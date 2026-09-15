@@ -45,7 +45,6 @@ def get_args(argv=None):
     if args.agent is None:
         missing.append("--agent")
 
-
     if missing:
         msg = ", ".join(missing)
         parser.error(f"{msg}: value is required")
