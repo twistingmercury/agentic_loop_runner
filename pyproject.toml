@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[project]
+name = "alr"
+version = "0.0.1"
+description = "A tool for running ralph loops"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+alr = "alr.main:main"

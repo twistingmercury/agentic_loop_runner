@@ -1,0 +1,28 @@
+.idea/
+.vscode/
+
+**/.local/
+**/.scratch/
+**/.bin/
+docs/code_reviews/
+
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+**/alr.egg-info
+
+# Linux
+*~
+.directory
+.Trash-*
+.fuse_hidden*
+.nfs*
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
