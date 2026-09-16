@@ -10,7 +10,14 @@ name = "alr"
 version = "0.0.1"
 description = "A tool for running ralph loops"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
+dependencies = [
+    "PyYAML>=6",
+    "pydantic>=2",
+]
 
 [project.scripts]
 alr = "alr.main:main"
+
+[tool.ruff.lint]
+select = ["N"]

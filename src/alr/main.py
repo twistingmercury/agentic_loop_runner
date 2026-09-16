@@ -1,2 +1,6 @@
+from alr.cli import get_args
+
+
 def main():
-    print("hello, snake")
+    args = get_args()
+    print(args)
