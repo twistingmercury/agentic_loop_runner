@@ -20,7 +20,7 @@
 I don't like how [gralph](https://github.com/twistingmercury/gralph) evolved. The code is too complicated.
 Why? I relied too much on Claude and Codex. Yeah, it works, but...it's hard for me to follow.
 Part of the reason it got so complex is that I made the requirements too complex. Durable task states mainly.
-That's not needed with a good ole ralph loop.
+That's not needed with a good ole Ralph loop.
 
 So, I'm writing a _new_ agentic loop runner in Python. Why Python? Because I need to learn
 Python. I'm using Claude to help tutor me, but I decide on how I want it implemented, I write
@@ -47,6 +47,8 @@ alr -t tasks.yaml -a codex -p prompt.md
 | `--dry-run`       | `-d`  | No                  | Validation-only mode; ignores `--prompt`/`--agent` |
 
 ## How it works
+
+> Note: the tasks yaml and prompt markdown are created using this skill: [ralph-loop-docs-writer](https://github.com/twistingmercury/mnemonic-agents-skills/blob/develop/shared/skills/ralph-loop-docs-writer/SKILL.md)
 
 A run reads a YAML task file and a shared Markdown prompt. Tasks execute one at
 a time in list order, each in a fresh agent session. The runner owns task
