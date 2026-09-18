@@ -25,8 +25,7 @@ before moving on. There's no need to pause for user review between increments.
 Out of scope: automatic retries, concurrent task execution within a run,
 concurrent-run protection (withdrawn FR-008), flags to change the log and result directory,
 model-selection flags, and platforms other than CON-002. Live agent output is
-optional. The user will choose the programming language separately; architects must not
-choose it on the user's behalf.
+optional. The user chose Python (CON-003); architects must not change the language.
 
 ## Where these requirements come from
 
@@ -312,8 +311,13 @@ first step or import unrelated template/Gralph features.
 
 ### CON-002 - Platforms
 
-Support only Linux/amd64 and macOS/arm64. Build and verify required behavior for
-both targets. Other operating-system/architecture combinations are out of scope.
+Support only Linux and macOS. Build and verify required behavior on both.
+Other operating systems, including Windows, are out of scope.
+
+### CON-003 - Language
+
+Implement in Python >= 3.12, managed with uv. The user selected the language;
+it is not an architect decision.
 
 ## Details for the architects to decide
 
@@ -329,7 +333,7 @@ requirements questions:
 - Consistent error messages, exact nonzero exit codes, and how to save statuses.
 
 These decisions must not introduce automatic retries, concurrent-run protection,
-or other withdrawn/out-of-scope features. Language selection stays with the user.
+or other withdrawn/out-of-scope features. The language is fixed by CON-003.
 
 ## Questions we've settled
 
@@ -347,6 +351,7 @@ Question IDs stay the same. Earlier answers that were corrected no longer apply.
 | Q-008 | Resolved: FR-005 field rules, warnings, and validation exit behavior                                                            |
 | Q-009 | Resolved for scope: FR-002/FR-004 status, startup, failure, and recovery rules                                                  |
 | Q-010 | Resolved: required backend flag for execution; existing CLI model/auth settings                                                 |
+| Q-011 | Resolved: Python >= 3.12 with uv, CON-003                                                                                       |
 
 ## About this draft
 
@@ -373,4 +378,4 @@ execution behavior for blocked/abandoned tasks.
 Update the generated task files and prompts to reflect the differences listed
 here before connecting them to the runner. The source templates themselves remain unchanged by this
 cleanup. Check how the installed CLIs actually behave when
-implementing their support. Language selection remains the user's decision.
+implementing their support. The language is Python (CON-003).

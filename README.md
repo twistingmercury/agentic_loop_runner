@@ -1,6 +1,6 @@
 # Agentic Loop Runner (alr)
 
-> **Maturity Level**: Emerging - in active, initial development; expect breaking changes.
+> **Maturity Level**: Emerging - in active, initial development; expect breaking changes.  
 > **Version**: v0.0.2
 
 ---
@@ -64,7 +64,7 @@ Full requirements: [docs/requirements/01_requirements_v01.md](docs/requirements/
 
 ## Key Considerations
 
-- Supported platforms are Linux/amd64 and macOS/arm64 only.
+- Supported platforms are Linux and macOS only.
 - No automatic retries: at most one attempt per task per run.
 - Logs and JSON results are written to `alr_activity/` under the directory
   where `alr` was started. There is no flag to change this.
