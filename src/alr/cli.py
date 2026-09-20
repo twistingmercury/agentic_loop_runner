@@ -3,7 +3,6 @@ import argparse
 
 def get_args(argv=None):
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--help", help="this is the help for alr")
     parser.add_argument(
         "-t",
         "--tasks",

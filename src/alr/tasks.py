@@ -2,8 +2,14 @@ import pathlib
 from enum import StrEnum, auto
 from typing import Annotated
 
+
 import yaml
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 
 class TaskStatus(StrEnum):
@@ -30,6 +36,15 @@ class Task(BaseModel):
 
 class TaskList(BaseModel):
     tasks: list[Task] = Field(min_length=1)
+
+    @field_validator("tasks")
+    @classmethod
+    def validate_ids_unique(cls, tasks: list[Task]) -> list[Task]:
+        ids = [task.id for task in tasks]
+        if len(ids) != len(set(ids)):
+            raise ValueError("items must have unique ids")
+
+        return tasks
 
 
 def parse_tasks(path: str | pathlib.Path):
