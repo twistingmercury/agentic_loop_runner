@@ -21,3 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Task fields simplified to `id`, `name`, `prompt`, `state`. Dropped `title`,
   `agent`, `checkpoint`.
 - An empty `state` now means `pending` instead of being rejected.
+
+### Removed
+
+- `--agent` flag and Codex support. Claude Code is the only agent.
+
+- Activity log and JSON result files (FR-006 withdrawn). The agent reports its
+  outcome as a single JSON line on stdout instead.

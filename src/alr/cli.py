@@ -25,7 +25,6 @@ def get_args(argv=None):
     args = parser.parse_args(argv)
 
     if args.dry_run:
-        args.agent = None
         args.prompt = None
         return args
 

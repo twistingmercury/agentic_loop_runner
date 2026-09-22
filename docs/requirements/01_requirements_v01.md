@@ -1,100 +1,77 @@
 # Agentic Loop Runner (alr) - Requirements
 
 > **Version**: v01
-> **Date**: 2026-09-14
-> **Notes**: Consolidated requirements from the capture-requirements trial.
+> **Date**: 2026-09-22
 
 ## What we're building and why
 
 `alr` (Agentic Loop Runner) is a new console app that runs Ralph loops using a
-YAML PRD/task list and a shared Markdown prompt. 
+YAML PRD/task list and a shared Markdown prompt.
 
 ## Goals
 
-- Run the supplied tasks using Claude Code or Codex.
+- Run the supplied tasks using Claude Code.
 - Keep the logic easy to follow and add complexity in small steps.
-- Save task progress, logs, and results so work can resume when the user restarts.
+- Save task state so a rerun skips finished work.
 
 ## What's included
 
-The first increment implements YAML validation through `--dry-run` (FR-005).
-Later increments add the required task-running behavior in FR-001 through
-FR-004, FR-006, and FR-007. Build and check each increment
-before moving on. There's no need to pause for user review between increments.
+FR-005 (YAML validation through `--dry-run`) and FR-001 (shared prompt) are
+implemented. FR-002 through FR-004 and FR-007 add task execution. Build and
+check each increment before moving on.
 
 Out of scope: automatic retries, concurrent task execution within a run,
-concurrent-run protection (withdrawn FR-008), flags to change the log and result directory,
-model-selection flags, and platforms other than CON-002. Live agent output is
-optional. The user chose Python (CON-003); architects must not change the language.
+concurrent-run protection, activity logs and result files, model-selection
+flags, and platforms other than CON-002. Live agent output is
+optional. The language is Python (CON-003).
 
-## Where these requirements come from
+## Inputs
 
-These requirements come from the conversation with the user. The supplied
-templates describe the task file, shared instructions, logs, and results:
+alr reads the task file and shared prompt produced by the
+[ralph-loop-docs-writer](https://github.com/twistingmercury/gralph/blob/develop/skills/ralph-loop-docs-writer/SKILL.md)
+skill. The task file is
+Gralph's [tasks_template.yaml](https://github.com/twistingmercury/gralph/blob/develop/skills/ralph-loop-docs-writer/templates/tasks_template.yaml)
+format and the
+prompt is
+its [prompt_template.md](https://github.com/twistingmercury/gralph/blob/develop/skills/ralph-loop-docs-writer/templates/prompt_template.md)
+format. alr's `Task` model uses the
+same field names as the YAML, one to one: `id`, `name`, `prompt`, `state`.
 
-- `shared/skills/ralph-loop-docs-writer/templates/loop_tasks_template_v02.yaml`
-- `shared/skills/ralph-loop-docs-writer/templates/loop_prompt_template_v02.md`
-- `shared/skills/ralph-loop-docs-writer/templates/activity_log_template_v02.md`
-- `shared/skills/ralph-loop-docs-writer/templates/activity_result_template_v02.json`
-
-These paths are relative to the mnemonic-agents-skills repository root. The
-concept reference is [Huntley's Ralph loop description](https://ghuntley.com/loop/).
-Where these requirements differ from the templates, follow this document.
-The templates are starting points; the files used in a run contain details for
-that project. The source templates have not changed during this trial.
-
-Differences alr needs to support:
-
-| Template convention                   | Required alr behavior                                      |
-| ------------------------------------- | ---------------------------------------------------------- |
-| Task has `title`, `agent`, `checkpoint` | Task has only `id`, `name`, `prompt`, and `state`         |
-| Original statuses exclude `blocked`   | States are exactly `pending`, `completed`, `abandoned`    |
-| Runner reserves an empty activity log | Agent creates and writes both files; runner supplies paths |
-| Runtime may retry automatically       | No automatic retries                                       |
-| Runtime references name Gralph        | Generated instructions must follow alr's requirements      |
-
-Other Gralph features and matching its CLI are not required unless stated here.
+The concept reference is [Huntley's Ralph loop description](https://ghuntley.com/loop/).
+Matching Gralph's other features or its CLI is not required.
 
 ## How we'll know it works
 
 | Outcome                   | What to check                                                                                  |
-| ------------------------- | ---------------------------------------------------------------------------------------------- |
+|---------------------------|------------------------------------------------------------------------------------------------|
 | Useful first increment    | FR-005 checks valid and invalid sample files and warnings without file changes or agent launch |
-| Sequential execution      | FR-002 processes eligible tasks in list order and checks the whole list before starting        |
-| Both backends supported   | FR-007 runs tasks in fresh sessions through both supported CLIs                                |
+| Sequential execution      | FR-002 runs pending tasks one at a time in list order and skips completed or abandoned ones    |
+| Fresh sessions            | FR-007 runs each task in a fresh Claude Code session                                           |
 | Reliable outcome handling | FR-004 distinguishes success, reported failure, crashes, and invalid results                   |
-| Recoverable execution     | FR-002 and FR-003 preserve checkpoints and earlier logs and results across explicit restarts   |
+| Recoverable execution     | FR-002 saves state after each task, and a rerun starts unfinished tasks fresh                  |
 | Incremental delivery      | Each implemented increment passes its checks before the next begins (CON-001)                  |
 
 ## Command-line options
 
-| Flag                            | Execution                                         | Dry-run                                                    |
-| ------------------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
-| `--tasks <path>`, `-t <path>`   | Required; no default                              | Required; no default                                       |
-| `--agent <value>`, `-a <value>` | Required; exactly `codex` or `claude`; no default | Ignored, including supplied value and backend availability |
-| `--prompt <path>`, `-p <path>`  | Required; no default                              | Ignored; file is not read or validated                     |
-| `--dry-run`                     | Selects validation-only mode                      | Launches no agents and changes no files                    |
+| Flag                           | Execution                    | Dry-run                                 |
+|--------------------------------|------------------------------|-----------------------------------------|
+| `--tasks <path>`, `-t <path>`  | Required; no default         | Required; no default                    |
+| `--prompt <path>`, `-p <path>` | Required; no default         | Ignored; file is not read or validated  |
+| `--dry-run`                    | Selects validation-only mode | Launches no agents and changes no files |
 
 ```sh
 alr -t tasks.yaml --dry-run
-alr -t tasks.yaml -a claude -p prompt.md
-alr -t tasks.yaml -a codex -p prompt.md
+alr -t tasks.yaml -p prompt.md
 ```
-
-The CLI `--agent` chooses Claude Code or Codex. The YAML task's `agent` field
-names the specialist, as described in the task template; it does not choose
-which CLI to launch.
 
 ## What alr must do
 
-These requirements reflect confirmed user decisions and the accepted templates.
-Their IDs stay the same even where the order has changed. The checks below
-describe what someone using or testing alr should see.
+The checks below describe what someone using or testing alr should see.
 
 ### FR-005 - Validate YAML inputs
 
-**Priority:** First increment. Also required before execution.
-**Why:** Start with a small, useful validation step before adding task execution.
+**Priority:** First increment. Also required before execution. **Why:** Start with a small, useful validation step
+before adding task execution.
 
 Validate YAML syntax and safe parsing, then require a top-level `tasks` list
 containing at least one valid task entry with named fields. Reject missing, null, non-list, or
@@ -102,12 +79,12 @@ empty task collections. Reject the entire input if any task element is invalid;
 never silently skip an element. A bare `-`, `null`, `~`, `{}`, `[]`, and `""`
 are invalid task elements, including among otherwise valid tasks.
 
-| Task field   | Presence | Accepted value                                                           |
-| ------------ | -------- | ------------------------------------------------------------------------ |
-| `id`         | Required | Positive integer, unique within the task list                            |
-| `name`       | Required | Nonblank string                                                          |
-| `prompt`     | Required | Nonblank string                                                          |
-| `state`      | Optional | Exactly `pending`, `completed`, or `abandoned`                           |
+| Task field | Presence | Accepted value                                 |
+|------------|----------|------------------------------------------------|
+| `id`       | Required | Positive integer, unique within the task list  |
+| `name`     | Required | Nonblank string                                |
+| `prompt`   | Required | Nonblank string                                |
+| `state`    | Optional | Exactly `pending`, `completed`, or `abandoned` |
 
 Omission or an empty string (`""`) defaults `state` to `pending`. Reject
 explicit null, whitespace-only, or unrecognized states. Whitespace-only strings
@@ -120,7 +97,7 @@ What to check:
   of executing natural-language instructions.
 - Report errors with the affected field and task index or ID when available.
   For file or syntax errors, don't invent a task index or ID.
-- Dry-run requires only the task-file input. It ignores backend and prompt flags,
+- Dry-run requires only the task-file input. It ignores the prompt flag,
   launches no agents or task commands, and creates or changes no files.
 - Dry-run writes a warning to stdout identifying each `abandoned` task and the
   need for manual intervention before execution. These warnings alone do not
@@ -133,8 +110,7 @@ What to check:
 
 ### FR-001 - Read the shared prompt for execution
 
-**Priority:** Required for execution.
-**Why:** Use the user's existing YAML and shared prompt inputs.
+**Priority:** Required for execution. **Why:** Use the user's existing YAML and shared prompt inputs.
 
 Load the shared prompt identified by `--prompt` or `-p`. Reject execution before
 agent launch if the flag is omitted or the file is missing, unreadable, empty,
@@ -142,144 +118,99 @@ or whitespace-only. Report the prompt-file problem. Dry-run ignores this input.
 
 **Related:** FR-005, FR-007.
 
-### FR-002 - Run tasks one at a time and update their status
+### FR-002 - Run tasks one at a time and update their state
 
-**Priority:** Required for execution.
-**Why:** Make task order predictable and let the user restart interrupted work.
+**Priority:** Required for execution. **Why:** Make task order predictable and let the user rerun after a stop.
 
-The runner owns task status. Execute exactly one task at a time in YAML list
-order, not ID or title order. Never launch the next task while the current task
+The runner owns task state. Execute exactly one task at a time in YAML list
+order, not ID or name order. Never launch the next task while the current task
 run is active.
 
-| Existing status          | Execution behavior                                                                       |
-| ------------------------ | ---------------------------------------------------------------------------------------- |
-| Omitted                  | Treat as `pending`                                                                       |
-| `pending`                | Eligible in list order                                                                   |
-| `in_progress`            | Resume on an explicitly started run using the saved checkpoint and a fresh session       |
-| `completed`              | Skip without launching an agent                                                          |
-| `blocked` or `abandoned` | Block the entire run before any task launch; report manual intervention and exit nonzero |
+| Existing state  | Execution behavior                                          |
+|-----------------|-------------------------------------------------------------|
+| Omitted or `""` | Treat as `pending`                                          |
+| `pending`       | Eligible in list order                                      |
+| `completed`     | Skip without launching an agent                             |
+| `abandoned`     | Print the same warning dry-run prints, skip, and keep going |
 
-Check the entire list for `blocked` or `abandoned` before launching even an
-earlier task. If all tasks are completed, exit `0` without launching an agent.
+If no task is `pending`, exit `0` without launching an agent.
 
-Save the selected task's status as `in_progress` before agent launch. If the
-write fails, stop without launching it. Apply FR-004 after the agent exits;
-move on only after the task completes successfully and its status is saved. Preserve the
-agent's checkpoint updates when writing status.
+Launch the agent for the selected task. Apply FR-004 after the agent exits;
+move on only after the task's new state is saved to the task file. If the
+write fails, report it and exit nonzero without advancing or claiming the
+write succeeded.
 
-On Ctrl+C, stop the active agent, preserve saved checkpoints, logs, and results,
-leave the task `in_progress`, and exit nonzero without advancing. A later
-explicit run resumes from saved progress, not an earlier conversation session.
-Do not claim that unsaved work was saved after an interruption.
+On Ctrl+C, stop the active agent, leave the task
+`pending`, and exit nonzero without advancing. There are no checkpoints and
+no `in_progress` state; a later run starts the task again from scratch in a
+fresh session. Do not claim that unsaved work was saved after an interruption.
 
 **Related:** FR-003, FR-004, FR-007.
 
-### FR-003 - Give the agent its instructions and output paths
+### FR-003 - Give the agent its instructions
 
-**Priority:** Required for execution.
-**Why:** Give each fresh session the task context and keep the information needed to resume work.
+**Priority:** Required for execution. **Why:** Give each fresh session the task context it needs.
 
-Supply the selected task's ID, title, specialist, full prompt, saved checkpoint,
-positive attempt number, task-file path, shared instructions, activity-log path,
-and JSON-result path. The agent owns its checkpoint updates; the runner preserves
-them when updating status.
+Supply the selected task's ID, name, full prompt, task-file path, and the
+shared instructions. alr creates no files for the agent and asks it to write
+none beyond what the prompt itself authorizes.
 
-What to check:
+**Related:** FR-002, FR-004.
 
-- Logs and JSON results go in `alr_activity/` under the directory where the
-  user started alr.
-  This is a fixed location with no override flag; it is not relative to the
-  executable, YAML, or prompt file.
-- Each task run, including a resumed task, gets fresh paths for both a new log
-  and a new JSON result. Preserve earlier runs' files.
-- The executing agent creates, writes, and finishes both files. `alr` supplies
-  paths but does not reserve empty files, write their contents, or invent
-  results on failure.
-- Read the current result only from its supplied path. Never substitute a prior
-  result for missing output.
+### FR-004 - Read the agent's result and decide what happens next
 
-The architects can decide how to name files and assign attempt numbers. Each
-run must still get fresh paths, identify the right task and attempt, and keep
-previous logs and results.
+**Priority:** Required for execution. **Why:** Use one small, machine-readable line to decide what happened.
 
-**Related:** FR-002, FR-004, FR-006.
+The agent ends its output with one JSON object on the last non-blank line of
+stdout:
 
-### FR-004 - Read the JSON result and decide what happens next
+```json
+{
+  "state": "completed"
+}
+```
 
-**Priority:** Required for execution.
-**Why:** Use the JSON result to decide what happened, rather than reading the human log.
+| Field   | Required value                     |
+|---------|------------------------------------|
+| `state` | Exactly `completed` or `abandoned` |
 
-The agent produces one JSON object with exactly four fields:
+Reject invalid JSON, a missing or unrecognized `state`, extra fields, and
+Markdown around the JSON. The runner reads this line and nothing else to decide the task's outcome.
+No result file is written.
 
-| Field         | Required value                                        |
-| ------------- | ----------------------------------------------------- |
-| `task`        | Positive integer matching the selected task ID        |
-| `attempt`     | Positive integer matching the supplied attempt number |
-| `disposition` | `completed`, `retry`, or `blocked`                    |
-| `summary`     | Nonempty string describing the outcome                |
-
-Reject invalid JSON, a task or attempt number that doesn't match, extra fields,
-Markdown around the JSON, and anything after the JSON except whitespace. These
-rules follow the supplied JSON format. The runner reads this result; it does
-not read or validate the activity log to decide the task's outcome.
-
-| Attempt outcome                                    | Runner behavior                                                                       |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Valid `completed` result and successful agent exit | Save `completed`, then advance; exit `0` when all tasks complete                      |
-| Valid `blocked` or `retry` result                  | Save `blocked` if possible; stop the entire run and exit nonzero                      |
-| Agent crash or missing/invalid JSON                | Leave `in_progress`, keep logs, results, and saved checkpoints, stop and exit nonzero |
-| Ctrl+C                                             | Apply FR-002 interruption behavior                                                    |
+| Attempt outcome                                     | Runner behavior                                                  |
+|-----------------------------------------------------|------------------------------------------------------------------|
+| Exit `0` and a valid `completed` result             | Save `completed`, then advance; exit `0` when nothing is pending |
+| Exit `0` and a valid `abandoned` result             | Save `abandoned`, stop the run, and exit nonzero                 |
+| Nonzero exit, crash, or missing/invalid result line | Leave `pending`, stop the run, and exit nonzero                  |
+| Ctrl+C                                              | Apply FR-002 interruption behavior                               |
 
 There are no automatic retries: at most one attempt per task in a run. An
-explicit restart is separate from an automatic retry. Existing `blocked` tasks
-require manual intervention before a later run can execute anything.
+explicit rerun is separate from an automatic retry. A reported `completed`
+result with a nonzero process exit cannot count as completion.
 
 Before reporting completion, the agent must follow the accepted prompt's steps
-for checking its work, cleaning up, saving its checkpoint, finishing its log,
-and making any authorized commits to the project. The agent reports the result
-through JSON; alr does not repeat those steps. A reported `completed` result with a nonzero process exit
-cannot count as completion.
+for checking its work, cleaning up, and making any
+authorized commits to the project. alr does not repeat those steps.
 
-If a required status write fails, report the failure and exit nonzero without
-advancing or claiming the write succeeded. Preserve logs, results, and saved
-checkpoints on failures.
+If a required state write fails, report the failure and exit nonzero without
+advancing or claiming the write succeeded.
 
-**Related:** FR-002, FR-003, FR-006.
+**Related:** FR-002, FR-003.
 
-### FR-006 - Produce a human activity log
+### FR-007 - Launch Claude Code
 
-**Priority:** Required for execution.
-**Why:** Keep a readable record of what happened, what was checked, and what needs attention.
+**Priority:** Required for execution. **Why:** Run the user's chosen coding agent without adding model configuration.
 
-The executing agent writes a Markdown log following the supplied activity-log
-format, with the agent creating the file as described in FR-003. The metadata
-at the top records the task and attempt, title, timestamps, and paths to the
-task file, prompt, log, and JSON result.
-Its sections record activity, created resources, verification, cleanup, retained
-resources and preserved work, blockers and next actions, and the summary.
+Launch Claude Code in the same working directory where the user started alr.
+Every task run starts a fresh session, including reruns of a task; do not
+reuse previous conversation sessions. Supply FR-003 context to the agent.
 
-Replace template placeholders with actual values and record when no resources or
-checks apply. The finished log includes the actual end time. A crash or interruption
-may leave an unfinished log; alr must keep it rather than invent an ending.
+Use the installed CLI's existing model and authentication settings. Add no
+alr model-selection flags. Check that the agent receives the agreed task
+details and instructions and produces the expected result line.
 
-**Related:** FR-003, FR-004.
-
-### FR-007 - Launch Claude Code or Codex
-
-**Priority:** Both backends required for execution support.
-**Why:** Support the user's chosen coding agents without adding model configuration.
-
-Select one backend for the run using the command-line options above. Launch it in the same
-working directory where the user started alr. Every task run starts a fresh
-agent session, including resumed tasks; do not reuse previous conversation
-sessions. Supply FR-003 context to both backends.
-
-Use each installed CLI's existing model and authentication settings. Add no
-alr model-selection flags. Check that both backends receive the
-agreed task details and instructions, and that their agents produce the expected
-log and JSON result.
-
-**Related:** FR-001 through FR-004, FR-006.
+**Related:** FR-001 through FR-004.
 
 ## Keeping it simple
 
@@ -302,10 +233,8 @@ added later and does not need to be ready for delivery.
 ### CON-001 - Incremental delivery
 
 Implement, test, and confirm basic functionality before adding complexity.
-FR-005 is the first increment. After an increment's implementation and checks
-pass, proceed without a user-review pause. Architects should sequence remaining
-requirements into small increments; do not implement the full runner in the
-first step or import unrelated template/Gralph features.
+Sequence the remaining requirements into small increments; do not implement
+the full runner in one step or import unrelated Gralph features.
 
 ### CON-002 - Platforms
 
@@ -314,66 +243,15 @@ Other operating systems, including Windows, are out of scope.
 
 ### CON-003 - Language
 
-Implement in Python >= 3.12, managed with uv. The user selected the language;
-it is not an architect decision.
+Implement in Python >= 3.12, managed with uv.
 
-## Details for the architects to decide
+## Implementation decisions
 
-Language and platform requirements are limited to what the user confirmed.
-The architects can decide the following details; these do not need more
-requirements questions:
+The following details are implementation decisions, not requirements:
 
-- Internal structure and sequencing of execution increments after FR-005.
-- Log and result filenames, attempt numbering, and creation of the containing directory,
-  while preserving agent ownership of the files and fresh paths per run.
-- How to launch and stop each CLI while respecting its existing settings,
+- How to launch and stop the CLI while respecting its existing settings,
   starting fresh sessions, and handling interruptions as described above.
-- Consistent error messages, exact nonzero exit codes, and how to save statuses.
+- Consistent error messages, exact nonzero exit codes, and how to save states.
 
 These decisions must not introduce automatic retries, concurrent-run protection,
-or other withdrawn/out-of-scope features. The language is fixed by CON-003.
-
-## Questions we've settled
-
-Question IDs stay the same. Earlier answers that were corrected no longer apply.
-
-| ID    | Answer                                                                                                                          |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Q-001 | Resolved: a new alternative implementation, not a Gralph wrapper                                                                |
-| Q-002 | Resolved: Claude Code and Codex, FR-007                                                                                         |
-| Q-003 | Resolved for scope: list order, no automatic retries, explicit stop behavior, FR-002/FR-004                                     |
-| Q-004 | The opening section explains why this app is needed; a wider survey of users is not required                                    |
-| Q-005 | Resolved for scope: use the supplied templates with the differences listed here; no requirement to match everything Gralph does |
-| Q-006 | Resolved: understandable logic and incremental delivery, NFR-001/CON-001                                                        |
-| Q-007 | Resolved: FR-005 first, no review pause after passing checks                                                                    |
-| Q-008 | Resolved: FR-005 field rules, warnings, and validation exit behavior                                                            |
-| Q-009 | Resolved for scope: FR-002/FR-004 status, startup, failure, and recovery rules                                                  |
-| Q-010 | Resolved: required backend flag for execution; existing CLI model/auth settings                                                 |
-| Q-011 | Resolved: Python >= 3.12 with uv, CON-003                                                                                       |
-
-## About this draft
-
-Consolidated the discovery draft in place while it remains unpublished. Stable
-requirement and question IDs are preserved. Removed superseded status-ownership,
-status-validation, retry, and log/result-ownership statements. Retained FR-008 as
-withdrawn. Individual decisions were confirmed during discovery; no separate
-approval of this consolidated document is claimed.
-
-## Ready for architecture and design
-
-**Readiness: READY for architecture and staged implementation planning.**
-Use this document as the source of requirements for alr in this trial.
-FR-005 defines the first increment; the remaining active functional requirements
-define execution support. No more interview questions are needed for this
-scope. The design details above can be worked out next.
-
-The architect should preserve NFR-001 and CON-001, define small increments after
-validation, and map each design decision to the applicable FR/CON IDs. The
-execution design must preserve runner-owned status, agent-written logs and results,
-one fresh session at a time, no automatic retries, and the different dry-run versus
-execution behavior for blocked/abandoned tasks.
-
-Update the generated task files and prompts to reflect the differences listed
-here before connecting them to the runner. The source templates themselves remain unchanged by this
-cleanup. Check how the installed CLIs actually behave when
-implementing their support. The language is Python (CON-003).
+or other out-of-scope features.
