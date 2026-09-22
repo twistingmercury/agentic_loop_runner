@@ -2,7 +2,6 @@ import pathlib
 from enum import StrEnum, auto
 from typing import Annotated
 
-
 import yaml
 from pydantic import (
     BaseModel,
@@ -57,3 +56,17 @@ def parse_tasks(path: str | pathlib.Path):
     tasks = yaml.safe_load(data)
     task_list = TaskList.model_validate(tasks)
     return task_list
+
+
+def summarize_tasks(task_list: TaskList):
+    reset = "\033[0m"
+    for task in task_list.tasks:
+        color = "  "
+        emoji = ""
+        suffix = ""
+        if task.state == TaskState.ABANDONED:
+            color = "\033[33m"
+            emoji = "\u26a0\ufe0f"
+            suffix = " \u2190 ABANDONED! You should take a look at this before running"
+
+        print(f"{color}{emoji} {task.id}: {task.name}{suffix}{reset}")

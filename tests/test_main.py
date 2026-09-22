@@ -19,6 +19,22 @@ tasks:
     Stand up a new python project, targeting Python >= 3.12
 """
 
+GOOD_YAML = """
+tasks:
+  - id: 1
+    name: "Standup project structure"
+    prompt: |
+      Objective:
+      Create a new empty python project
+      Stand up a new python project, targeting Python >= 3.12
+  - id: 2
+    name: "Write hello world app"
+    prompt: |
+      Objective:
+      Create a main.py file that when executed writes "hello, world"
+      to the console.    
+"""
+
 
 def test_main_exists():
     assert callable(main)
@@ -62,3 +78,11 @@ def test_input_args_behaviour(capsys, argv: list[str], expected_error: str):
         main(argv)
 
     assert expected_error in capsys.readouterr().err
+
+
+def test_main_dry_run(capsys):
+    args = ["-t", TEST_YAML, "-d"]
+    main(args)
+    tout = capsys.readouterr().out
+    assert "tasks yaml looks good!" in tout
+    assert "\u26a0" in tout

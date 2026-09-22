@@ -8,7 +8,15 @@ tasks:
       Stand up a new python project, targeting Python >= 3.12
   - id: 2
     name: "Write hello world app"
+    state: "abandoned"
     prompt: |
       Objective:
       Create a main.py file that when executed writes "hello, world"
       to the console.
+  - id: 3
+    name: "Standup project structure"
+    state: ""
+    prompt: |
+      Objective:
+      Test the function
+      Use Pytest to test the function

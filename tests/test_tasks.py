@@ -139,7 +139,7 @@ def test_parse_tasks_success():
     yaml_file = Path(__file__).parent / "data" / "tasks.yaml"
     task_list = parse_tasks(yaml_file)
 
-    assert len(task_list.tasks) == 2
+    assert len(task_list.tasks) == 3
 
     task_1 = task_list.tasks[0]
     assert task_1.id == 1
@@ -150,7 +150,7 @@ def test_parse_tasks_success():
     task_2 = task_list.tasks[1]
     assert task_2.id == 2
     assert task_2.name == "Write hello world app"
-    assert task_2.state == TaskState.PENDING
+    assert task_2.state == TaskState.ABANDONED
     assert len(task_2.prompt) > 1
 
 
