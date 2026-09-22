@@ -47,8 +47,8 @@ Differences alr needs to support:
 
 | Template convention                   | Required alr behavior                                      |
 | ------------------------------------- | ---------------------------------------------------------- |
-| Task `agent` may be omitted           | Task `agent` is required                                   |
-| Original statuses exclude `blocked`   | `blocked` is a valid saved task status                     |
+| Task has `title`, `agent`, `checkpoint` | Task has only `id`, `name`, `prompt`, and `state`         |
+| Original statuses exclude `blocked`   | States are exactly `pending`, `completed`, `abandoned`    |
 | Runner reserves an empty activity log | Agent creates and writes both files; runner supplies paths |
 | Runtime may retry automatically       | No automatic retries                                       |
 | Runtime references name Gralph        | Generated instructions must follow alr's requirements      |
@@ -105,14 +105,12 @@ are invalid task elements, including among otherwise valid tasks.
 | Task field   | Presence | Accepted value                                                           |
 | ------------ | -------- | ------------------------------------------------------------------------ |
 | `id`         | Required | Positive integer, unique within the task list                            |
-| `title`      | Required | Nonblank string                                                          |
-| `agent`      | Required | Nonblank string                                                          |
-| `checkpoint` | Required | String; may be empty                                                     |
+| `name`       | Required | Nonblank string                                                          |
 | `prompt`     | Required | Nonblank string                                                          |
-| `status`     | Optional | Exactly `pending`, `in_progress`, `completed`, `abandoned`, or `blocked` |
+| `state`      | Optional | Exactly `pending`, `completed`, or `abandoned`                           |
 
-Reject explicit null, empty-string, whitespace-only, or unrecognized statuses.
-Only omission defaults to `pending` during execution. Whitespace-only strings
+Omission or an empty string (`""`) defaults `state` to `pending`. Reject
+explicit null, whitespace-only, or unrecognized states. Whitespace-only strings
 are invalid for nonblank fields.
 
 What to check:
@@ -124,9 +122,9 @@ What to check:
   For file or syntax errors, don't invent a task index or ID.
 - Dry-run requires only the task-file input. It ignores backend and prompt flags,
   launches no agents or task commands, and creates or changes no files.
-- Dry-run writes a warning to stdout identifying each `blocked` or `abandoned`
-  task and the need for manual intervention before execution. These warnings
-  alone do not fail validation.
+- Dry-run writes a warning to stdout identifying each `abandoned` task and the
+  need for manual intervention before execution. These warnings alone do not
+  fail validation.
 - Dry-run exits `0` when validation passes and nonzero when it fails.
 - Normal execution applies all the same YAML checks before launching any agent.
   Validation failure stops execution with a nonzero exit.
