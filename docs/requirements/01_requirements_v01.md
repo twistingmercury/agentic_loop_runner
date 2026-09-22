@@ -25,8 +25,7 @@ before moving on. There's no need to pause for user review between increments.
 Out of scope: automatic retries, concurrent task execution within a run,
 concurrent-run protection (withdrawn FR-008), flags to change the log and result directory,
 model-selection flags, and platforms other than CON-002. Live agent output is
-optional. The user will choose the programming language separately; architects must not
-choose it on the user's behalf.
+optional. The user chose Python (CON-003); architects must not change the language.
 
 ## Where these requirements come from
 
@@ -48,8 +47,8 @@ Differences alr needs to support:
 
 | Template convention                   | Required alr behavior                                      |
 | ------------------------------------- | ---------------------------------------------------------- |
-| Task `agent` may be omitted           | Task `agent` is required                                   |
-| Original statuses exclude `blocked`   | `blocked` is a valid saved task status                     |
+| Task has `title`, `agent`, `checkpoint` | Task has only `id`, `name`, `prompt`, and `state`         |
+| Original statuses exclude `blocked`   | States are exactly `pending`, `completed`, `abandoned`    |
 | Runner reserves an empty activity log | Agent creates and writes both files; runner supplies paths |
 | Runtime may retry automatically       | No automatic retries                                       |
 | Runtime references name Gralph        | Generated instructions must follow alr's requirements      |
@@ -106,14 +105,12 @@ are invalid task elements, including among otherwise valid tasks.
 | Task field   | Presence | Accepted value                                                           |
 | ------------ | -------- | ------------------------------------------------------------------------ |
 | `id`         | Required | Positive integer, unique within the task list                            |
-| `title`      | Required | Nonblank string                                                          |
-| `agent`      | Required | Nonblank string                                                          |
-| `checkpoint` | Required | String; may be empty                                                     |
+| `name`       | Required | Nonblank string                                                          |
 | `prompt`     | Required | Nonblank string                                                          |
-| `status`     | Optional | Exactly `pending`, `in_progress`, `completed`, `abandoned`, or `blocked` |
+| `state`      | Optional | Exactly `pending`, `completed`, or `abandoned`                           |
 
-Reject explicit null, empty-string, whitespace-only, or unrecognized statuses.
-Only omission defaults to `pending` during execution. Whitespace-only strings
+Omission or an empty string (`""`) defaults `state` to `pending`. Reject
+explicit null, whitespace-only, or unrecognized states. Whitespace-only strings
 are invalid for nonblank fields.
 
 What to check:
@@ -125,9 +122,9 @@ What to check:
   For file or syntax errors, don't invent a task index or ID.
 - Dry-run requires only the task-file input. It ignores backend and prompt flags,
   launches no agents or task commands, and creates or changes no files.
-- Dry-run writes a warning to stdout identifying each `blocked` or `abandoned`
-  task and the need for manual intervention before execution. These warnings
-  alone do not fail validation.
+- Dry-run writes a warning to stdout identifying each `abandoned` task and the
+  need for manual intervention before execution. These warnings alone do not
+  fail validation.
 - Dry-run exits `0` when validation passes and nonzero when it fails.
 - Normal execution applies all the same YAML checks before launching any agent.
   Validation failure stops execution with a nonzero exit.
@@ -312,8 +309,13 @@ first step or import unrelated template/Gralph features.
 
 ### CON-002 - Platforms
 
-Support only Linux/amd64 and macOS/arm64. Build and verify required behavior for
-both targets. Other operating-system/architecture combinations are out of scope.
+Support only Linux and macOS. Build and verify required behavior on both.
+Other operating systems, including Windows, are out of scope.
+
+### CON-003 - Language
+
+Implement in Python >= 3.12, managed with uv. The user selected the language;
+it is not an architect decision.
 
 ## Details for the architects to decide
 
@@ -329,7 +331,7 @@ requirements questions:
 - Consistent error messages, exact nonzero exit codes, and how to save statuses.
 
 These decisions must not introduce automatic retries, concurrent-run protection,
-or other withdrawn/out-of-scope features. Language selection stays with the user.
+or other withdrawn/out-of-scope features. The language is fixed by CON-003.
 
 ## Questions we've settled
 
@@ -347,6 +349,7 @@ Question IDs stay the same. Earlier answers that were corrected no longer apply.
 | Q-008 | Resolved: FR-005 field rules, warnings, and validation exit behavior                                                            |
 | Q-009 | Resolved for scope: FR-002/FR-004 status, startup, failure, and recovery rules                                                  |
 | Q-010 | Resolved: required backend flag for execution; existing CLI model/auth settings                                                 |
+| Q-011 | Resolved: Python >= 3.12 with uv, CON-003                                                                                       |
 
 ## About this draft
 
@@ -373,4 +376,4 @@ execution behavior for blocked/abandoned tasks.
 Update the generated task files and prompts to reflect the differences listed
 here before connecting them to the runner. The source templates themselves remain unchanged by this
 cleanup. Check how the installed CLIs actually behave when
-implementing their support. Language selection remains the user's decision.
+implementing their support. The language is Python (CON-003).

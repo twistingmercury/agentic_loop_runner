@@ -3,7 +3,6 @@ import argparse
 
 def get_args(argv=None):
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--help", help="this is the help for alr")
     parser.add_argument(
         "-t",
         "--tasks",
@@ -23,13 +22,6 @@ def get_args(argv=None):
         help="validate that the yaml task file is properly formatted and the tasks are valid",
         action="store_true",
     )
-    parser.add_argument(
-        "-a",
-        "--agent",
-        help="the coding agent to be used",
-        choices=["claude", "codex"],
-        type=str,
-    )
     args = parser.parse_args(argv)
 
     if args.dry_run:
@@ -37,16 +29,7 @@ def get_args(argv=None):
         args.prompt = None
         return args
 
-    missing: list[str] = []
-
     if args.prompt is None:
-        missing.append("--prompt")
-
-    if args.agent is None:
-        missing.append("--agent")
-
-    if missing:
-        msg = ", ".join(missing)
-        parser.error(f"{msg}: value is required")
+        parser.error("{The argument '--prompt [-p] is required")
 
     return args

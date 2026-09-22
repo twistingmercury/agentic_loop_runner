@@ -3,14 +3,17 @@ from enum import StrEnum, auto
 from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 
-class TaskStatus(StrEnum):
+class TaskState(StrEnum):
     PENDING = auto()
-    IN_PROGRESS = auto()
     COMPLETED = auto()
-    BLOCKED = auto()
     ABANDONED = auto()
 
 
@@ -21,15 +24,30 @@ type NonBlankString = Annotated[
 
 class Task(BaseModel):
     id: int = Field(gt=0, strict=True)
-    title: NonBlankString
-    agent: NonBlankString
-    checkpoint: str
+    name: NonBlankString
     prompt: NonBlankString
-    status: TaskStatus = TaskStatus.PENDING
+    state: TaskState = Field(default=TaskState.PENDING, validate_default=True)
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def validate_task_state(cls, state: TaskState) -> TaskState:
+        if state == "":
+            state = TaskState.PENDING
+
+        return state
 
 
 class TaskList(BaseModel):
     tasks: list[Task] = Field(min_length=1)
+
+    @field_validator("tasks")
+    @classmethod
+    def validate_ids_unique(cls, tasks: list[Task]) -> list[Task]:
+        ids = [task.id for task in tasks]
+        if len(ids) != len(set(ids)):
+            raise ValueError("items must have unique ids")
+
+        return tasks
 
 
 def parse_tasks(path: str | pathlib.Path):
@@ -38,3 +56,17 @@ def parse_tasks(path: str | pathlib.Path):
     tasks = yaml.safe_load(data)
     task_list = TaskList.model_validate(tasks)
     return task_list
+
+
+def summarize_tasks(task_list: TaskList):
+    reset = "\033[0m"
+    for task in task_list.tasks:
+        color = "  "
+        emoji = ""
+        suffix = ""
+        if task.state == TaskState.ABANDONED:
+            color = "\033[33m"
+            emoji = "\u26a0\ufe0f"
+            suffix = " \u2190 ABANDONED! You should take a look at this before running"
+
+        print(f"{color}{emoji} {task.id}: {task.name}{suffix}{reset}")

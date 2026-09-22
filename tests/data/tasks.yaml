@@ -1,22 +1,22 @@
 tasks:
   - id: 1
-    title: "Standup project structure"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Standup project structure"
+    state: ""
     prompt: |
       Objective:
-      
       Create a new empty python project
-
       Stand up a new python project, targeting Python >= 3.12
   - id: 2
-    title: "Write hello world app"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Write hello world app"
+    state: "abandoned"
     prompt: |
       Objective:
-      
       Create a main.py file that when executed writes "hello, world"
       to the console.
+  - id: 3
+    name: "Standup project structure"
+    state: ""
+    prompt: |
+      Objective:
+      Test the function
+      Use Pytest to test the function

@@ -1,7 +1,7 @@
 # Agentic Loop Runner (alr)
 
-> **Maturity Level**: Emerging - in active, initial development; expect breaking changes.
-> **Version**: v0.0.2
+> **Maturity Level**: Emerging - in active, initial development; expect breaking changes.  
+> **Version**: v0.0.3
 
 ---
 
@@ -48,30 +48,35 @@ alr -t tasks.yaml -a codex -p prompt.md
 
 ## How it works
 
-> Note: the tasks yaml and prompt markdown are created using this skill: [ralph-loop-docs-writer](https://github.com/twistingmercury/mnemonic-agents-skills/blob/develop/shared/skills/ralph-loop-docs-writer/SKILL.md)
+> Note: the tasks yaml and prompt markdown are created using this skill: [ralph-loop-docs-writer](https://github.com/twistingmercury/gralph/blob/develop/skills/ralph-loop-docs-writer/SKILL.md)
 
 A run reads a YAML task file and a shared Markdown prompt. Tasks execute one at
 a time in list order, each in a fresh agent session. The runner owns task
-status; the agent writes its own activity log and JSON result and updates its
-checkpoint so an interrupted run can be resumed by an explicit restart.
+state; the agent writes its own activity log and JSON result.
 
-Current state: only **FR-005 (YAML input validation)** is in progress. Task
-parsing and validation live in `src/alr/tasks.py`; argument parsing lives in
-`src/alr/cli.py`. Task execution (FR-001 through FR-004, FR-006, FR-007) is not
-implemented yet.
+Each task has an `id`, a `name`, a `prompt`, and an optional `state` of
+`pending`, `completed`, or `abandoned`. A missing or empty `state` means
+`pending`. Dry-run prints one line per task and flags `abandoned` tasks with a
+warning so you can look at them before running.
+
+Current state (2026-09-22): **FR-005 (YAML input validation)** and **FR-001
+(read the shared prompt)** are done. Task parsing and validation live in
+`src/alr/tasks.py`, prompt loading in `src/alr/prompt.py`, argument parsing in
+`src/alr/cli.py`, and the entry point in `src/alr/main.py`. The run loop in
+`src/alr/looper.py` is a stub; task execution (FR-002 through FR-004, FR-006,
+FR-007) is not implemented yet. Next up: the run loop, then `--agent`.
 
 Full requirements: [docs/requirements/01_requirements_v01.md](docs/requirements/01_requirements_v01.md).
 
 ## Key Considerations
 
-- Supported platforms are Linux/amd64 and macOS/arm64 only.
+- Supported platforms are Linux and macOS only.
 - No automatic retries: at most one attempt per task per run.
 - Logs and JSON results are written to `alr_activity/` under the directory
   where `alr` was started. There is no flag to change this.
 - Backends use each installed CLI's own model and authentication settings;
   `alr` adds no model-selection flags.
-- The YAML task's `agent` field names a specialist for the prompt. It does not
-  choose which CLI `alr` launches; `--agent` does that.
+- `--agent` chooses which CLI `alr` launches. It is planned but not implemented.
 
 ## Development Considerations
 
