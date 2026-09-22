@@ -13,8 +13,6 @@ tasks:
   - id: 1
     title: "Standup project structure"
     status: pending
-    agent: python_software_engineer
-    checkpoint: ""
   prompt: |
     Objective:
     Create a new empty python project
@@ -55,9 +53,8 @@ def test_malformed_yaml():
 @pytest.mark.parametrize(
     "argv, expected_error",
     [
-        (["-t", TEST_YAML, "-p", TEST_PROMPT], "-agent: value is required"),
-        (["-t", TEST_YAML, "-a", "claude"], "-prompt: value is required"),
-        (["-p", TEST_PROMPT, "-a", "claude"], "-tasks"),
+        (["-t", TEST_YAML], "-prompt"),
+        (["-p", TEST_PROMPT], "-tasks"),
     ],
 )
 def test_input_args_behaviour(capsys, argv: list[str], expected_error: str):

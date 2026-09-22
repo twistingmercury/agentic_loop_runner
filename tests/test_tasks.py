@@ -3,14 +3,12 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from alr.tasks import parse_tasks, TaskStatus
+from alr.tasks import parse_tasks, TaskState
 
 MISSING_ID = """
 tasks:
-  - title: "Standup project structure"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+  - name: "Standup project structure"
+    state:  pending
     prompt: |
       Objective:
       Create a new empty python project
@@ -20,10 +18,8 @@ tasks:
 ID_IS_ZERO = """
 tasks:
   - id: 0
-    title: "Standup project structure"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  pending
     prompt: |
       Objective:
       Create a new empty python project
@@ -33,36 +29,19 @@ tasks:
 ID_IS_NEGATIVE = """
 tasks:
   - id: -1
-    title: "Standup project structure"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  pending
     prompt: |
       Objective:
       Create a new empty python project
       Stand up a new python project, targeting Python >= 3.12
 """
 
-TITLE_IS_BLANK = """
+NAME_IS_BLANK = """
 tasks:
   - id: 1
-    title: ""
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
-    prompt: |
-      Objective:
-      Create a new empty python project
-      Stand up a new python project, targeting Python >= 3.12
-"""
-
-AGENT_IS_BLANK = """
-tasks:
-  - id: 1
-    title: "Standup project structure"
-    status: pending
-    agent: ""
-    checkpoint: ""
+    name: ""
+    state:  pending ""
     prompt: |
       Objective:
       Create a new empty python project
@@ -72,29 +51,23 @@ tasks:
 PROMPT_IS_BLANK = """
 tasks:
   - id: 1
-    title: "Standup project structure"
-    status: pending
-    agent: "python_software_engineer"
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  pending
     prompt: ""
 """
 
 IDS_ARE_DUPE = """
 tasks:
   - id: 1
-    title: "Standup project structure"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  pending
     prompt: |
       Objective:
       Create a new empty python project
       Stand up a new python project, targeting Python >= 3.12
   - id: 1
-    title: "Write hello world app"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Write hello world app"
+    state:  pending
     prompt: |
       Objective:
       Create a main.py file that when executed writes "hello, world"
@@ -105,13 +78,11 @@ TASKS_ARE_EMPTY = """
 tasks: []
 """
 
-STATUS_IS_INVALID = """
+STATE_IS_INVALID = """
 tasks:
   - id: 1
-    title: "Standup project structure"
-    status: BOGUS
-    agent: "python_software_engineer"
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  BOGUS
     prompt: |
       Objective:
       Create a main.py file that when executed writes "hello, world"
@@ -121,10 +92,8 @@ tasks:
 INVALID_ID = """
 tasks:
   - id: "1"
-    title: "Standup project structure"
-    status: pending
-    agent: "python_software_engineer"
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  pending
     prompt: |
       Objective:
       Create a main.py file that when executed writes "hello, world"
@@ -134,23 +103,19 @@ tasks:
 MALFORMED_YAML = """
 tasks:
   - id: 1
-    title: "Standup project structure"
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "Standup project structure"
+    state:  pending
   prompt: |
     Objective:
     Create a new empty python project
     Stand up a new python project, targeting Python >= 3.12
 """
 
-TITLE_IS_WHITESPACE = """
+NAME_IS_WHITESPACE = """
 tasks:
   - id: 0
-    title: "      "
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    name: "      "
+    state:  pending
     prompt: |
       Objective:
       Create a new empty python project
@@ -161,10 +126,8 @@ CUSTOM_TAGS = """
 tasks:
   - id: 0
     name: "billy"
-    title: "      "
-    status: pending
-    agent: python_software_engineer
-    checkpoint: ""
+    description: "      "
+    state:  pending
     prompt: |
       Objective:
       Create a new empty python project
@@ -180,18 +143,14 @@ def test_parse_tasks_success():
 
     task_1 = task_list.tasks[0]
     assert task_1.id == 1
-    assert task_1.title == "Standup project structure"
-    assert task_1.status == TaskStatus.PENDING
-    assert task_1.agent == "python_software_engineer"
-    assert task_1.checkpoint == ""
+    assert task_1.name == "Standup project structure"
+    assert task_1.state == TaskState.PENDING
     assert len(task_1.prompt) > 1
 
     task_2 = task_list.tasks[1]
     assert task_2.id == 2
-    assert task_2.title == "Write hello world app"
-    assert task_2.status == TaskStatus.PENDING
-    assert task_2.agent == "python_software_engineer"
-    assert task_2.checkpoint == ""
+    assert task_2.name == "Write hello world app"
+    assert task_2.state == TaskState.PENDING
     assert len(task_2.prompt) > 1
 
 
@@ -207,14 +166,13 @@ def test_parse_tasks_no_file():
         MISSING_ID,
         ID_IS_ZERO,
         ID_IS_NEGATIVE,
-        TITLE_IS_BLANK,
-        AGENT_IS_BLANK,
+        NAME_IS_BLANK,
         PROMPT_IS_BLANK,
         IDS_ARE_DUPE,
         TASKS_ARE_EMPTY,
-        STATUS_IS_INVALID,
+        STATE_IS_INVALID,
         INVALID_ID,
-        TITLE_IS_WHITESPACE,
+        NAME_IS_WHITESPACE,
         CUSTOM_TAGS,
     ],
 )

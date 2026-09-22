@@ -12,11 +12,9 @@ from pydantic import (
 )
 
 
-class TaskStatus(StrEnum):
+class TaskState(StrEnum):
     PENDING = auto()
-    IN_PROGRESS = auto()
     COMPLETED = auto()
-    BLOCKED = auto()
     ABANDONED = auto()
 
 
@@ -27,11 +25,17 @@ type NonBlankString = Annotated[
 
 class Task(BaseModel):
     id: int = Field(gt=0, strict=True)
-    title: NonBlankString
-    agent: NonBlankString
-    checkpoint: str
+    name: NonBlankString
     prompt: NonBlankString
-    status: TaskStatus = TaskStatus.PENDING
+    state: TaskState = Field(default=TaskState.PENDING, validate_default=True)
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def validate_task_state(cls, state: TaskState) -> TaskState:
+        if state == "":
+            state = TaskState.PENDING
+
+        return state
 
 
 class TaskList(BaseModel):
