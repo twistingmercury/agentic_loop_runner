@@ -151,9 +151,12 @@ fresh session. Do not claim that unsaved work was saved after an interruption.
 
 **Priority:** Required for execution. **Why:** Give each fresh session the task context it needs.
 
-Supply the selected task's ID, name, full prompt, task-file path, and the
-shared instructions. alr creates no files for the agent and asks it to write
-none beyond what the prompt itself authorizes.
+Combine the shared prompt and the selected task into one prompt and pass it
+to the agent: the shared prompt, a blank line, a `<id>: <name>` heading, a
+blank line, then the task's `prompt`. The ID and name are there so a human
+reading the prompt can tell which task it is. alr adds nothing else, such as
+the task-file path. The shared prompt is responsible for telling the agent to
+end with the FR-004 result line. alr creates no files for the agent.
 
 **Related:** FR-002, FR-004.
 

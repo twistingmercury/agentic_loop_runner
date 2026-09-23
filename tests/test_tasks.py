@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from alr.tasks import parse_tasks, TaskState
+from alr.tasks import parse_tasks, TaskState, Task
 
 MISSING_ID = """
 tasks:
@@ -194,3 +194,18 @@ def test_malformed_yaml():
         temp_yaml.flush()
         with pytest.raises(yaml.YAMLError):
             parse_tasks(temp_yaml.name)
+
+
+def test_string_task():
+    test_task = Task(
+        id=1,
+        name="Write hello world app",
+        prompt="Do some stuff",
+        state=TaskState.PENDING,
+    )
+    task_str = str(test_task)
+
+    expected = """1: Write hello world app
+
+Do some stuff"""
+    assert task_str == expected

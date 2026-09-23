@@ -36,6 +36,10 @@ class Task(BaseModel):
 
         return state
 
+    def __str__(self) -> str:
+        normalized = f"{self.id}: {self.name}\n\n{self.prompt}"
+        return normalized
+
 
 class TaskList(BaseModel):
     tasks: list[Task] = Field(min_length=1)
