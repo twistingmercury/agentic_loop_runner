@@ -1,4 +1,5 @@
-import pathlib
+import os
+from pathlib import Path
 from enum import StrEnum, auto
 from typing import Annotated
 
@@ -54,12 +55,33 @@ class TaskList(BaseModel):
         return tasks
 
 
-def parse_tasks(path: str | pathlib.Path):
-    file = pathlib.Path(path)
+def parse_tasks(path: str | Path):
+    file = Path(path)
     data = file.read_text()
     tasks = yaml.safe_load(data)
     task_list = TaskList.model_validate(tasks)
     return task_list
+
+
+def save_tasks(file_path: str | Path, task_list: TaskList):
+    target = Path(file_path)
+    # target_dir = target.parent
+    tmp_path = target.with_name(target.name + ".tmp")
+
+    try:
+        data = task_list.model_dump(mode="json")
+        with open(tmp_path, "w", encoding="utf-8") as tmp_file:
+            yaml.safe_dump(
+                data,
+                tmp_file,
+                default_flow_style=False,
+                sort_keys=False,
+                indent=2,
+            )
+        os.replace(tmp_path, file_path)
+    except (IOError, yaml.YAMLError):
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def summarize_tasks(task_list: TaskList):

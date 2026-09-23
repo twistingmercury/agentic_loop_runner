@@ -24,9 +24,9 @@ def main(argv=None):
             sys.exit(1)
 
         shared_prompt = parse_prompt(args.prompt)
-        start(shared_prompt, task_list)
+        start(shared_prompt, task_list, args.tasks)
     except (
-        FileNotFoundError,
+        OSError,
         yaml.YAMLError,
         pydantic.ValidationError,
         ValueError,
