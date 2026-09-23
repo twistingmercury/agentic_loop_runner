@@ -1,9 +1,12 @@
+import os
+import shutil
+
 import pytest, tempfile, yaml
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from alr.tasks import parse_tasks, TaskState, Task
+from alr.tasks import parse_tasks, save_tasks, TaskState, Task
 
 MISSING_ID = """
 tasks:
@@ -209,3 +212,49 @@ def test_string_task():
 
 Do some stuff"""
     assert task_str == expected
+
+
+TEST_YAML = Path(__file__).parent / "data" / "tasks.yaml"
+
+
+def test_save_tasks_round_trip(tmp_path):
+    yaml_file = tmp_path / "tasks.yaml"
+    shutil.copy(TEST_YAML, yaml_file)
+
+    before = parse_tasks(yaml_file)
+    before.tasks[2].state = TaskState.COMPLETED
+    save_tasks(yaml_file, before)
+
+    after = parse_tasks(yaml_file)
+    assert after == before
+    assert after.tasks[2].state == TaskState.COMPLETED
+
+
+def test_save_tasks_leaves_no_tmp_file(tmp_path):
+    yaml_file = tmp_path / "tasks.yaml"
+    shutil.copy(TEST_YAML, yaml_file)
+
+    save_tasks(yaml_file, parse_tasks(yaml_file))
+
+    assert [p.name for p in tmp_path.iterdir()] == ["tasks.yaml"]
+
+
+def test_save_tasks_failure_keeps_original(tmp_path, monkeypatch):
+    yaml_file = tmp_path / "tasks.yaml"
+    shutil.copy(TEST_YAML, yaml_file)
+    original = yaml_file.read_text()
+
+    task_list = parse_tasks(yaml_file)
+    task_list.tasks[2].state = TaskState.COMPLETED
+
+    # Make the swap step fail, as if the disk gave out mid-save.
+    def broken_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", broken_replace)
+
+    with pytest.raises(OSError):
+        save_tasks(yaml_file, task_list)
+
+    assert yaml_file.read_text() == original
+    assert [p.name for p in tmp_path.iterdir()] == ["tasks.yaml"]
