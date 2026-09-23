@@ -1,4 +1,4 @@
-.PHONY: help test analyze
+.PHONY: help test analyze build install
 
 .DEFAULT_GOAL := help
 
@@ -16,3 +16,12 @@ test: analyze ## Run pytest
 analyze: ## Runs formatting and linting
 	uv run ruff format
 	uv run ruff check --fix
+
+build: test ## Builds the wheel
+	build/build.sh
+
+install: ## Install the locally build wheel
+	uv tool install dist/alr-*.whl --force
+
+uninstall: ## Uninstalls alr
+	uv tool uninstall alr

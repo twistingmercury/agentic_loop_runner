@@ -1,0 +1,34 @@
+# Keep the build context to what the image needs:
+# pyproject.toml, uv.lock, README.md, src/, tests/
+
+# VCS and editor/tooling
+.git
+.github
+.idea
+.vscode
+.claude
+**/.local
+**/.scratch
+
+# Host Python environment and caches
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+**/*.egg-info
+
+# Build output
+**/.bin
+dist
+
+# Not needed inside the image
+build
+deploy
+scripts
+docs
+
+# OS junk
+**/.DS_Store
+**/._*
+**/*~

@@ -1,0 +1,25 @@
+name: Agentic Loop Runner (alr) CI build
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  build:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # Full history for version metadata
+
+      - name: Run Docker-first build
+        run: ./build/build.sh
