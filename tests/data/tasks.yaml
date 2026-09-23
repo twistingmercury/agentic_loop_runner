@@ -1,14 +1,14 @@
 tasks:
   - id: 1
     name: "Standup project structure"
-    state: ""
+    state: "completed"
     prompt: |
       Objective:
       Create a new empty python project
       Stand up a new python project, targeting Python >= 3.12
   - id: 2
     name: "Write hello world app"
-    state: "abandoned"
+    state: "failed"
     prompt: |
       Objective:
       Create a main.py file that when executed writes "hello, world"

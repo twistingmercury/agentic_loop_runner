@@ -84,5 +84,6 @@ def test_main_dry_run(capsys):
     args = ["-t", TEST_YAML, "-d"]
     main(args)
     tout = capsys.readouterr().out
-    assert "tasks yaml looks good!" in tout
-    assert "\u26a0" in tout
+    assert "Some tasks failed previous runs:" in tout
+    assert "FAILED" in tout
+    assert "\u274c" in tout

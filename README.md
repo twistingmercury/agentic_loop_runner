@@ -35,16 +35,14 @@ the code, and I write tests. Claude is just there to offer advice and help when 
 alr -t tasks.yaml --dry-run
 
 # Run the tasks with a coding agent.
-alr -t tasks.yaml -a claude -p prompt.md
-alr -t tasks.yaml -a codex -p prompt.md
+alr -t tasks.yaml -p prompt.md
 ```
 
 | Flag              | Short | Required            | Description                                        |
 | ----------------- | ----- | ------------------- | -------------------------------------------------- |
 | `--tasks <path>`  | `-t`  | Always              | YAML file holding the task list                    |
 | `--prompt <path>` | `-p`  | Execution only      | Markdown file with the shared prompt for each loop |
-| `--agent <value>` | `-a`  | Execution only      | Coding agent to launch: `claude` or `codex`        |
-| `--dry-run`       | `-d`  | No                  | Validation-only mode; ignores `--prompt`/`--agent` |
+| `--dry-run`       | `-d`  | No                  | Validation-only mode; ignores `--prompt`           |
 
 ## How it works
 
@@ -52,7 +50,7 @@ alr -t tasks.yaml -a codex -p prompt.md
 
 A run reads a YAML task file and a shared Markdown prompt. Tasks execute one at
 a time in list order, each in a fresh agent session. The runner owns task
-state; the agent writes its own activity log and JSON result.
+state; the agent reports its outcome as one JSON line at the end of its output.
 
 Each task has an `id`, a `name`, a `prompt`, and an optional `state` of
 `pending`, `completed`, or `abandoned`. A missing or empty `state` means
@@ -63,8 +61,8 @@ Current state (2026-09-22): **FR-005 (YAML input validation)** and **FR-001
 (read the shared prompt)** are done. Task parsing and validation live in
 `src/alr/tasks.py`, prompt loading in `src/alr/prompt.py`, argument parsing in
 `src/alr/cli.py`, and the entry point in `src/alr/main.py`. The run loop in
-`src/alr/looper.py` is a stub; task execution (FR-002 through FR-004, FR-006,
-FR-007) is not implemented yet. Next up: the run loop, then `--agent`.
+`src/alr/looper.py` is a stub; task execution (FR-002 through FR-004, FR-007)
+is not implemented yet. Next up: the run loop.
 
 Full requirements: [docs/requirements/01_requirements_v01.md](docs/requirements/01_requirements_v01.md).
 
@@ -72,11 +70,8 @@ Full requirements: [docs/requirements/01_requirements_v01.md](docs/requirements/
 
 - Supported platforms are Linux and macOS only.
 - No automatic retries: at most one attempt per task per run.
-- Logs and JSON results are written to `alr_activity/` under the directory
-  where `alr` was started. There is no flag to change this.
-- Backends use each installed CLI's own model and authentication settings;
-  `alr` adds no model-selection flags.
-- `--agent` chooses which CLI `alr` launches. It is planned but not implemented.
+- Claude Code is the only supported agent. It uses your installed CLI's own
+  model and authentication settings; `alr` adds no model-selection flags.
 
 ## Development Considerations
 

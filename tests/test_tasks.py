@@ -1,9 +1,12 @@
+import os
+import shutil
+
 import pytest, tempfile, yaml
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from alr.tasks import parse_tasks, TaskState
+from alr.tasks import parse_tasks, save_tasks, TaskState, Task
 
 MISSING_ID = """
 tasks:
@@ -144,13 +147,13 @@ def test_parse_tasks_success():
     task_1 = task_list.tasks[0]
     assert task_1.id == 1
     assert task_1.name == "Standup project structure"
-    assert task_1.state == TaskState.PENDING
+    assert task_1.state == TaskState.COMPLETED
     assert len(task_1.prompt) > 1
 
     task_2 = task_list.tasks[1]
     assert task_2.id == 2
     assert task_2.name == "Write hello world app"
-    assert task_2.state == TaskState.ABANDONED
+    assert task_2.state == TaskState.FAILED
     assert len(task_2.prompt) > 1
 
 
@@ -194,3 +197,64 @@ def test_malformed_yaml():
         temp_yaml.flush()
         with pytest.raises(yaml.YAMLError):
             parse_tasks(temp_yaml.name)
+
+
+def test_string_task():
+    test_task = Task(
+        id=1,
+        name="Write hello world app",
+        prompt="Do some stuff",
+        state=TaskState.PENDING,
+    )
+    task_str = str(test_task)
+
+    expected = """1: Write hello world app
+
+Do some stuff"""
+    assert task_str == expected
+
+
+TEST_YAML = Path(__file__).parent / "data" / "tasks.yaml"
+
+
+def test_save_tasks_round_trip(tmp_path):
+    yaml_file = tmp_path / "tasks.yaml"
+    shutil.copy(TEST_YAML, yaml_file)
+
+    before = parse_tasks(yaml_file)
+    before.tasks[2].state = TaskState.COMPLETED
+    save_tasks(yaml_file, before)
+
+    after = parse_tasks(yaml_file)
+    assert after == before
+    assert after.tasks[2].state == TaskState.COMPLETED
+
+
+def test_save_tasks_leaves_no_tmp_file(tmp_path):
+    yaml_file = tmp_path / "tasks.yaml"
+    shutil.copy(TEST_YAML, yaml_file)
+
+    save_tasks(yaml_file, parse_tasks(yaml_file))
+
+    assert [p.name for p in tmp_path.iterdir()] == ["tasks.yaml"]
+
+
+def test_save_tasks_failure_keeps_original(tmp_path, monkeypatch):
+    yaml_file = tmp_path / "tasks.yaml"
+    shutil.copy(TEST_YAML, yaml_file)
+    original = yaml_file.read_text()
+
+    task_list = parse_tasks(yaml_file)
+    task_list.tasks[2].state = TaskState.COMPLETED
+
+    # Make the swap step fail, as if the disk gave out mid-save.
+    def broken_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", broken_replace)
+
+    with pytest.raises(OSError):
+        save_tasks(yaml_file, task_list)
+
+    assert yaml_file.read_text() == original
+    assert [p.name for p in tmp_path.iterdir()] == ["tasks.yaml"]
