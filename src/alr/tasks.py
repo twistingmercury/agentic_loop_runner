@@ -14,7 +14,7 @@ from pydantic import (
 class TaskState(StrEnum):
     PENDING = auto()
     COMPLETED = auto()
-    ABANDONED = auto()
+    FAILED = auto()
 
 
 type NonBlankString = Annotated[
@@ -63,14 +63,42 @@ def parse_tasks(path: str | pathlib.Path):
 
 
 def summarize_tasks(task_list: TaskList):
-    reset = "\033[0m"
-    for task in task_list.tasks:
-        color = "  "
-        emoji = ""
-        suffix = ""
-        if task.state == TaskState.ABANDONED:
-            color = "\033[33m"
-            emoji = "\u26a0\ufe0f"
-            suffix = " \u2190 ABANDONED! You should take a look at this before running"
+    color_red = "\033[1;91m"
+    color_grn = "\033[92m"
+    color_rst = "\033[0m"
 
-        print(f"{color}{emoji} {task.id}: {task.name}{suffix}{reset}")
+    # Pad the plain text first, then add color, so the escape codes
+    # don't throw off the column widths.
+    id_width = max(len("ID"), *(len(str(task.id)) for task in task_list.tasks))
+    state_width = max(len(state) for state in TaskState)
+
+    print(f"   {'ID':>{id_width}}  {'STATE':<{state_width}}  NAME")
+    print(f"   {'-' * id_width}  {'-' * state_width}  {'-' * 4}")
+
+    for task in task_list.tasks:
+        emoji = "  "
+        color = ""
+        note = ""
+
+        match task.state:
+            case TaskState.FAILED:
+                emoji = "\u274c"
+                color = color_red
+                note = f"  {color_red}\u2190 Needs review!{color_rst}"
+            case TaskState.COMPLETED:
+                emoji = "\u2705"
+                color = color_grn
+
+        state = f"{color}{task.state.upper():<{state_width}}{color_rst}"
+        print(f"{emoji} {task.id:>{id_width}}  {state}  {task.name}{note}")
+
+
+def validate_tasks(task_list: TaskList) -> bool:
+    for task in task_list.tasks:
+        match task.state:
+            case TaskState.FAILED:
+                return False
+            case TaskState.COMPLETED | TaskState.PENDING:
+                continue
+
+    return True

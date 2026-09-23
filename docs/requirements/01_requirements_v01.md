@@ -45,7 +45,7 @@ Matching Gralph's other features or its CLI is not required.
 | Outcome                   | What to check                                                                                  |
 |---------------------------|------------------------------------------------------------------------------------------------|
 | Useful first increment    | FR-005 checks valid and invalid sample files and warnings without file changes or agent launch |
-| Sequential execution      | FR-002 runs pending tasks one at a time in list order and skips completed or abandoned ones    |
+| Sequential execution      | FR-002 runs pending tasks one at a time in list order and skips completed ones                 |
 | Fresh sessions            | FR-007 runs each task in a fresh Claude Code session                                           |
 | Reliable outcome handling | FR-004 distinguishes success, reported failure, crashes, and invalid results                   |
 | Recoverable execution     | FR-002 saves state after each task, and a rerun starts unfinished tasks fresh                  |
@@ -84,7 +84,7 @@ are invalid task elements, including among otherwise valid tasks.
 | `id`       | Required | Positive integer, unique within the task list  |
 | `name`     | Required | Nonblank string                                |
 | `prompt`   | Required | Nonblank string                                |
-| `state`    | Optional | Exactly `pending`, `completed`, or `abandoned` |
+| `state`    | Optional | Exactly `pending`, `completed`, or `failed`    |
 
 Omission or an empty string (`""`) defaults `state` to `pending`. Reject
 explicit null, whitespace-only, or unrecognized states. Whitespace-only strings
@@ -99,12 +99,16 @@ What to check:
   For file or syntax errors, don't invent a task index or ID.
 - Dry-run requires only the task-file input. It ignores the prompt flag,
   launches no agents or task commands, and creates or changes no files.
-- Dry-run writes a warning to stdout identifying each `abandoned` task and the
-  need for manual intervention before execution. These warnings alone do not
-  fail validation.
+- `failed` is a valid state: it means the task was attempted in an earlier run
+  and did not complete. Its presence still needs the user's attention, so
+  dry-run flags each `failed` task on stdout with a ❌ and bold red text and
+  says it needs manual intervention before execution. Dry-run has done its job
+  by reporting this, so it still exits `0`. The user fixes the problem and
+  resets the task's `state` to `pending` (or `completed`) by hand.
 - Dry-run exits `0` when validation passes and nonzero when it fails.
-- Normal execution applies all the same YAML checks before launching any agent.
-  Validation failure stops execution with a nonzero exit.
+- Normal execution applies all the same YAML checks before launching any agent,
+  and also refuses to start while any task is `failed`. Either stops execution
+  with a nonzero exit.
 
 **Related:** FR-001, FR-002, CON-001.
 
@@ -126,12 +130,12 @@ The runner owns task state. Execute exactly one task at a time in YAML list
 order, not ID or name order. Never launch the next task while the current task
 run is active.
 
-| Existing state  | Execution behavior                                          |
-|-----------------|-------------------------------------------------------------|
-| Omitted or `""` | Treat as `pending`                                          |
-| `pending`       | Eligible in list order                                      |
-| `completed`     | Skip without launching an agent                             |
-| `abandoned`     | Print the same warning dry-run prints, skip, and keep going |
+| Existing state  | Execution behavior                                                   |
+|-----------------|----------------------------------------------------------------------|
+| Omitted or `""` | Treat as `pending`                                                   |
+| `pending`       | Eligible in list order                                               |
+| `completed`     | Skip without launching an agent                                      |
+| `failed`        | Refuses to start the run (FR-005); no agent is launched              |
 
 If no task is `pending`, exit `0` without launching an agent.
 
@@ -173,9 +177,9 @@ stdout:
 }
 ```
 
-| Field   | Required value                     |
-|---------|------------------------------------|
-| `state` | Exactly `completed` or `abandoned` |
+| Field   | Required value                  |
+|---------|---------------------------------|
+| `state` | Exactly `completed` or `failed` |
 
 Reject invalid JSON, a missing or unrecognized `state`, extra fields, and
 Markdown around the JSON. The runner reads this line and nothing else to decide the task's outcome.
@@ -184,8 +188,8 @@ No result file is written.
 | Attempt outcome                                     | Runner behavior                                                  |
 |-----------------------------------------------------|------------------------------------------------------------------|
 | Exit `0` and a valid `completed` result             | Save `completed`, then advance; exit `0` when nothing is pending |
-| Exit `0` and a valid `abandoned` result             | Save `abandoned`, stop the run, and exit nonzero                 |
-| Nonzero exit, crash, or missing/invalid result line | Leave `pending`, stop the run, and exit nonzero                  |
+| Exit `0` and a valid `failed` result                | Save `failed`, stop the run, and exit nonzero                    |
+| Nonzero exit, crash, or missing/invalid result line | Save `failed`, stop the run, and exit nonzero                    |
 | Ctrl+C                                              | Apply FR-002 interruption behavior                               |
 
 There are no automatic retries: at most one attempt per task in a run. An

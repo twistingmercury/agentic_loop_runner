@@ -10,7 +10,7 @@ are given, then stop.
 3. Verify the result.
 4. End your output with exactly one line of plain JSON, with no backticks or
    code fences and nothing after it: {"state": "completed"} if you finished
-   the task, or {"state": "abandoned"} if you cannot.
+   the task, or {"state": "failed"} if you cannot.
 
 ## Rules
 

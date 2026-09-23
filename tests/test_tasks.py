@@ -144,13 +144,13 @@ def test_parse_tasks_success():
     task_1 = task_list.tasks[0]
     assert task_1.id == 1
     assert task_1.name == "Standup project structure"
-    assert task_1.state == TaskState.PENDING
+    assert task_1.state == TaskState.COMPLETED
     assert len(task_1.prompt) > 1
 
     task_2 = task_list.tasks[1]
     assert task_2.id == 2
     assert task_2.name == "Write hello world app"
-    assert task_2.state == TaskState.ABANDONED
+    assert task_2.state == TaskState.FAILED
     assert len(task_2.prompt) > 1
 
 
