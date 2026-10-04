@@ -148,6 +148,14 @@ def not_found_text(name: str) -> str:
     return f"{name}: not found on PATH"
 
 
+def start_failed_text(name: str, exc: OSError) -> str:
+    """Say why an executable could not be started."""
+    if isinstance(exc, FileNotFoundError):
+        return not_found_text(name)
+
+    return f"{name}: cannot be started: {exc.strerror}"
+
+
 async def capture(
     argv: Sequence[str],
     *,

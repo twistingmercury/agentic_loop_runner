@@ -247,6 +247,28 @@ async def test_run_loop_claude_missing_from_path(
     assert [task.state for task in saved.tasks] == [FAILED]
 
 
+async def test_run_loop_claude_that_cannot_be_executed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No execute bit at all, which exec refuses even for root.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "claude").write_text("#!/bin/sh\n", encoding="utf-8")
+    (bin_dir / "claude").chmod(0o644)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    tasks_file = tmp_path / "tasks.yaml"
+    task_list = TaskList(tasks=[Task(id=1, name="Only", prompt="p")])
+
+    with pytest.raises(RunError) as caught:
+        await _run(task_list, tasks_file)
+
+    assert str(caught.value) == (
+        "task 1: Only failed: claude: cannot be started: Permission denied"
+    )
+    saved = _saved(tasks_file)
+    assert [task.state for task in saved.tasks] == [FAILED]
+
+
 async def test_run_loop_context_already_cancelled(record: Path, tmp_path: Path) -> None:
     # Deliberately never created.
     tasks_file = tmp_path / "tasks.yaml"

@@ -32,8 +32,8 @@ class PlainFrontEnd:
         try:
             # stderr is inherited, so it reaches the terminal untouched.
             process = await proc.start(argv, stdin=PIPE, stdout=PIPE)
-        except FileNotFoundError:
-            return SessionResult(text="", error=proc.not_found_text(argv[0]))
+        except OSError as exc:
+            return SessionResult(text="", error=proc.start_failed_text(argv[0], exc))
 
         chunks: list[bytes] = []
         error = await proc.finish(process, _pump(process, stdin_text.encode(), chunks))
@@ -48,7 +48,11 @@ class PlainFrontEnd:
         # Flushed, so the line stays ahead of the gate's own output.
         print(f"gate: {gate.cmd}", flush=True)
         # No stdin, and stdout and stderr inherited, so the output passes straight through.
-        process = await proc.start(["sh", "-c", gate.cmd])
+        try:
+            process = await proc.start(["sh", "-c", gate.cmd])
+        except OSError as exc:
+            return proc.start_failed_text("sh", exc)
+
         return await proc.finish(process)
 
     def gate_finished(
@@ -69,7 +73,11 @@ class PlainFrontEnd:
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
         # stdout and stderr inherited, so git's output passes straight through.
-        process = await proc.start(argv, cwd=cwd)
+        try:
+            process = await proc.start(argv, cwd=cwd)
+        except OSError as exc:
+            return proc.start_failed_text(argv[0], exc)
+
         return await proc.finish(process, gentle=True)
 
     def committed(self, task: Task, commit_hash: str) -> None:

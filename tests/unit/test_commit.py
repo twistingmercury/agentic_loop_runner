@@ -525,6 +525,29 @@ async def test_run_failed_add_fails_the_task(git_repo: Path) -> None:
 
 
 @pytest.mark.usefixtures("fake_claude")
+async def test_run_git_that_cannot_be_executed_fails_the_task(
+    git_repo: Path, fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = _task_file(git_repo)
+    repo = await _open(tasks_file)
+    # No execute bit at all, which exec refuses even for root. Only this and
+    # the fake claude are on PATH, because exec moves on to the next folder
+    # that holds an executable git.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text("#!/bin/true\n", encoding="utf-8")
+    (bin_dir / "git").chmod(0o644)
+    monkeypatch.setenv("PATH", f"{fake_claude}:{bin_dir}")
+    want_error = "commit failed: git: cannot be started: Permission denied"
+
+    with pytest.raises(RunError) as caught:
+        await _run(_gated_task(), tasks_file, repo)
+
+    assert str(caught.value) == f"task 1: First failed: {want_error}"
+    assert _saved_states(tasks_file) == [(FAILED, want_error)]
+
+
+@pytest.mark.usefixtures("fake_claude")
 async def test_run_commit_with_task_file_outside_the_tree(
     git_repo: Path, outside: Path
 ) -> None:

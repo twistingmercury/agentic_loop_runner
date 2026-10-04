@@ -321,6 +321,28 @@ async def test_run_cancel_during_gate_leaves_file_untouched(
     )
 
 
+async def test_run_gate_shell_that_cannot_be_executed_fails_the_task(
+    fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No execute bit at all, which exec refuses even for root. Only this and
+    # the fake claude are on PATH, because exec moves on to the next folder
+    # that holds an executable sh.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "sh").write_text("#!/bin/true\n", encoding="utf-8")
+    (bin_dir / "sh").chmod(0o644)
+    monkeypatch.setenv("PATH", f"{fake_claude}:{bin_dir}")
+    tasks_file = tmp_path / "tasks.yaml"
+
+    with pytest.raises(RunError) as caught:
+        await _run(_gated_task(Gate(cmd="true")), tasks_file)
+
+    assert str(caught.value) == (
+        'task 1: First failed: gate "true" failed: sh: cannot be started: Permission denied'
+    )
+    assert [task.state for task in _saved(tasks_file).tasks] == [FAILED]
+
+
 async def test_run_gate_timeout_fails_task_and_skips_later_gates(
     tmp_path: Path,
 ) -> None:

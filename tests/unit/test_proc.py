@@ -151,6 +151,17 @@ def test_not_found_text() -> None:
     assert proc.not_found_text("claude") == "claude: not found on PATH"
 
 
+def test_start_failed_text() -> None:
+    assert (
+        proc.start_failed_text("claude", FileNotFoundError(2, "No such file"))
+        == "claude: not found on PATH"
+    )
+    assert (
+        proc.start_failed_text("claude", PermissionError(13, "Permission denied"))
+        == "claude: cannot be started: Permission denied"
+    )
+
+
 async def test_finish_stops_the_group_when_the_drain_fails(tmp_path: Path) -> None:
     pid_file = tmp_path / "child.pid"
     process = await proc.start(
