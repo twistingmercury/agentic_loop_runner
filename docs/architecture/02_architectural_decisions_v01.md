@@ -33,6 +33,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | 004   | One engine, two front ends                             | Accepted | 2026-10-04 |
 | 005   | PyYAML nodes and hand-written validation, no pydantic  | Accepted | 2026-10-04 |
 | 006   | Port the tests first, with a fake claude on PATH       | Accepted | 2026-10-04 |
+| 007   | Compatible in use, Python-native inside                | Accepted | 2026-10-04 |
 
 ## Inherited Decisions
 
@@ -59,7 +60,7 @@ gralph's ADR-008 (Docker-first CI) is already met by this repository's own build
 
 ### ADR-001: Port gralph to Python, drop-in compatible
 
-**Status:** Accepted
+**Status:** Accepted; what "drop-in compatible" covers is narrowed by ADR-007
 
 **Context:**
 
@@ -214,5 +215,44 @@ For each module, port gralph's tests to pytest first, then write the code to pas
 
 - A large amount of test code to port before features appear
 - A gralph test that asserts Go-specific detail needs judgment to translate
+
+### ADR-007: Compatible in use, Python-native inside
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-001 called the port "drop-in compatible" and listed error text among the things that must match. The first five tasks read that strictly: the task file loader was given a custom YAML resolver so plain values such as `yes` and `12:30` load the way gralph's Go YAML library loads them, and the saver was taught to quote strings that library would read as numbers. The owner then clarified the intent. `alr` replaces gralph; the two are not meant to run side by side on the same files. "Drop-in" was about what a person using the tool sees and types, not about reproducing how the Go code represents things inside.
+
+**Decision:**
+
+Compatibility covers the surface a user works with:
+
+- The command-line flags and what they mean
+- The task file format and its field rules, the shared prompt, and the text sent to Claude
+- The result line and the outcome rule
+- What gates, `--commit`, and the sandbox flags do
+- Exit codes and the shape of plain-mode output
+- The full-screen view's behavior, when it is built
+
+Compatibility does not cover internal representation:
+
+- YAML is read and written with PyYAML's standard safe loader and dumper rules. A plain value that YAML 1.1 reads as a boolean or a number (`yes`, `on`, `12:30`) must be quoted to be a string; `alr` rejects it with a clear message otherwise
+- Error messages must be clear and name the task and field. They do not have to match gralph's wording, and a ported test that asserts Go-specific wording may be adapted
+- No new code is added only to imitate a Go library. The small helpers already in `alr.gocompat` stay because they are tested and the saved `error` text has to say something
+
+The saver keeps two behaviors because they serve `alr`'s own users: multi-line text is written as a `|` block, and lists are indented under their key.
+
+**Consequences:**
+
+*Positive:*
+
+- Less code, and none that exists only to mirror another library
+- The task file behaves the way anyone who knows YAML and PyYAML expects
+
+*Negative:*
+
+- A gralph task file with an unquoted name such as `yes` or `12:30` needs quotes added before `alr` accepts it
+- Error text can drift from gralph's, so the Go tests are a guide to behavior and no longer an exact oracle for messages
 
 **Next:** [System Architecture](03_system_architecture_v01.md)
