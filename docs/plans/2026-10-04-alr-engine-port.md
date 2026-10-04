@@ -18,7 +18,7 @@
 - Runtime dependency: PyYAML only. Remove `pydantic`. Dev dependencies: `pytest`, `pytest-asyncio`, `ruff`.
 - Compatible with gralph at `170dc6f` in what a user sees and types (ADR-007): same flags, task file format, stdin text, Claude argv, outcome rule, and gate and commit behavior. Messages that name the command say `alr`.
 - Python-native inside (ADR-007): no code that exists only to imitate a Go library. YAML is read and written with PyYAML's standard safe rules. Error messages must be clear and name the task and field; they do not have to match gralph's wording.
-- Known differences from gralph: `--install-skill` is not accepted; no wizard, no TUI, no terminal detection (always plain); `--help` text; `--version` prints one line, `alr version: <version>`; saved YAML is equivalent, not byte-identical; error wording; a plain YAML value such as `yes` or `12:30` must be quoted to be a string; `<<` merge keys are rejected.
+- Known differences from gralph: `--install-skill` is not accepted; no wizard, no TUI, no terminal detection (always plain); `--help` text; `--version` prints one line, `alr version: <version>`; saved YAML is equivalent, not byte-identical; error wording; a plain YAML value such as `yes` or `12:30` must be quoted to be a string; `<<` merge keys are rejected; result-line keys must be the exact lowercase `state` and `error`.
 - Import rules: `alr.engine` imports neither `alr.plain`, `alr.stream`, nor `alr.tui`. `alr.plain` and `alr.stream` never import each other. `alr.engine` never writes to stdout or stderr.
 - Linux and macOS only. No Windows branches.
 - Type-hint every function signature. Catch specific exceptions. Re-raise with `raise ... from ...`.
@@ -39,6 +39,7 @@ These apply to every task that says "port".
 5. **Tests that depend on file permissions** (unreadable file, unwritable folder) must skip when `os.geteuid() == 0`, because the Docker build runs the tests as root.
 6. **Skip, with a one-line comment naming the reason, any Go test that only exercises something out of scope**: the TUI, the wizard, `--install-skill`, the skill check, terminal detection, Windows.
 7. **Time in tests.** Go tests that sleep or poll keep the same timeouts. Use `tmp_path` for every file and `monkeypatch` for `PATH`, the working directory, and environment variables.
+8. **The fake claude has one set of variables.** gralph had two fakes with overlapping `FAKE_CLAUDE_*` and `FAKECLAUDE_*` variables. alr's fake (`tests/fakeclaude/fake_claude.py`) has one set, all prefixed `FAKECLAUDE_`, and its docstring is the reference. When a Go test sets a variable, use the alr variable that does the same job: output is `FAKECLAUDE_OUTPUT`, stderr text is `FAKECLAUDE_STDERR`, and the record file holds one JSON line of `argv` and `stdin` per call, which replaces the separate args file and attempt log (count the lines to count calls). The ready file holds the fake's PID.
 
 ## File Structure
 
