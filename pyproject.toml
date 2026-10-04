@@ -28,5 +28,3 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["N"]
-# RunCancelled is a stop, not a fault, and its name is fixed by the port plan.
-ignore = ["N818"]

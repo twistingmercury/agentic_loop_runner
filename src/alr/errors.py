@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,6 +11,11 @@ if TYPE_CHECKING:
 FAILED_TASKS_MESSAGE = (
     "fix the failed tasks and set their state to pending before running"
 )
+
+
+def quote(text: str) -> str:
+    """Wrap text in double quotes, escaping what needs it, for names in error messages."""
+    return json.dumps(text, ensure_ascii=False)
 
 
 class AlrError(Exception):
@@ -52,5 +58,5 @@ class RunError(AlrError):
     """A task failed, or its state could not be saved."""
 
 
-class RunCancelled(RunError):
+class RunCancelledError(RunError):
     """The run was stopped before a task finished."""

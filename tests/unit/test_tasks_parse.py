@@ -741,9 +741,51 @@ def test_parse_timeout_errors(text: str, want: str) -> None:
     assert str(exc.value) == want
 
 
+@pytest.mark.parametrize("value", ["yes", "no", "on", "off", "12:30", "1_000"])
+def test_parse_tasks_rejects_unquoted_yaml_11_scalars_as_names(value: str) -> None:
+    # PyYAML's standard rules read these as booleans or numbers, so they must be quoted.
+    text = f"tasks:\n  - id: 1\n    name: {value}\n    prompt: do it\n"
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert str(exc.value) == "tasks[0] (id 1): name: must be a string"
+
+
+@pytest.mark.parametrize("value", ["yes", "no", "on", "off", "12:30", "1_000"])
+def test_parse_tasks_reads_quoted_yaml_11_scalars_as_names(value: str) -> None:
+    text = f'tasks:\n  - id: 1\n    name: "{value}"\n    prompt: do it\n'
+    assert tasks.parse_tasks(text).tasks[0].name == value
+
+
+def test_parse_tasks_rejects_merge_keys() -> None:
+    # A merge key would otherwise be dropped without a word, losing what it merged in.
+    text = "tasks:\n  - &base {id: 1, name: a, prompt: p}\n  - {<<: *base, id: 2, name: b}\n"
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert "tag !!merge is not allowed" in str(exc.value)
+
+
 @pytest.mark.parametrize(
-    "name", ["yes", "no", "on", "off", "12:30", "y", "~x", "1_000 widgets"]
+    ("text", "want"),
+    [
+        pytest.param("0x1F", 31, id="hex"),
+        pytest.param("0b11", 3, id="binary"),
+        pytest.param("0_7", 7, id="octal with underscore"),
+        pytest.param("1_0", 10, id="underscore"),
+        pytest.param("+5", 5, id="plus sign"),
+        pytest.param("1:30", 90, id="base 60"),
+    ],
 )
-def test_parse_tasks_reads_yaml_11_scalars_as_strings(name: str) -> None:
-    text = f"tasks:\n  - id: 1\n    name: {name}\n    prompt: do it\n"
-    assert tasks.parse_tasks(text).tasks[0].name == name
+def test_parse_tasks_reads_ids_as_pyyaml_does(text: str, want: int) -> None:
+    got = tasks.parse_tasks("tasks:\n  - {id: " + text + ", name: a, prompt: p}\n")
+    assert got.tasks[0].id == want
+
+
+@pytest.mark.parametrize("text", ['!!int ""', "!!int abc"])
+def test_parse_tasks_rejects_ids_that_are_not_integers(text: str) -> None:
+    # An explicit int tag can sit on text that is not a number at all.
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks("tasks:\n  - {id: " + text + ", name: a, prompt: p}\n")
+
+    assert ID_RANGE_ERROR in str(exc.value)

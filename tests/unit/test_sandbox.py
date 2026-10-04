@@ -1,4 +1,6 @@
+import errno
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -108,8 +110,8 @@ def test_sandbox_args_rejects_bad_files(
 def test_sandbox_args_unreadable_path(tmp_path: Path) -> None:
     missing = tmp_path / "missing.json"
     reasons = {
-        str(missing): f"open {missing}: no such file or directory",
-        str(tmp_path): f"read {tmp_path}: is a directory",
+        str(missing): os.strerror(errno.ENOENT),
+        str(tmp_path): os.strerror(errno.EISDIR),
     }
 
     for path, reason in reasons.items():

@@ -1,11 +1,12 @@
+import errno
 import os
+import random
 from pathlib import Path
 
 import pytest
 
 from alr import tasks
-from alr.errors import TaskFileError
-from alr.gocompat import goquote
+from alr.errors import TaskFileError, quote
 from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
 
 PROMPT = 'Line one: with "quotes" and a colon\n\n  indented line\nhéllo — done\n'
@@ -83,10 +84,12 @@ def test_save_tasks_path_is_directory(tmp_path: Path) -> None:
             str(target), TaskList(tasks=[Task(id=1, name="a", prompt="p")])
         )
 
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, OSError)
     assert str(excinfo.value) == (
-        f"failed to save tasks to {goquote(str(target))}: "
-        f"rename {target}.tmp {target}: file exists"
+        f"failed to save tasks to {quote(str(target))}: {cause.strerror}"
     )
+    assert target.is_dir()
     assert not Path(f"{target}.tmp").exists()
 
 
@@ -107,8 +110,7 @@ def test_save_tasks_target_dir_not_writable(tmp_path: Path) -> None:
         ro_dir.chmod(0o700)
 
     assert str(excinfo.value) == (
-        f"failed to save tasks to {goquote(str(path))}: "
-        f"open {path}.tmp: permission denied"
+        f"failed to save tasks to {quote(str(path))}: {os.strerror(errno.EACCES)}"
     )
     assert not Path(f"{path}.tmp").exists()
 
@@ -132,7 +134,7 @@ def test_save_tasks_failed_save_leaves_existing_file_untouched(tmp_path: Path) -
         tasks.save_tasks(str(path), changed)
 
     assert str(excinfo.value) == (
-        f"failed to save tasks to {goquote(str(path))}: open {path}.tmp: is a directory"
+        f"failed to save tasks to {quote(str(path))}: {os.strerror(errno.EISDIR)}"
     )
     assert path.read_bytes() == before
 
@@ -241,16 +243,26 @@ def test_save_tasks_gate_timeout_kept_as_written_and_omitted_when_absent(
     assert tasks.parse_tasks(saved) == want
 
 
-def test_save_tasks_writes_multi_line_prompt_as_block(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        pytest.param(PROMPT, id="plain"),
+        pytest.param("a\tb\nc\n", id="tab"),
+        pytest.param("\tleading tab\nsecond line\n", id="leading tab"),
+    ],
+)
+def test_save_tasks_writes_multi_line_prompt_as_block(
+    tmp_path: Path, prompt: str
+) -> None:
     path = tmp_path / "tasks.yaml"
     tasks.save_tasks(
-        str(path), tasks.TaskList(tasks=[tasks.Task(id=1, name="a", prompt=PROMPT)])
+        str(path), tasks.TaskList(tasks=[tasks.Task(id=1, name="a", prompt=prompt)])
     )
 
     saved = path.read_text(encoding="utf-8")
     assert "prompt: |" in saved
     assert "\\n" not in saved
-    assert tasks.parse_tasks(saved).tasks[0].prompt == PROMPT
+    assert tasks.parse_tasks(saved).tasks[0].prompt == prompt
 
 
 @pytest.mark.parametrize(
@@ -264,3 +276,32 @@ def test_save_tasks_keeps_awkward_names_as_strings(tmp_path: Path, name: str) ->
     )
 
     assert tasks.parse_tasks(path.read_text(encoding="utf-8")).tasks[0].name == name
+
+
+def _round_trips(tmp_path: Path, name: str, prompt: str) -> tuple[str, str]:
+    path = tmp_path / "tasks.yaml"
+    tasks.save_tasks(str(path), TaskList(tasks=[Task(id=1, name=name, prompt=prompt)]))
+    got = tasks.parse_tasks(_saved(path)).tasks[0]
+    return got.name, got.prompt
+
+
+@pytest.mark.parametrize("char", ["\x85", "\u2028", "\u2029"])
+@pytest.mark.parametrize("template", ["a{}b", "x{}", "line one\n{}line two\n"])
+def test_save_tasks_round_trips_unicode_line_breaks(
+    tmp_path: Path, char: str, template: str
+) -> None:
+    # YAML reads these as line breaks and folds them, so they must be escaped.
+    text = template.format(char)
+
+    assert _round_trips(tmp_path, text, text) == (text, text)
+
+
+def test_save_tasks_round_trips_random_strings(tmp_path: Path) -> None:
+    alphabet = list("abcXYZ019  \t\n\n\r:#-'\"\x85é")
+    rng = random.Random(0)
+    for _ in range(3000):
+        text = "".join(rng.choices(alphabet, k=rng.randint(1, 12)))
+        if not text.strip():
+            continue
+
+        assert _round_trips(tmp_path, text, text) == (text, text), repr(text)

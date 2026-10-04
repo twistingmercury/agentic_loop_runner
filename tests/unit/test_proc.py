@@ -4,6 +4,7 @@ import asyncio
 import os
 import signal
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import pytest
 
 from alr.engine import proc
 
-# Stands in for Go's TestProcessTreeHelper: the parent starts a descendant,
+# The parent starts a descendant,
 # writes its PID to the ready file named in argv, and blocks.
 _DESCENDANT = "import time\nwhile True:\n    time.sleep(3600)\n"
 _PARENT = f"""
@@ -123,7 +124,7 @@ async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> No
     assert process.returncode == 7
 
 
-async def test_finish_returns_go_style_exit_text() -> None:
+async def test_finish_returns_exit_text() -> None:
     process = await proc.start(["sh", "-c", "exit 3"])
     assert await proc.finish(process) == "exit status 3"
 
@@ -185,3 +186,126 @@ async def test_capture_returns_output_and_code() -> None:
         "out\n",
         "err\n",
     )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "text"),
+    [
+        (0, None),
+        (1, "exit status 1"),
+        (127, "exit status 127"),
+        (-signal.SIGKILL, "signal: SIGKILL"),
+        (-signal.SIGTERM, "signal: SIGTERM"),
+        (-signal.SIGINT, "signal: SIGINT"),
+        (-250, "signal: 250"),
+    ],
+)
+def test_exit_text(returncode: int, text: str | None) -> None:
+    assert proc.exit_text(returncode) == text
+
+
+def test_not_found_text() -> None:
+    assert proc.not_found_text("claude") == "claude: not found on PATH"
+
+
+async def test_finish_stops_the_group_when_the_drain_fails(tmp_path: Path) -> None:
+    pid_file = tmp_path / "child.pid"
+    process = await proc.start(
+        ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; while :; do echo line; done"],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+
+    def fail(line: bytes) -> None:
+        raise RuntimeError("callback failed")
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        await asyncio.wait_for(
+            proc.finish(process, proc.read_lines(process.stdout, fail)), 5
+        )
+
+    assert process.returncode == -signal.SIGKILL
+    await wait_until_gone(int(pid_file.read_text()))
+
+
+async def wait_until_gone(pid: int) -> None:
+    deadline = asyncio.get_running_loop().time() + 2
+    while unix_process_is_running(pid):
+        if asyncio.get_running_loop().time() > deadline:
+            pytest.fail(f"process {pid} remained running")
+
+        await asyncio.sleep(0.01)
+
+
+async def test_gentle_capture_does_not_wait_for_pipe_holders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "holder.pid"
+    started = time.monotonic()
+
+    try:
+        result = await proc.capture(
+            ["sh", "-c", f"sleep 4 & echo $! > {pid_file}; echo done"], gentle=True
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+    assert result == (0, "done\n", "")
+    assert elapsed < 2
+
+
+async def test_gentle_cancel_kills_a_child_that_ignores_sigterm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.3)
+    ready = tmp_path / "ready"
+    process = await proc.start(
+        ["sh", "-c", f"trap '' TERM; echo ready > {ready}; while :; do sleep 0.1; done"]
+    )
+    waiter = asyncio.ensure_future(proc.finish(process, gentle=True))
+    while not ready.exists():
+        await asyncio.sleep(0.01)
+
+    started = time.monotonic()
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    assert process.returncode == -signal.SIGKILL
+    assert time.monotonic() - started >= 0.3
+
+
+async def test_gentle_cancel_kills_a_grandchild_that_ignores_sigterm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.3)
+    pid_file = tmp_path / "grandchild.pid"
+    grandchild = f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.1; done"
+    process = await proc.start(
+        ["sh", "-c", f"trap 'exit 0' TERM; sh -c \"{grandchild}\" & wait"]
+    )
+    waiter = asyncio.ensure_future(proc.finish(process, gentle=True))
+    while not pid_file.exists() or not pid_file.read_text().strip():
+        await asyncio.sleep(0.01)
+
+    started = time.monotonic()
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    assert process.returncode == 0
+    assert time.monotonic() - started >= 0.3
+    await wait_until_gone(int(pid_file.read_text()))
+
+
+def test_a_group_that_refuses_the_signal_counts_as_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(pgid: int, sig: int) -> None:
+        raise PermissionError
+
+    monkeypatch.setattr(os, "killpg", refuse)
+
+    assert proc._signal_group(1, 0) is False

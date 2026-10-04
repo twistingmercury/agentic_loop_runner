@@ -1,11 +1,13 @@
 """The result line a session ends with, and the rule that turns it into a task outcome."""
 
 import json
+import re
 
 from alr.tasks import COMPLETED, FAILED
 
 _NO_RESULT = "no valid result line in session output"
 _FAILED_WITHOUT_ERROR = "session reported failed with no error"
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 def parse_result(line: str) -> tuple[str, str] | None:
@@ -30,12 +32,21 @@ def parse_result(line: str) -> tuple[str, str] | None:
     if state not in (COMPLETED, FAILED):
         return None
 
-    return state, error.strip()
+    return state, _replace_lone_surrogates(error.strip())
 
 
 def _reject_constant(name: str) -> None:
     """Refuse NaN and Infinity, which Python's json accepts and Go's does not."""
     raise ValueError(f"invalid JSON constant {name}")
+
+
+def _replace_lone_surrogates(text: str) -> str:
+    """A `\\ud800` escape decodes to a character that cannot be written as UTF-8.
+
+    The json module joins a valid pair into one character, so any surrogate
+    left over is a lone one.
+    """
+    return _LONE_SURROGATE.sub("\ufffd", text)
 
 
 def _field(data: dict[str, object], name: str) -> str | None:

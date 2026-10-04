@@ -184,3 +184,16 @@ def test_outcome(
     run_error: str | None, last_line: str, want_state: str, want_error: str
 ) -> None:
     assert outcome(run_error, last_line) == (want_state, want_error)
+
+
+def test_parse_result_replaces_a_lone_surrogate_escape() -> None:
+    # A lone surrogate cannot be written as UTF-8, so it must not reach the saved error.
+    line = '{"state":"failed","error":"bad \\ud800 text"}'
+
+    assert parse_result(line) == (FAILED, "bad \ufffd text")
+
+
+def test_parse_result_keeps_a_surrogate_pair_escape() -> None:
+    line = '{"state":"failed","error":"ok \\ud83d\\ude00"}'
+
+    assert parse_result(line) == (FAILED, "ok \U0001f600")

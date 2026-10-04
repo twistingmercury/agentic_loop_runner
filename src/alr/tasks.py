@@ -1,15 +1,13 @@
 """The task file: parse, validate, save."""
 
-import errno
 import os
-import re
-import stat
 from dataclasses import dataclass
+from pathlib import Path
 
 import yaml
 
-from alr import gocompat
-from alr.errors import TaskFileError
+from alr.durations import parse_duration
+from alr.errors import TaskFileError, quote
 
 PENDING = "pending"
 FAILED = "failed"
@@ -23,63 +21,42 @@ _MAX_ID = 32767
 _TAG = "tag:yaml.org,2002:"
 _STR = _TAG + "str"
 _INT = _TAG + "int"
-_INT_PATTERN = r"^[-+]?(?:0|[1-9][0-9_]*|0[0-7_]+|0o[0-7_]+|0x[0-9a-fA-F_]+|0b[01_]+)$"
-_FLOAT_PATTERN = (
-    r"^(?:[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?"
-    r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"
-)
-_PREFIX_BASES = {"0o": 8, "0x": 16, "0b": 2}
 
-# The tags gralph's YAML library resolves on its own; any other tag, explicit
-# or custom, is rejected before anything is read.
+# Any other tag, explicit or custom, is rejected before anything is read. The
+# merge tag is left out on purpose: a `<<` key would otherwise be dropped
+# without a word, along with what it merges in.
 _ALLOWED_TAGS = frozenset(
     _TAG + name
-    for name in (
-        "str",
-        "int",
-        "float",
-        "bool",
-        "null",
-        "map",
-        "seq",
-        "timestamp",
-        "merge",
-    )
+    for name in ("str", "int", "float", "bool", "null", "map", "seq", "timestamp")
 )
 
-
-class _GoLoader(yaml.SafeLoader):
-    """Resolves plain scalars as gopkg.in/yaml.v3 does: `yes` and `12:30` are strings."""
-
-
-_GoLoader.yaml_implicit_resolvers = {}
-_GoLoader.add_implicit_resolver(
-    _TAG + "bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
-)
-_GoLoader.add_implicit_resolver(
-    _TAG + "null", re.compile(r"^(?:~|null|Null|NULL|)$"), ["~", "n", "N", ""]
-)
-_GoLoader.add_implicit_resolver(_INT, re.compile(_INT_PATTERN), list("-+0123456789"))
-_GoLoader.add_implicit_resolver(
-    _TAG + "float", re.compile(_FLOAT_PATTERN), list("-+0123456789.")
-)
-
-# Timestamps and merge keys resolve the same in both libraries; reuse PyYAML's patterns.
-_SHARED_TAGS = {_TAG + "timestamp", _TAG + "merge"}
-for _first, _resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items():
-    for _tag, _pattern in _resolvers:
-        if _tag in _SHARED_TAGS:
-            _GoLoader.yaml_implicit_resolvers.setdefault(_first, []).append(
-                (_tag, _pattern)
-            )
+# YAML reads these as line breaks and folds them in every style but a
+# double-quoted one, which escapes them.
+_UNICODE_BREAKS = frozenset("\x85\u2028\u2029")
 
 
-class _GoDumper(yaml.SafeDumper):
-    """Writes the task file the way gralph does: nested lists indented, long text as blocks."""
+class _TaskDumper(yaml.SafeDumper):
+    """Writes the task file with lists indented under their key and multi-line text as blocks."""
 
     def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
-        # PyYAML leaves a list under a key unindented; gralph's files indent it.
+        # PyYAML leaves a list under a key unindented; the task file indents it.
         super().increase_indent(flow, False)
+
+    def analyze_scalar(self, scalar: str) -> yaml.emitter.ScalarAnalysis:
+        analysis = super().analyze_scalar(scalar)
+        if _UNICODE_BREAKS.intersection(scalar):
+            analysis.allow_flow_plain = analysis.allow_block_plain = False
+            analysis.allow_single_quoted = analysis.allow_block = False
+            return analysis
+
+        # PyYAML counts a tab as a special character that only a double-quoted
+        # string may hold, but a block scalar keeps it as it is.
+        if "\t" in scalar and not analysis.allow_block:
+            analysis.allow_block = (
+                super().analyze_scalar(scalar.replace("\t", "x")).allow_block
+            )
+
+        return analysis
 
 
 def _represent_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
@@ -87,12 +64,7 @@ def _represent_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
     return dumper.represent_scalar(_STR, value, style=style)
 
 
-_GoDumper.add_representer(str, _represent_str)
-# Quote any string gralph's library would read back as a number, on top of PyYAML's own rules.
-_GoDumper.add_implicit_resolver(_INT, re.compile(_INT_PATTERN), list("-+0123456789"))
-_GoDumper.add_implicit_resolver(
-    _TAG + "float", re.compile(_FLOAT_PATTERN), list("-+0123456789.")
-)
+_TaskDumper.add_representer(str, _represent_str)
 
 
 @dataclass
@@ -146,7 +118,7 @@ def parse_tasks(text: str) -> TaskList:
     tasks[<index>] (id <id>) and the field.
     """
     try:
-        doc = yaml.compose(text, Loader=_GoLoader)
+        doc = yaml.compose(text, Loader=yaml.SafeLoader)
     except yaml.YAMLError as exc:
         raise TaskFileError(f"failed to parse yaml tasks: {exc}") from exc
 
@@ -287,28 +259,19 @@ def _task_id(where: str, fields: dict[str, yaml.Node]) -> int:
     if not isinstance(node, yaml.ScalarNode) or node.tag != _INT:
         raise TaskFileError(f"{where}: {_ID_ERROR}")
 
-    task_id = _int_value(node.value)
+    task_id = _int_value(node)
     if task_id is None or not 0 < task_id <= _MAX_ID:
         raise TaskFileError(f"{where}: {_ID_ERROR}")
 
     return task_id
 
 
-def _int_value(text: str) -> int | None:
-    """Convert a YAML integer's text as gralph's YAML library does; None if it cannot."""
-    # An explicit !!int tag can sit on any text, so the shape is checked here too.
-    if re.match(_INT_PATTERN, text) is None:
-        return None
-
-    sign = -1 if text.startswith("-") else 1
-    digits = text.lstrip("+-").replace("_", "")
-    base = _PREFIX_BASES.get(digits[:2])
-    if base is None:
-        base = 8 if len(digits) > 1 and digits.startswith("0") else 10
-
+def _int_value(node: yaml.ScalarNode) -> int | None:
+    """Convert an int-tagged node as PyYAML's safe constructor does; None if it cannot."""
+    # An explicit !!int tag can sit on any text, so the conversion can fail.
     try:
-        return sign * int(digits, base)
-    except ValueError:
+        return yaml.SafeLoader("").construct_yaml_int(node)
+    except (ValueError, IndexError):
         return None
 
 
@@ -338,7 +301,7 @@ def _check_string_field(where: str, field: str, node: yaml.Node | None) -> None:
     if field == "state" and node.value != "" and node.value not in _STATES:
         raise TaskFileError(
             f"{where}: state: must be pending, completed, or failed, "
-            f"got {gocompat.goquote(node.value)}"
+            f"got {quote(node.value)}"
         )
 
 
@@ -418,7 +381,7 @@ def parse_timeout(text: str) -> float:
     the value came from.
     """
     try:
-        seconds = gocompat.parse_duration(text)
+        seconds = parse_duration(text)
     except ValueError as exc:
         raise ValueError(_DURATION_HINT) from exc
 
@@ -436,25 +399,23 @@ def save_tasks(path: str, task_list: TaskList) -> None:
     """
     text = yaml.dump(
         _document(task_list),
-        Dumper=_GoDumper,
+        Dumper=_TaskDumper,
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
         indent=2,
         width=2**31 - 1,
     )
-    path = os.path.normpath(path)
-    tmp = path + ".tmp"
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
     try:
         _write_file(tmp, text)
+        tmp.replace(target)
     except OSError as exc:
-        raise _save_error(path, tmp, gocompat.os_error_text("open", tmp, exc)) from exc
-
-    try:
-        _rename(tmp, path)
-    except OSError as exc:
-        reason = gocompat.os_error_text("rename", f"{tmp} {path}", exc)
-        raise _save_error(path, tmp, reason) from exc
+        _remove(tmp)
+        raise TaskFileError(
+            f"failed to save tasks to {quote(str(target))}: {exc.strerror}"
+        ) from exc
 
 
 def _document(task_list: TaskList) -> dict[str, object]:
@@ -488,41 +449,18 @@ def _task_entry(task: Task) -> dict[str, int | str]:
     return entry
 
 
-def _write_file(path: str, text: str) -> None:
+def _write_file(path: Path, text: str) -> None:
     # The task file can hold prompts and commands, so only its owner may read it.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as file:
         file.write(text)
 
 
-def _rename(tmp: str, path: str) -> None:
-    """Rename tmp over path, refusing a directory as Go's os.Rename does.
-
-    Go reports `file exists` there; the system call alone words it differently
-    on Linux and macOS.
-    """
-    try:
-        is_dir = stat.S_ISDIR(os.lstat(path).st_mode)
-    except OSError:
-        is_dir = False
-
-    if is_dir:
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST))
-
-    os.replace(tmp, path)
-
-
-def _save_error(path: str, tmp: str, reason: str) -> TaskFileError:
-    """Clear away the temporary file and build the error for a failed save."""
-    _remove(tmp)
-    return TaskFileError(f"failed to save tasks to {gocompat.goquote(path)}: {reason}")
-
-
-def _remove(path: str) -> None:
-    """Remove a file or an empty directory, as Go's os.Remove does; failure is ignored."""
-    for remove in (os.unlink, os.rmdir):
+def _remove(path: Path) -> None:
+    """Remove a leftover temporary file or empty directory; failure is ignored."""
+    for remove in (path.unlink, path.rmdir):
         try:
-            remove(path)
+            remove()
         except OSError:
             continue
 

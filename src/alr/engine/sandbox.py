@@ -1,10 +1,9 @@
 """The Claude flags that set what a session may do."""
 
 import json
-import os
+from pathlib import Path
 
-from alr.errors import SandboxError
-from alr.gocompat import goquote, os_error_text
+from alr.errors import SandboxError, quote
 
 _FLAG = "--sandbox-settings"
 
@@ -25,20 +24,14 @@ def sandbox_args(path: str) -> list[str]:
 
 
 def _read_settings(path: str) -> str:
-    # gralph opens the cleaned path, and that is the path its error names.
-    clean_path = os.path.normpath(path)
     try:
-        with open(clean_path, "rb") as file:
-            data = file.read()
+        data = Path(path).read_bytes()
     except OSError as exc:
-        # Go opens a directory without complaint and fails on the read.
-        op = "read" if isinstance(exc, IsADirectoryError) else "open"
-        reason = os_error_text(op, clean_path, exc)
         raise SandboxError(
-            f"{_FLAG}: file {goquote(path)} is not accessible: {reason}"
+            f"{_FLAG}: file {quote(path)} is not accessible: {exc.strerror}"
         ) from exc
 
-    # Go's decoder replaces bytes that are not UTF-8 instead of failing.
+    # Bytes that are not UTF-8 become U+FFFD instead of failing the read.
     return data.decode("utf-8", errors="replace")
 
 

@@ -43,7 +43,7 @@ class FrontEnd(Protocol):
         ...
 
     async def run_gate(self, task: Task, gate: Gate) -> str | None:
-        """Run this gate command under this limit; return the exit."""
+        """Run this gate command; return the exit. The engine applies the time limit around the call."""
         ...
 
     def gate_finished(

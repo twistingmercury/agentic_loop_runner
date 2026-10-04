@@ -1,15 +1,17 @@
 """Child processes: each in its own process group, stopped as a group when the run is cancelled."""
 
 import asyncio
+import contextlib
 import os
 import signal
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from subprocess import DEVNULL
 
-from alr.gocompat import exit_error
-
-_GIT_STOP_GRACE = 2.0
-_GIT_STOP_POLL = 0.01
+# How long a gentle stop waits for the group to exit on SIGTERM before SIGKILL,
+# and how long a gentle capture keeps reading after its process has exited.
+# Tests patch it to stay fast.
+_GENTLE_GRACE = 2.0
+_GENTLE_POLL = 0.01
 _READ_SIZE = 64 * 1024
 
 
@@ -45,9 +47,10 @@ async def finish(
     *,
     gentle: bool = False,
 ) -> str | None:
-    """Wait for process after drain is done and return its Go-style exit text.
+    """Wait for process after drain is done and return its exit text.
 
-    On cancellation the whole group is stopped before the cancellation carries on.
+    If the drain or the wait raises anything, cancellation included, the whole
+    group is stopped before the error carries on.
     gentle is for git, which cleans up its index lock on SIGTERM but not on SIGKILL.
     """
     try:
@@ -55,11 +58,32 @@ async def finish(
             await drain
 
         returncode = await process.wait()
-    except asyncio.CancelledError:
+    except BaseException:
         await asyncio.shield(_stop_group(process, gentle))
         raise
 
-    return exit_error(returncode)
+    return exit_text(returncode)
+
+
+def exit_text(returncode: int) -> str | None:
+    """Say how a process ended: None for a zero exit, else `exit status 3` or `signal: SIGKILL`."""
+    if returncode == 0:
+        return None
+
+    if returncode > 0:
+        return f"exit status {returncode}"
+
+    try:
+        name = signal.Signals(-returncode).name
+    except ValueError:
+        name = str(-returncode)
+
+    return f"signal: {name}"
+
+
+def not_found_text(name: str) -> str:
+    """Say that an executable is not on PATH."""
+    return f"{name}: not found on PATH"
 
 
 async def capture(
@@ -69,7 +93,12 @@ async def capture(
     env: Mapping[str, str] | None = None,
     gentle: bool = False,
 ) -> tuple[int, str, str]:
-    """Run argv to the end and return its exit code, stdout, and stderr."""
+    """Run argv to the end and return its exit code, stdout, and stderr.
+
+    With gentle, a daemon that still holds the pipes after the command has
+    exited does not hang the call: reading stops after the grace period and
+    returns what was read.
+    """
     process = await start(
         argv,
         stdout=asyncio.subprocess.PIPE,
@@ -77,11 +106,16 @@ async def capture(
         cwd=cwd,
         env=env,
     )
-    output: list[bytes] = []
-    await finish(process, _read_pipes(process, output), gentle=gentle)
-    assert process.returncode is not None
-    stdout, stderr = (data.decode("utf-8", errors="replace") for data in output)
-    return process.returncode, stdout, stderr
+    stdout, stderr = bytearray(), bytearray()
+    await finish(process, _read_pipes(process, stdout, stderr, gentle), gentle=gentle)
+    if process.returncode is None:
+        raise RuntimeError(f"{argv[0]} finished without an exit code")
+
+    return (
+        process.returncode,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
 
 
 async def read_lines(
@@ -108,11 +142,37 @@ async def read_lines(
         on_line(b"".join(pieces))
 
 
-async def _read_pipes(process: asyncio.subprocess.Process, output: list[bytes]) -> None:
+async def _read_pipes(
+    process: asyncio.subprocess.Process,
+    stdout: bytearray,
+    stderr: bytearray,
+    gentle: bool,
+) -> None:
     """Read both pipes at the same time, so a full one never blocks the child."""
-    assert process.stdout is not None
-    assert process.stderr is not None
-    output.extend(await asyncio.gather(process.stdout.read(), process.stderr.read()))
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("the process was started without output pipes")
+
+    reads = asyncio.gather(
+        _read_all(process.stdout, stdout), _read_all(process.stderr, stderr)
+    )
+    try:
+        if not gentle:
+            await reads
+            return
+
+        await process.wait()
+        # wait_for cancels the reads at the deadline; what they read is kept.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(reads, _GENTLE_GRACE)
+    finally:
+        reads.cancel()
+        await asyncio.gather(reads, return_exceptions=True)
+
+
+async def _read_all(stream: asyncio.StreamReader, buffer: bytearray) -> None:
+    """Read stream to its end into buffer, so a cut-off read still leaves the data so far."""
+    while chunk := await stream.read(_READ_SIZE):
+        buffer.extend(chunk)
 
 
 async def _stop_group(process: asyncio.subprocess.Process, gentle: bool) -> None:
@@ -124,9 +184,9 @@ async def _stop_group(process: asyncio.subprocess.Process, gentle: bool) -> None
 
 
 async def _wait_for_group_exit(pgid: int) -> None:
-    deadline = asyncio.get_running_loop().time() + _GIT_STOP_GRACE
+    deadline = asyncio.get_running_loop().time() + _GENTLE_GRACE
     while asyncio.get_running_loop().time() < deadline:
-        await asyncio.sleep(_GIT_STOP_POLL)
+        await asyncio.sleep(_GENTLE_POLL)
         if not _signal_group(pgid, 0):
             return
 
@@ -136,6 +196,9 @@ def _signal_group(pgid: int, sig: int) -> bool:
     try:
         os.killpg(pgid, sig)
     except ProcessLookupError:
+        return False
+    except PermissionError:
+        # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
         return False
 
     return True
