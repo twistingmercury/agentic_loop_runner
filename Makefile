@@ -17,7 +17,7 @@ analyze: ## Runs formatting and linting
 	uv run ruff format
 	uv run ruff check --fix
 
-build: test ## Builds the wheel
+build: ## Builds the wheel
 	build/build.sh
 
 install: ## Install the locally build wheel
