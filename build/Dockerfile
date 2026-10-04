@@ -15,7 +15,7 @@ COPY . .
 
 RUN uv run ruff format --check
 RUN uv run ruff check
-RUN uv run pytest
+RUN uv run pytest tests/unit
 RUN uv version ${BUILD_VER}
 RUN uv build
 

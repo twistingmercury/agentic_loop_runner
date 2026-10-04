@@ -1,4 +1,4 @@
-.PHONY: help test analyze build install
+.PHONY: help test unit e2e analyze build install uninstall
 
 .DEFAULT_GOAL := help
 
@@ -7,10 +7,13 @@ help: ## Show this help
 	@echo ""
 
 
-test: analyze ## Run pytest
-	uv sync
-	uv run ruff check
-	uv run pytest
+test: analyze unit e2e ## Run analyze, then the unit tests, then the e2e tests
+
+unit: ## Run the unit tests only
+	uv run pytest tests/unit
+
+e2e: ## Run the end-to-end tests only
+	uv run pytest tests/e2e
 
 
 analyze: ## Runs formatting and linting
