@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from alr.engine.commit import Repo, commit
 from alr.engine.frontend import FrontEnd
 from alr.engine.gates import run_gates
 from alr.engine.result import last_result_line, outcome
@@ -35,8 +36,7 @@ class RunOptions:
     session_args: Sequence[str]
     """The Claude flags that set what a session may do."""
 
-    # alr.engine.commit does not exist yet; this becomes its Repo.
-    repo: object | None = None
+    repo: Repo | None = None
     """Where each completed task is committed; None for a run without --commit."""
 
 
@@ -135,7 +135,7 @@ async def _run_task(
     options: RunOptions,
     front_end: FrontEnd,
 ) -> tuple[str, str]:
-    """Run the task's session, then the gates, and return the state and error to save."""
+    """Run the task's session, the gates, and the commit; return the state and error to save."""
     stdin_text = f"{prompt}\n\n{task.text()}\n"
     argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
     started = time.monotonic()
@@ -152,7 +152,19 @@ async def _run_task(
     if state != COMPLETED:
         return state, error
 
-    return await run_gates(replace(task), gates, options.gate_timeout, front_end)
+    state, error = await run_gates(
+        replace(task), gates, options.gate_timeout, front_end
+    )
+    if state != COMPLETED or options.repo is None:
+        return state, error
+
+    try:
+        return await commit(options.repo, replace(task), front_end)
+    except asyncio.CancelledError:
+        # Nothing is saved, so the next run picks the task up again.
+        raise RunCancelledError(
+            f"task {task.id}: {task.name}: stopped during commit"
+        ) from None
 
 
 def _save(

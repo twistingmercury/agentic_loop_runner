@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from alr.engine import proc
 from alr.engine.frontend import SessionResult
+from alr.engine.gates import first_line
 from alr.tasks import Gate, Task
 
 _READ_SIZE = 64 * 1024
@@ -62,13 +63,17 @@ class PlainFrontEnd:
         return
 
     def commit_started(self, task: Task) -> None:
-        raise NotImplementedError
+        # Only the first line, so a multi-line name stays one line. Flushed,
+        # so the line stays ahead of git's own output.
+        print(f"commit: {first_line(task.name)}", flush=True)
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        raise NotImplementedError
+        # stdout and stderr inherited, so git's output passes straight through.
+        process = await proc.start(argv, cwd=cwd)
+        return await proc.finish(process, gentle=True)
 
     def committed(self, task: Task, commit_hash: str) -> None:
-        raise NotImplementedError
+        return
 
     def task_finished(self, task: Task, error: str | None, seconds: float) -> None:
         return
