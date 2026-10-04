@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from alr.engine.frontend import FrontEnd
+from alr.engine.gates import run_gates
 from alr.engine.result import last_result_line, outcome
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
@@ -17,7 +18,7 @@ from alr.errors import (
     TaskFileError,
     quote,
 )
-from alr.tasks import COMPLETED, FAILED, Task, TaskList, parse_tasks, save_tasks
+from alr.tasks import COMPLETED, FAILED, Gate, Task, TaskList, parse_tasks, save_tasks
 
 __all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_prompt", "load_tasks", "run"]
 
@@ -114,7 +115,9 @@ async def _run_and_save(
     # The front end gets copies, so nothing it keeps changes under it.
     front_end.task_started(replace(task))
     started = time.monotonic()
-    state, error = await _run_task(prompt, task, options, front_end)
+    state, error = await _run_task(
+        prompt, task, task_list.gate_list(), options, front_end
+    )
     task.state, task.error = state, error
     failure = (
         None if state == COMPLETED else f"task {task.id}: {task.name} failed: {error}"
@@ -126,9 +129,13 @@ async def _run_and_save(
 
 
 async def _run_task(
-    prompt: str, task: Task, options: RunOptions, front_end: FrontEnd
+    prompt: str,
+    task: Task,
+    gates: Sequence[Gate],
+    options: RunOptions,
+    front_end: FrontEnd,
 ) -> tuple[str, str]:
-    """Run the task's session and return the state and error to save."""
+    """Run the task's session, then the gates, and return the state and error to save."""
     stdin_text = f"{prompt}\n\n{task.text()}\n"
     argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
     started = time.monotonic()
@@ -142,7 +149,10 @@ async def _run_task(
     front_end.session_finished(
         replace(task, state=state, error=error), time.monotonic() - started
     )
-    return state, error
+    if state != COMPLETED:
+        return state, error
+
+    return await run_gates(replace(task), gates, options.gate_timeout, front_end)
 
 
 def _save(

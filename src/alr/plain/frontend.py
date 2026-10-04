@@ -44,7 +44,11 @@ class PlainFrontEnd:
         return
 
     async def run_gate(self, task: Task, gate: Gate) -> str | None:
-        raise NotImplementedError
+        # Flushed, so the line stays ahead of the gate's own output.
+        print(f"gate: {gate.cmd}", flush=True)
+        # No stdin, and stdout and stderr inherited, so the output passes straight through.
+        process = await proc.start(["sh", "-c", gate.cmd])
+        return await proc.finish(process)
 
     def gate_finished(
         self,
@@ -55,7 +59,7 @@ class PlainFrontEnd:
         timed_out: bool,
         seconds: float,
     ) -> None:
-        raise NotImplementedError
+        return
 
     def commit_started(self, task: Task) -> None:
         raise NotImplementedError
