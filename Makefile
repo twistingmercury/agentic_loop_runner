@@ -7,20 +7,20 @@ help: ## Show this help
 	@echo ""
 
 
-test: analyze unit e2e ## Run analyze, then the unit tests, then the e2e tests
+test: analyze unit ## Run analyze, then the unit tests (e2e runs in a container: make e2e)
 
 unit: ## Run the unit tests only
 	uv run pytest tests/unit
 
-e2e: ## Run the end-to-end tests only
-	uv run pytest tests/e2e
+e2e: ## Run the e2e tests in a container against the wheel in dist/ (run make build first)
+	build/build.sh e2e
 
 
 analyze: ## Runs formatting and linting
 	uv run ruff format
 	uv run ruff check --fix
 
-build: ## Builds the wheel
+build: ## Builds the wheel, then runs the e2e tests in a container
 	build/build.sh
 
 install: ## Install the locally build wheel

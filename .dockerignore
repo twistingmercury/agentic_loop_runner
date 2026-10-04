@@ -1,5 +1,6 @@
-# Keep the build context to what the image needs:
-# pyproject.toml, uv.lock, README.md, src/, tests/
+# Context for build/Dockerfile: pyproject.toml, uv.lock, README.md, src/, tests/.
+# tests/e2e/Dockerfile has its own tests/e2e/Dockerfile.dockerignore, which
+# lets dist/ in; dist/ stays out of this context.
 
 # VCS and editor/tooling
 .git

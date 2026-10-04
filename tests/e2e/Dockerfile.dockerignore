@@ -1,0 +1,8 @@
+# Context for tests/e2e/Dockerfile: only the suite and the built wheel.
+# BuildKit reads this file instead of the root .dockerignore for this Dockerfile.
+*
+!tests/e2e
+!dist/*.whl
+**/__pycache__
+**/*.pyc
+.pytest_cache

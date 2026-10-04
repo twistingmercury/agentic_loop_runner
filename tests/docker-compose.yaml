@@ -1,0 +1,11 @@
+name: alr-e2e
+
+services:
+  tests:
+    build:
+      context: ..
+      dockerfile: tests/e2e/Dockerfile
+      args:
+        # build/build.sh sets this to the wheel it is testing.
+        ALR_WHEEL: ${ALR_WHEEL:?run build/build.sh, which names the wheel}
+    container_name: alr-e2e-tests
