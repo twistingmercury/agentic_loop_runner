@@ -57,7 +57,7 @@ async def finish(
         if drain is not None:
             await drain
 
-        returncode = await process.wait()
+        returncode = await _wait_for_exit(process)
     except BaseException:
         await asyncio.shield(_stop_group(process, gentle))
         raise
@@ -160,13 +160,26 @@ async def _read_pipes(
             await reads
             return
 
-        await process.wait()
+        await _wait_for_exit(process)
         # wait_for cancels the reads at the deadline; what they read is kept.
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(reads, _GENTLE_GRACE)
     finally:
         reads.cancel()
         await asyncio.gather(reads, return_exceptions=True)
+
+
+async def _wait_for_exit(process: asyncio.subprocess.Process) -> int:
+    """Wait until the child itself has exited, whoever still holds its pipes.
+
+    On Python 3.12 `Process.wait()` also waits for the pipes to close, so a
+    descendant that keeps them open would block it; `returncode` is set the
+    moment the child exits, on every version.
+    """
+    while (returncode := process.returncode) is None:
+        await asyncio.sleep(_GENTLE_POLL)
+
+    return returncode
 
 
 async def _read_all(stream: asyncio.StreamReader, buffer: bytearray) -> None:

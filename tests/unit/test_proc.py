@@ -237,6 +237,13 @@ async def wait_until_gone(pid: int) -> None:
         await asyncio.sleep(0.01)
 
 
+async def _kill_holder_and_let_pipes_close(pid_file: Path) -> None:
+    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+    # Closing the pipes lets asyncio finish with the transport; one left open
+    # would only be cleaned up after the loop is gone, with a warning.
+    await asyncio.sleep(0.05)
+
+
 async def test_gentle_capture_does_not_wait_for_pipe_holders(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -250,10 +257,35 @@ async def test_gentle_capture_does_not_wait_for_pipe_holders(
         )
         elapsed = time.monotonic() - started
     finally:
-        os.kill(int(pid_file.read_text()), signal.SIGKILL)
+        await _kill_holder_and_let_pipes_close(pid_file)
 
     assert result == (0, "done\n", "")
     assert elapsed < 2
+
+
+async def test_finish_returns_when_a_descendant_holds_the_pipes(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "holder.pid"
+    process = await proc.start(
+        # The child outlives the drain, so finish is already waiting when it exits.
+        ["sh", "-c", f"sleep 4 & echo $! > {pid_file}; sleep 0.3"],
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def drain_nothing() -> None:
+        # Stands in for a drain that gave up on the held pipes.
+        await asyncio.sleep(0.05)
+
+    try:
+        result = await asyncio.wait_for(
+            proc.finish(process, drain_nothing(), gentle=True), 2
+        )
+    finally:
+        await _kill_holder_and_let_pipes_close(pid_file)
+
+    assert result is None
 
 
 async def test_gentle_cancel_kills_a_child_that_ignores_sigterm(
