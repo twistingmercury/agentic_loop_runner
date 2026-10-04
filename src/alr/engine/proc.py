@@ -234,7 +234,13 @@ async def _stop_group(process: asyncio.subprocess.Process, gentle: bool) -> None
         await _wait_for_group_exit(process.pid)
 
     _signal_group(process.pid, signal.SIGKILL)
-    await process.wait()
+    # Not process.wait(): on 3.12 it also waits for the pipes to close, and a
+    # descendant that left the group still holds them.
+    await _wait_for_exit(process, None)
+    # Whatever still holds a pipe left the group, so the pipes will not close
+    # by themselves. Closing our ends here keeps asyncio from doing it at
+    # garbage collection, after the loop is gone, and printing a traceback.
+    process._transport.close()
 
 
 async def _wait_for_group_exit(pgid: int) -> None:

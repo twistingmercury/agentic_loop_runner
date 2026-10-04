@@ -70,6 +70,50 @@ def test_loop_signal_kills_process_tree(
         wait_process_gone(descendant_pid, 10)
 
 
+def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
+    tmp_path: Path,
+) -> None:
+    prompt_path = write_prompt(tmp_path, "Body.\n")
+    tasks_path = write_tasks_yaml(tmp_path, TASKS_YAML)
+    ready_file = tmp_path / "ready"
+    session_pid_file = tmp_path / "session.pid"
+    sleeper_pid_file = tmp_path / "sleeper.pid"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # setsid takes the sleeper out of the group alr kills, and it keeps the
+    # session's stdout open; its stderr goes away so it cannot also hold the
+    # test's pipe. Short, so a failing run cleans up on its own.
+    claude = bin_dir / "claude"
+    claude.write_text(
+        "#!/bin/sh\n"
+        f"echo $$ > {session_pid_file}\n"
+        "setsid sleep 5 2>/dev/null &\n"
+        f"echo $! > {sleeper_pid_file}\n"
+        f"echo ready > {ready_file}\n"
+        "exec sleep 60\n",
+        encoding="utf-8",
+    )
+    claude.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+    with stopped_at_exit(
+        start_alr(*run_args(prompt_path, tasks_path), env=env),
+        session_pid_file,
+        sleeper_pid_file,
+    ) as process:
+        wait_for_file(ready_file, 10)
+
+        process.send_signal(signal.SIGINT)
+        # Well before the sleeper exits, so a hang fails here.
+        out, err = process.communicate(timeout=3)
+
+        assert process.returncode == 1, (out, err)
+        assert "error: loop error: task 1: First task: stopped\n" in err
+        assert "Traceback" not in err
+        assert tasks_path.read_text(encoding="utf-8") == TASKS_YAML
+        assert_no_tmp_file(tasks_path)
+
+
 @contextlib.contextmanager
 def stopped_at_exit(
     process: subprocess.Popen[str], *pid_files: Path

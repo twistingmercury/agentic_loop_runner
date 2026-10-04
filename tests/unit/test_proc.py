@@ -259,6 +259,36 @@ async def test_gentle_finish_cuts_off_a_drain_held_open_by_a_background_process(
     assert elapsed < 2
 
 
+async def test_cancel_returns_when_an_escaped_descendant_holds_the_pipe(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "escaped.pid"
+    # setsid takes the sleeper out of the group the stop kills, and it keeps
+    # the stdout pipe; short, so a failing run cleans up on its own.
+    process = await proc.start(
+        ["sh", "-c", f"setsid sleep 3 & echo $! > {pid_file}; sleep 60"],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+    waiter = asyncio.ensure_future(
+        proc.finish(process, proc.read_lines(process.stdout, lines.append))
+    )
+
+    try:
+        await wait_for_text(pid_file)
+        waiter.cancel()
+        # Not awaiting the waiter directly: a stop that hangs must fail here,
+        # not hold up the suite.
+        done, _ = await asyncio.wait({waiter}, timeout=1)
+    finally:
+        await _kill_holder_and_let_pipes_close(pid_file)
+        await asyncio.gather(waiter, return_exceptions=True)
+
+    assert done, "the stop waited for the escaped descendant to close the pipe"
+    assert process.returncode == -signal.SIGKILL
+
+
 async def test_finish_does_not_spin_when_the_drain_ends_before_the_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
