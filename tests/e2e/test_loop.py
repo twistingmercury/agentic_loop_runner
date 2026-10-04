@@ -2,12 +2,13 @@
 
 from pathlib import Path
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     TWO_TASKS_YAML,
     VALID_TASKS_YAML,
     assert_no_tmp_file,
     expected_stdin,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -48,7 +49,7 @@ def test_loop_runs_every_task_in_order(tmp_path: Path, fake_claude: Path) -> Non
     assert "task 20: First task already completed, skipping" in res.out
     assert "Do the first thing." not in res.out
 
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     assert len(records) == 2
     want_tasks = [
         (30, "Second task", "Do the second thing."),
@@ -94,7 +95,7 @@ def test_loop_failed_task_refuses_to_run(tmp_path: Path, fake_claude: Path) -> N
     assert (
         "fix the failed tasks and set their state to pending before running" in res.err
     )
-    assert read_fake_claude_records(record_file) == []
+    assert fake_claude_records(record_file) == []
     assert tasks_path.read_text(encoding="utf-8") == tasks_yaml
     assert_no_tmp_file(tasks_path)
 
@@ -116,7 +117,7 @@ def test_loop_stops_on_first_failure(tmp_path: Path, fake_claude: Path) -> None:
     assert res.code != 0, res
     assert "task 1: First task failed: exit status 3" in res.err
     assert "claude-stderr-marker" in res.err
-    assert len(read_fake_claude_records(record_file)) == 1
+    assert len(fake_claude_records(record_file)) == 1
     assert "Do the second thing." not in res.out
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "failed", 2: "pending"}
     assert_no_tmp_file(tasks_path)
@@ -171,7 +172,7 @@ def assert_startup_failure(tmp_path: Path, prompt: str, tasks: str, want: str) -
     assert res.code != 0, res
     assert "failed to start loop runner" in res.err
     assert want in res.err
-    assert read_fake_claude_records(record_file) == []
+    assert fake_claude_records(record_file) == []
 
 
 def test_start_empty_prompt(tmp_path: Path, fake_claude: Path) -> None:

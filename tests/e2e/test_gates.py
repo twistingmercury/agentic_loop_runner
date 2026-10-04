@@ -5,10 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     assert_no_tmp_file,
     expected_stdin,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -55,7 +56,7 @@ def test_gates_passing_gates_complete_the_task(
     assert "gate: echo gate-output\ngate-output\n" in res.out
     assert marker.exists()
 
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     assert len(records) == 1
     # Gates are never sent to claude.
     assert records[0]["stdin"] == expected_stdin(
@@ -87,7 +88,7 @@ def test_gates_failing_gate_fails_the_task_and_blocks_the_next_run(
     assert res.code != 0, res
     assert f"task 1: First task failed: {gate_err}" in res.err
     assert not never.exists(), "gates after a failed gate must not run"
-    assert len(read_fake_claude_records(record_file)) == 1
+    assert len(fake_claude_records(record_file)) == 1
 
     after = read_tasks_yaml(tasks_path)
     assert task_states(after) == {1: "failed", 2: "pending"}
@@ -100,7 +101,7 @@ def test_gates_failing_gate_fails_the_task_and_blocks_the_next_run(
 
     assert again.code != 0, again
     assert "Some tasks failed previous runs:" in again.out
-    assert len(read_fake_claude_records(record_file)) == 1
+    assert len(fake_claude_records(record_file)) == 1
 
 
 def test_gates_skipped_when_the_session_fails(
@@ -308,7 +309,7 @@ def test_gates_shared_gates_run_for_every_task(
     # The shared gate runs once per task.
     assert marker.read_text(encoding="utf-8") == "ran\nran\n"
 
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     # Gates are never sent to claude.
     assert [record["stdin"] for record in records] == [
         expected_stdin("Body.", 1, "First task", "Do the first thing."),

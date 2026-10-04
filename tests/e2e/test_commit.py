@@ -10,9 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     Result,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -68,7 +69,7 @@ class CommitRepo:
         return self.git("log", "--format=%s").splitlines()
 
     def calls(self) -> int:
-        return len(read_fake_claude_records(self.record_file))
+        return len(fake_claude_records(self.record_file))
 
 
 def new_commit_repo(git_repo: Path, tasks_yaml: str = TWO_WORK_TASKS) -> CommitRepo:

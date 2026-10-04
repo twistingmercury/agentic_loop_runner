@@ -4,18 +4,15 @@ import contextlib
 import os
 import signal
 import subprocess
-import sys
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from helpers import start_alr, wait_for_file, wait_process_gone
 
 from e2e.conftest import (
     assert_no_tmp_file,
     run_args,
-    start_alr,
-    wait_for_file,
     write_prompt,
     write_tasks_yaml,
 )
@@ -136,37 +133,3 @@ def kill_pid_in(pid_file: Path) -> None:
     except (OSError, ValueError):
         # No file, or the process is already gone: nothing is left to stop.
         pass
-
-
-def wait_process_gone(pid: int, timeout: float) -> None:
-    deadline = time.monotonic() + timeout
-    while process_alive(pid):
-        assert time.monotonic() < deadline, f"process {pid} is still alive"
-        time.sleep(0.05)
-
-
-def process_alive(pid: int) -> bool:
-    """Report whether pid is a live process that is not a zombie.
-
-    A signal 0 alone is not enough on Linux: it still succeeds for a process
-    that has exited but is not reaped yet, which an orphaned descendant can
-    briefly be.
-    """
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        pass
-
-    if sys.platform != "linux":
-        return True
-
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-    # The state follows the command name, which is in parentheses and may hold spaces.
-    fields = stat.rpartition(")")[2].split()
-    return not fields or fields[0] not in ("Z", "X")

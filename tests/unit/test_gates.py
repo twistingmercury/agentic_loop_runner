@@ -10,13 +10,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from test_proc import wait_for_text, wait_until_gone
+from helpers import cancel_run, run_loop, saved_tasks, wait_for_text, wait_until_gone
 
-from alr import tasks
-from alr.engine import gates, loop
-from alr.engine.sandbox import bypass_args
-from alr.errors import RunCancelledError, RunError
-from alr.plain.frontend import PlainFrontEnd
+from alr.engine import gates
+from alr.errors import RunError
 from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
@@ -62,37 +59,8 @@ def descendant_pid_file(tmp_path: Path) -> Iterator[Path]:
         os.kill(int(pid_file.read_text()), signal.SIGKILL)
 
 
-def _record_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Make the fake claude record its calls and return the file it records them in."""
-    path = tmp_path / "record.log"
-    monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(path))
-    return path
-
-
 def _stdins(record: Path) -> list[str]:
     return [json.loads(line)["stdin"] for line in record.read_text().splitlines()]
-
-
-def _saved(path: Path) -> TaskList:
-    return tasks.parse_tasks(path.read_text(encoding="utf-8"))
-
-
-async def _run(task_list: TaskList, tasks_file: Path, gate_timeout: str = "") -> None:
-    options = loop.RunOptions(
-        tasks_file=str(tasks_file),
-        gate_timeout=gate_timeout,
-        session_args=bypass_args(),
-    )
-    await loop.run("prompt", task_list, options, PlainFrontEnd())
-
-
-async def _cancel(run: asyncio.Future[None]) -> RunCancelledError:
-    """Cancel a run and return the error it ends with."""
-    run.cancel()
-    with pytest.raises(RunCancelledError) as caught:
-        await asyncio.wait_for(run, 5)
-
-    return caught.value
 
 
 async def test_run_loop_gates_pass_completes_task(tmp_path: Path) -> None:
@@ -104,11 +72,11 @@ async def test_run_loop_gates_pass_completes_task(tmp_path: Path) -> None:
         Gate(cmd=f"test -e '{first}' && touch '{second}'"),
     ]
 
-    await _run(_gated_task(*task_gates), tasks_file)
+    await run_loop(_gated_task(*task_gates), tasks_file)
 
     assert first.exists()
     assert second.exists()
-    saved = _saved(tasks_file)
+    saved = saved_tasks(tasks_file)
     assert [(task.state, task.error) for task in saved.tasks] == [(COMPLETED, "")]
     assert saved.gate_list() == task_gates, "gates must survive the save"
 
@@ -126,7 +94,7 @@ async def test_run_loop_file_gates_run_after_every_completed_task(
         ],
     )
 
-    await _run(task_list, tmp_path / "tasks.yaml")
+    await run_loop(task_list, tmp_path / "tasks.yaml")
 
     assert count.read_text() == "ran\nran\n", (
         "the file's gates run once per task that ran, and not for one already completed"
@@ -134,9 +102,8 @@ async def test_run_loop_file_gates_run_after_every_completed_task(
 
 
 async def test_run_loop_gate_failure_fails_task_and_stops_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, record: Path
 ) -> None:
-    record = _record_calls(tmp_path, monkeypatch)
     tasks_file = tmp_path / "tasks.yaml"
     never = tmp_path / "never"
     task_list = TaskList(
@@ -149,13 +116,13 @@ async def test_run_loop_gate_failure_fails_task_and_stops_run(
     want_error = 'gate "test \\"a\\" = \\"b\\"" failed: exit status 1'
 
     with pytest.raises(RunError) as caught:
-        await _run(task_list, tasks_file)
+        await run_loop(task_list, tasks_file)
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
     assert not never.exists(), "gates after a failed gate must not run"
     assert len(_stdins(record)) == 1, "the second task must never run"
     # The quoted command must survive the yaml save and reload.
-    assert [(task.state, task.error) for task in _saved(tasks_file).tasks] == [
+    assert [(task.state, task.error) for task in saved_tasks(tasks_file).tasks] == [
         (FAILED, want_error),
         (PENDING, ""),
     ]
@@ -184,19 +151,18 @@ async def test_run_loop_gates_skipped_when_session_fails(
     marker = tmp_path / "gate-ran"
 
     with pytest.raises(RunError) as caught:
-        await _run(_gated_task(_touch_gate(marker)), tmp_path / "tasks.yaml")
+        await run_loop(_gated_task(_touch_gate(marker)), tmp_path / "tasks.yaml")
 
     assert want_error in str(caught.value)
     assert "gate" not in str(caught.value)
     assert not marker.exists(), "a failed session must not run gates"
 
 
-async def test_run_loop_gates_never_reach_claude(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    record = _record_calls(tmp_path, monkeypatch)
+async def test_run_loop_gates_never_reach_claude(tmp_path: Path, record: Path) -> None:
 
-    await _run(_gated_task(Gate(cmd="true # gate-only-text")), tmp_path / "tasks.yaml")
+    await run_loop(
+        _gated_task(Gate(cmd="true # gate-only-text")), tmp_path / "tasks.yaml"
+    )
 
     assert _stdins(record) == ["prompt\n\n1: First\n\np1\n"], (
         "the stdin contract must not change when a task has gates"
@@ -232,14 +198,14 @@ async def test_run_loop_gate_shell_behavior(
     task_list = _gated_task(Gate(cmd=cmd))
 
     if not want_error:
-        await _run(task_list, tasks_file)
-        assert [task.state for task in _saved(tasks_file).tasks] == [COMPLETED]
+        await run_loop(task_list, tasks_file)
+        assert [task.state for task in saved_tasks(tasks_file).tasks] == [COMPLETED]
         return
 
     with pytest.raises(RunError):
-        await _run(task_list, tasks_file)
+        await run_loop(task_list, tasks_file)
 
-    saved = _saved(tasks_file)
+    saved = saved_tasks(tasks_file)
     assert [task.state for task in saved.tasks] == [FAILED]
     assert want_error in saved.tasks[0].error
 
@@ -247,7 +213,7 @@ async def test_run_loop_gate_shell_behavior(
 async def test_run_loop_plain_prints_gate_line_and_output(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    await _run(_gated_task(Gate(cmd="echo gate-says-hi")), tmp_path / "tasks.yaml")
+    await run_loop(_gated_task(Gate(cmd="echo gate-says-hi")), tmp_path / "tasks.yaml")
 
     assert "gate: echo gate-says-hi\ngate-says-hi\n" in capfd.readouterr().out
 
@@ -255,7 +221,7 @@ async def test_run_loop_plain_prints_gate_line_and_output(
 async def test_run_loop_plain_passes_gate_stderr_through(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    await _run(
+    await run_loop(
         _gated_task(Gate(cmd="echo gate-stderr-marker >&2")), tmp_path / "tasks.yaml"
     )
 
@@ -289,7 +255,7 @@ async def test_run_loop_gate_stdin_is_empty_not_inherited(
     gate = Gate(cmd="printf 'gate-read=[%s]\\n' \"$(cat)\"")
 
     with _stdin_from(stdin_file):
-        await _run(_gated_task(gate), tmp_path / "tasks.yaml")
+        await run_loop(_gated_task(gate), tmp_path / "tasks.yaml")
 
     output = capfd.readouterr().out
     assert "gate-read=[]\n" in output, "the gate must see end-of-file before any input"
@@ -311,9 +277,9 @@ async def test_run_cancel_during_gate_leaves_file_untouched(
         Gate(cmd=f"echo ready > '{ready}'; sleep 60", timeout=timeout)
     )
 
-    run = asyncio.ensure_future(_run(task_list, tasks_file))
+    run = asyncio.ensure_future(run_loop(task_list, tasks_file))
     await wait_for_text(ready)
-    error = await _cancel(run)
+    error = await cancel_run(run)
 
     assert "task 1: First: stopped during gate" in str(error)
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml, (
@@ -335,12 +301,12 @@ async def test_run_gate_shell_that_cannot_be_executed_fails_the_task(
     tasks_file = tmp_path / "tasks.yaml"
 
     with pytest.raises(RunError) as caught:
-        await _run(_gated_task(Gate(cmd="true")), tasks_file)
+        await run_loop(_gated_task(Gate(cmd="true")), tasks_file)
 
     assert str(caught.value) == (
         'task 1: First failed: gate "true" failed: sh: cannot be started: Permission denied'
     )
-    assert [task.state for task in _saved(tasks_file).tasks] == [FAILED]
+    assert [task.state for task in saved_tasks(tasks_file).tasks] == [FAILED]
 
 
 async def test_run_gate_timeout_fails_task_and_skips_later_gates(
@@ -353,14 +319,14 @@ async def test_run_gate_timeout_fails_task_and_skips_later_gates(
     started = time.monotonic()
 
     with pytest.raises(RunError) as caught:
-        await _run(task_list, tasks_file)
+        await run_loop(task_list, tasks_file)
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
     assert time.monotonic() - started < 10, (
         "the deadline must kill the gate, not wait out its sleep"
     )
     assert not never.exists(), "gates after a timed-out gate must not run"
-    assert [(task.state, task.error) for task in _saved(tasks_file).tasks] == [
+    assert [(task.state, task.error) for task in saved_tasks(tasks_file).tasks] == [
         (FAILED, want_error)
     ]
 
@@ -372,7 +338,7 @@ async def test_run_gate_timeout_kills_the_gates_descendants(
     task_list = _gated_task(_spawning_gate(descendant_pid_file, "500ms"))
 
     with pytest.raises(RunError, match="timed out after 500ms"):
-        await _run(task_list, tmp_path / "tasks.yaml")
+        await run_loop(task_list, tmp_path / "tasks.yaml")
 
     # A process the gate started must die with it on a timeout.
     await wait_until_gone(int(await wait_for_text(descendant_pid_file)))
@@ -383,9 +349,9 @@ async def test_run_cancel_during_gate_kills_the_gates_descendants(
 ) -> None:
     task_list = _gated_task(_spawning_gate(descendant_pid_file, ""))
 
-    run = asyncio.ensure_future(_run(task_list, tmp_path / "tasks.yaml"))
+    run = asyncio.ensure_future(run_loop(task_list, tmp_path / "tasks.yaml"))
     pid = int(await wait_for_text(descendant_pid_file))
-    error = await _cancel(run)
+    error = await cancel_run(run)
 
     assert "task 1: First: stopped during gate" in str(error)
     # A process the gate started must die with it on a cancel.
@@ -397,10 +363,10 @@ async def test_run_gate_within_timeout_passes(tmp_path: Path) -> None:
     marker = tmp_path / "second"
     task_list = _gated_task(Gate(cmd="true", timeout="30s"), _touch_gate(marker))
 
-    await _run(task_list, tasks_file)
+    await run_loop(task_list, tasks_file)
 
     assert marker.exists()
-    saved = _saved(tasks_file)
+    saved = saved_tasks(tasks_file)
     assert [task.state for task in saved.tasks] == [COMPLETED]
     assert saved.gate_list() == task_list.gate_list(), (
         "timeout must survive the save as written"
@@ -413,7 +379,7 @@ async def test_run_gate_timeout_that_cannot_be_parsed_fails_the_gate(
     task_list = _gated_task(Gate(cmd="true", timeout="soon"))
 
     with pytest.raises(RunError) as caught:
-        await _run(task_list, tmp_path / "tasks.yaml")
+        await run_loop(task_list, tmp_path / "tasks.yaml")
 
     assert 'gate "true" failed:' in str(caught.value)
     assert "must be a duration string such as 90s or 10m" in str(caught.value)
@@ -479,7 +445,7 @@ async def test_run_gate_timeout_flag_overrides_the_gate_timeout(
     started = time.monotonic()
 
     with pytest.raises(RunError) as caught:
-        await _run(task_list, tmp_path / "tasks.yaml", gate_timeout="100ms")
+        await run_loop(task_list, tmp_path / "tasks.yaml", gate_timeout="100ms")
 
     assert (
         str(caught.value)
@@ -492,7 +458,7 @@ async def test_run_gate_timeout_flag_is_never_saved(tmp_path: Path) -> None:
     tasks_file = tmp_path / "tasks.yaml"
     task_list = _gated_task(Gate(cmd="true", timeout="30s"), Gate(cmd="true"))
 
-    await _run(task_list, tasks_file, gate_timeout="45s")
+    await run_loop(task_list, tasks_file, gate_timeout="45s")
 
     data = tasks_file.read_text(encoding="utf-8")
     assert data.count("timeout:") == 1, (
@@ -501,7 +467,7 @@ async def test_run_gate_timeout_flag_is_never_saved(tmp_path: Path) -> None:
     assert "timeout: 30s" in data
     assert "45s" not in data, "the flag must not reach the tasks file"
     assert "10m" not in data, "the default must not reach the tasks file"
-    assert _saved(tasks_file).gate_list() == [
+    assert saved_tasks(tasks_file).gate_list() == [
         Gate(cmd="true", timeout="30s"),
         Gate(cmd="true"),
     ]
@@ -528,10 +494,10 @@ async def test_run_multi_line_gate_errors_name_only_the_first_line(
     tasks_file = tmp_path / "tasks.yaml"
 
     with pytest.raises(RunError) as caught:
-        await _run(_gated_task(gate), tasks_file)
+        await run_loop(_gated_task(gate), tasks_file)
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
-    saved = _saved(tasks_file)
+    saved = saved_tasks(tasks_file)
     assert saved.tasks[0].error == want_error
     assert saved.gate_list()[0].cmd == gate.cmd, "the stored command stays whole"
 

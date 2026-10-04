@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import pytest
+from helpers import write_file
 
 from alr.errors import RepoError, TaskFileError
 from alr.plain.dryrun import dry_run
@@ -38,11 +39,6 @@ tasks:
 """
 
 
-def _write(path: Path, content: str) -> str:
-    path.write_text(content, encoding="utf-8")
-    return str(path)
-
-
 async def _dry_run(
     tasks_file: str,
     gate_timeout: str = "",
@@ -54,16 +50,8 @@ async def _dry_run(
     return out.getvalue()
 
 
-@pytest.fixture
-def outside(tmp_path: Path) -> Path:
-    """A folder next to the repository, so outside its work tree."""
-    path = tmp_path.resolve() / "outside"
-    path.mkdir()
-    return path
-
-
 async def test_dry_run_valid_file(tmp_path: Path) -> None:
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     assert await _dry_run(tasks_file) == (
         "   ID  STATE      NAME\n"
@@ -84,7 +72,7 @@ async def test_dry_run_no_failed_tasks_table(tmp_path: Path) -> None:
     name: Second task
     prompt: Do the second thing.
 """
-    tasks_file = _write(tmp_path / "tasks.yaml", content)
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
 
     assert await _dry_run(tasks_file) == (
         "    ID  STATE      NAME\n"
@@ -96,7 +84,7 @@ async def test_dry_run_no_failed_tasks_table(tmp_path: Path) -> None:
 
 
 async def test_dry_run_invalid_file(tmp_path: Path) -> None:
-    tasks_file = _write(
+    tasks_file = write_file(
         tmp_path / "tasks.yaml",
         "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
     )
@@ -123,7 +111,7 @@ async def test_dry_run_flags_failed_tasks(tmp_path: Path) -> None:
     name: Third task
     prompt: Do the third thing.
 """
-    tasks_file = _write(tmp_path / "tasks.yaml", content)
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
 
     assert await _dry_run(tasks_file) == (
         "Some tasks failed previous runs:\n"
@@ -161,7 +149,7 @@ async def test_dry_run_flags_failed_tasks(tmp_path: Path) -> None:
 async def test_dry_run_lists_effective_gate_timeouts(
     tmp_path: Path, override: str, want: str
 ) -> None:
-    tasks_file = _write(tmp_path / "tasks.yaml", GATES_YAML)
+    tasks_file = write_file(tmp_path / "tasks.yaml", GATES_YAML)
 
     got = await _dry_run(tasks_file, gate_timeout=override)
 
@@ -172,7 +160,7 @@ async def test_dry_run_lists_effective_gate_timeouts(
 
 
 async def test_dry_run_no_gates_prints_no_gate_lines(tmp_path: Path) -> None:
-    tasks_file = _write(
+    tasks_file = write_file(
         tmp_path / "tasks.yaml", "tasks:\n  - {id: 1, name: First, prompt: p}\n"
     )
 
@@ -184,7 +172,7 @@ async def test_dry_run_no_gates_prints_no_gate_lines(tmp_path: Path) -> None:
 
 
 async def test_dry_run_names_sandbox_settings(tmp_path: Path) -> None:
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     assert await _dry_run(tasks_file, sandbox_file="sandbox.json") == (
         "   ID  STATE      NAME\n"
@@ -199,7 +187,7 @@ async def test_dry_run_names_sandbox_settings(tmp_path: Path) -> None:
 async def test_dry_run_commit_clean_repository_names_the_work_tree(
     git_repo: Path, outside: Path
 ) -> None:
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     got = await _dry_run(tasks_file, commit=True)
 
@@ -210,7 +198,7 @@ async def test_dry_run_commit_dirty_repository_is_an_error(
     git_repo: Path, outside: Path
 ) -> None:
     (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     out = io.StringIO()
     with pytest.raises(RepoError, match="--commit needs a clean work tree"):
@@ -225,7 +213,7 @@ async def test_dry_run_commit_broken_repository_is_an_error(
     with (git_repo / ".git" / "config").open("a", encoding="utf-8") as config:
         config.write("[broken\n")
 
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     out = io.StringIO()
     with pytest.raises(RepoError, match="--commit: git rev-parse: "):
@@ -241,7 +229,7 @@ async def test_dry_run_commit_outside_a_repository_says_nothing_will_be_committe
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
     monkeypatch.chdir(outside)
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     got = await _dry_run(tasks_file, commit=True)
 
@@ -255,6 +243,6 @@ async def test_dry_run_commit_without_the_flag_git_is_never_consulted(
     git_repo: Path, outside: Path
 ) -> None:
     (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     assert "commit:" not in await _dry_run(tasks_file)

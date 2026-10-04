@@ -2,56 +2,33 @@
 
 import asyncio
 import os
-import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from test_proc import wait_for_text
+from helpers import (
+    commit_subjects,
+    git,
+    run_loop,
+    wait_for_text,
+    write_nested_file,
+)
 
 from alr import tasks
-from alr.engine import loop, proc
+from alr.engine import proc
 from alr.engine.commit import Repo, check_log_dir, open_repo
-from alr.engine.sandbox import bypass_args
 from alr.errors import RepoError, RunCancelledError, RunError
-from alr.plain.frontend import PlainFrontEnd
 from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
 
 RUN_DIR = "20261001T140211"
 
 
-@pytest.fixture
-def outside(tmp_path: Path) -> Path:
-    """A folder next to the repository, so outside its work tree."""
-    path = tmp_path.resolve() / "outside"
-    path.mkdir()
-    return path
-
-
-def _git(repo: Path, *args: str) -> str:
-    done = subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    return done.stdout
-
-
-def _write(path: Path, content: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    return path
-
-
 def _ignore_and_commit(repo: Path, *patterns: str) -> None:
     """Replace .gitignore and commit it, so the tree stays clean."""
-    _write(repo / ".gitignore", "\n".join(patterns) + "\n")
-    _git(repo, "add", ".gitignore")
-    _git(repo, "commit", "-q", "-m", "ignore")
+    write_nested_file(repo / ".gitignore", "\n".join(patterns) + "\n")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-q", "-m", "ignore")
 
 
 def _task_file(repo: Path) -> Path:
@@ -88,24 +65,24 @@ async def test_open_repo_clean_tree(git_repo: Path) -> None:
 
 
 def _dirty_modified(repo: Path) -> None:
-    _write(repo / "seed.txt", "changed\n")
+    write_nested_file(repo / "seed.txt", "changed\n")
 
 
 def _dirty_staged(repo: Path) -> None:
-    _write(repo / "new.txt", "new\n")
-    _git(repo, "add", "new.txt")
+    write_nested_file(repo / "new.txt", "new\n")
+    git(repo, "add", "new.txt")
 
 
 def _dirty_untracked(repo: Path) -> None:
-    _write(repo / "stray.txt", "stray\n")
+    write_nested_file(repo / "stray.txt", "stray\n")
 
 
 def _dirty_new_directory(repo: Path) -> None:
-    _write(repo / "docs" / "notes.md", "notes\n")
+    write_nested_file(repo / "docs" / "notes.md", "notes\n")
 
 
 def _dirty_non_ascii(repo: Path) -> None:
-    _write(repo / "café.txt", "latte\n")
+    write_nested_file(repo / "café.txt", "latte\n")
 
 
 @pytest.mark.parametrize(
@@ -125,7 +102,7 @@ def _dirty_non_ascii(repo: Path) -> None:
 async def test_open_repo_dirty_tree_is_refused(
     git_repo: Path, dirty: Callable[[Path], None], want_line: str
 ) -> None:
-    tasks_file = _write(_task_file(git_repo), "tasks: []\n")
+    tasks_file = write_nested_file(_task_file(git_repo), "tasks: []\n")
     dirty(git_repo)
 
     with pytest.raises(RepoError) as caught:
@@ -137,26 +114,26 @@ async def test_open_repo_dirty_tree_is_refused(
 
 
 async def test_open_repo_ignored_files_are_clean(git_repo: Path) -> None:
-    _write(git_repo / "run" / "prompt.md", "prompt\n")
-    tasks_file = _write(_task_file(git_repo), "tasks: []\n")
+    write_nested_file(git_repo / "run" / "prompt.md", "prompt\n")
+    tasks_file = write_nested_file(_task_file(git_repo), "tasks: []\n")
 
     assert await open_repo(str(tasks_file)) is not None
 
 
 def _seen_untracked(repo: Path, outside: Path) -> str:
-    return str(_write(repo / "tasks.yaml", "tasks: []\n"))
+    return str(write_nested_file(repo / "tasks.yaml", "tasks: []\n"))
 
 
 def _seen_tracked(repo: Path, outside: Path) -> str:
-    path = _write(repo / "tasks.yaml", "tasks: []\n")
-    _git(repo, "add", "tasks.yaml")
-    _git(repo, "commit", "-q", "-m", "track tasks")
+    path = write_nested_file(repo / "tasks.yaml", "tasks: []\n")
+    git(repo, "add", "tasks.yaml")
+    git(repo, "commit", "-q", "-m", "track tasks")
     return str(path)
 
 
 def _seen_staged(repo: Path, outside: Path) -> str:
-    path = _write(repo / "tasks.yaml", "tasks: []\n")
-    _git(repo, "add", "tasks.yaml")
+    path = write_nested_file(repo / "tasks.yaml", "tasks: []\n")
+    git(repo, "add", "tasks.yaml")
     return str(path)
 
 
@@ -167,12 +144,12 @@ def _seen_tracked_matching_a_pattern(repo: Path, outside: Path) -> str:
 
 
 def _seen_relative(repo: Path, outside: Path) -> str:
-    _write(repo / "docs" / "tasks.yaml", "tasks: []\n")
+    write_nested_file(repo / "docs" / "tasks.yaml", "tasks: []\n")
     return "docs/tasks.yaml"
 
 
 def _seen_symlink(repo: Path, outside: Path) -> str:
-    target = _write(outside / "tasks.yaml", "tasks: []\n")
+    target = write_nested_file(outside / "tasks.yaml", "tasks: []\n")
     link = repo / "link.yaml"
     link.symlink_to(target)
     return str(link)
@@ -211,16 +188,16 @@ async def test_open_repo_task_file_must_be_ignored_or_outside(
 
 
 def _unseen_directory_pattern(repo: Path, outside: Path) -> str:
-    return str(_write(_task_file(repo), "tasks: []\n"))
+    return str(write_nested_file(_task_file(repo), "tasks: []\n"))
 
 
 def _unseen_file_pattern(repo: Path, outside: Path) -> str:
     _ignore_and_commit(repo, "tasks.yaml")
-    return str(_write(repo / "tasks.yaml", "tasks: []\n"))
+    return str(write_nested_file(repo / "tasks.yaml", "tasks: []\n"))
 
 
 def _unseen_outside(repo: Path, outside: Path) -> str:
-    return str(_write(outside / "tasks.yaml", "tasks: []\n"))
+    return str(write_nested_file(outside / "tasks.yaml", "tasks: []\n"))
 
 
 def _unseen_not_yet_created(repo: Path, outside: Path) -> str:
@@ -232,7 +209,7 @@ def _unseen_directory_missing(repo: Path, outside: Path) -> str:
 
 
 def _unseen_relative(repo: Path, outside: Path) -> str:
-    _write(_task_file(repo), "tasks: []\n")
+    write_nested_file(_task_file(repo), "tasks: []\n")
     return "run/tasks.yaml"
 
 
@@ -261,7 +238,7 @@ async def test_open_repo_task_file_ignored_or_outside_is_accepted(
 async def test_open_repo_task_file_reached_through_a_symlinked_directory(
     git_repo: Path, outside: Path
 ) -> None:
-    _write(_task_file(git_repo), "tasks: []\n")
+    write_nested_file(_task_file(git_repo), "tasks: []\n")
     alias = outside / "alias"
     alias.symlink_to(git_repo / "run")
 
@@ -275,7 +252,7 @@ async def test_open_repo_from_subdirectory_covers_whole_tree(
 ) -> None:
     sub = git_repo / "sub"
     sub.mkdir()
-    _write(git_repo / "stray.txt", "stray\n")
+    write_nested_file(git_repo / "stray.txt", "stray\n")
     monkeypatch.chdir(sub)
 
     with pytest.raises(RepoError, match=r"\?\? stray\.txt"):
@@ -349,34 +326,21 @@ async def _open(tasks_file: Path) -> Repo:
     return repo
 
 
-def _subjects(repo: Path) -> list[str]:
-    """The commit subjects, newest first."""
-    return _git(repo, "log", "--format=%s").strip().split("\n")
-
-
 def _head_files(repo: Path) -> list[str]:
     """The files the newest commit changed."""
-    return sorted(_git(repo, "show", "--name-only", "--format=", "HEAD").split())
+    return sorted(git(repo, "show", "--name-only", "--format=", "HEAD").split())
 
 
 def _install_hook(repo: Path, script: str) -> None:
-    hook = _write(repo / ".git" / "hooks" / "pre-commit", f"#!/bin/sh\n{script}\n")
+    hook = write_nested_file(
+        repo / ".git" / "hooks" / "pre-commit", f"#!/bin/sh\n{script}\n"
+    )
     hook.chmod(0o700)
 
 
 def _saved_states(path: Path) -> list[tuple[str, str]]:
     saved = tasks.parse_tasks(path.read_text(encoding="utf-8"))
     return [(task.state, task.error) for task in saved.tasks]
-
-
-async def _run(task_list: TaskList, tasks_file: Path, repo: Repo | None) -> None:
-    options = loop.RunOptions(
-        tasks_file=str(tasks_file),
-        gate_timeout="",
-        session_args=bypass_args(),
-        repo=repo,
-    )
-    await loop.run("prompt", task_list, options, PlainFrontEnd())
 
 
 # The stream half of gralph's table belongs with the stream front end.
@@ -389,11 +353,11 @@ async def test_run_commits_one_commit_per_completed_task(git_repo: Path) -> None
         cmd="n=1; while [ -e work-$n.txt ]; do n=$((n+1)); done; echo work > work-$n.txt"
     )
 
-    await _run(_two_tasks(numbered), tasks_file, await _open(tasks_file))
+    await run_loop(_two_tasks(numbered), tasks_file, repo=await _open(tasks_file))
 
-    assert _subjects(git_repo) == ["Second", "First", "init"]
+    assert commit_subjects(git_repo) == ["Second", "First", "init"]
     assert _head_files(git_repo) == ["work-2.txt"]
-    assert _git(git_repo, "status", "--porcelain") == "", (
+    assert git(git_repo, "status", "--porcelain") == "", (
         "nothing may be left uncommitted"
     )
     assert _saved_states(tasks_file) == [(COMPLETED, ""), (COMPLETED, "")]
@@ -401,9 +365,9 @@ async def test_run_commits_one_commit_per_completed_task(git_repo: Path) -> None
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_run_nil_repo_never_commits(git_repo: Path) -> None:
-    await _run(_gated_task(_work_gate("one.txt")), _task_file(git_repo), None)
+    await run_loop(_gated_task(_work_gate("one.txt")), _task_file(git_repo))
 
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
     assert (git_repo / "one.txt").exists()
 
 
@@ -413,14 +377,14 @@ async def test_run_nothing_to_commit_still_completes(
 ) -> None:
     tasks_file = _task_file(git_repo)
 
-    await _run(_gated_task(), tasks_file, await _open(tasks_file))
+    await run_loop(_gated_task(), tasks_file, repo=await _open(tasks_file))
 
     # A commit line with no commit behind it would tell the user about a
     # commit git never made.
     assert "commit:" not in capfd.readouterr().out, (
         "nothing staged must announce nothing"
     )
-    assert _subjects(git_repo) == ["init"], "no empty commit"
+    assert commit_subjects(git_repo) == ["init"], "no empty commit"
     assert _saved_states(tasks_file) == [(COMPLETED, "")]
 
 
@@ -430,10 +394,10 @@ async def test_run_failed_gate_leaves_changes_uncommitted(git_repo: Path) -> Non
     task_list = _gated_task(Gate(cmd="echo work > one.txt; exit 1"))
 
     with pytest.raises(RunError) as caught:
-        await _run(task_list, tasks_file, await _open(tasks_file))
+        await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
     assert 'gate "echo work > one.txt; exit 1" failed' in str(caught.value)
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
     assert (git_repo / "one.txt").exists(), (
         "a failed task's changes stay in the work tree"
     )
@@ -446,12 +410,12 @@ async def test_run_session_failure_skips_commit(
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"nope"}')
     tasks_file = _task_file(git_repo)
     repo = await _open(tasks_file)
-    _write(git_repo / "left.txt", "left by the session\n")
+    write_nested_file(git_repo / "left.txt", "left by the session\n")
 
     with pytest.raises(RunError, match="nope"):
-        await _run(_gated_task(), tasks_file, repo)
+        await run_loop(_gated_task(), tasks_file, repo=repo)
 
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -465,12 +429,12 @@ async def test_run_commit_failure_fails_task_and_stops_run(
     want_error = "commit failed: exit status 1"
 
     with pytest.raises(RunError) as caught:
-        await _run(
-            _two_tasks(_work_gate("one.txt")), tasks_file, await _open(tasks_file)
+        await run_loop(
+            _two_tasks(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
         )
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
     assert len(record.read_text().splitlines()) == 1, "the second task must never run"
     assert _saved_states(tasks_file) == [(FAILED, want_error), (PENDING, "")]
 
@@ -487,11 +451,11 @@ async def test_run_commit_survives_a_gate_editing_gitignore(git_repo: Path) -> N
         _work_gate("one.txt"),
     )
 
-    await _run(task_list, tasks_file, await _open(tasks_file))
+    await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
-    assert _subjects(git_repo) == ["First", "init"]
+    assert commit_subjects(git_repo) == ["First", "init"]
     assert _head_files(git_repo) == [".gitignore", "one.txt"]
-    assert _git(git_repo, "status", "--porcelain") == ""
+    assert git(git_repo, "status", "--porcelain") == ""
     assert _saved_states(tasks_file) == [(COMPLETED, "")]
 
 
@@ -502,9 +466,11 @@ async def test_run_commit_after_the_session_committed_itself(git_repo: Path) -> 
         Gate(cmd="echo work > one.txt && git add -A && git commit -q -m own")
     )
 
-    await _run(task_list, tasks_file, await _open(tasks_file))
+    await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
-    assert _subjects(git_repo) == ["own", "init"], "alr must add no commit of its own"
+    assert commit_subjects(git_repo) == ["own", "init"], (
+        "alr must add no commit of its own"
+    )
     assert _saved_states(tasks_file) == [(COMPLETED, "")]
 
 
@@ -517,11 +483,11 @@ async def test_run_failed_add_fails_the_task(git_repo: Path) -> None:
     want_error = "commit failed: exit status 128"
 
     with pytest.raises(RunError) as caught:
-        await _run(task_list, tasks_file, await _open(tasks_file))
+        await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
     assert _saved_states(tasks_file) == [(FAILED, want_error)]
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -541,7 +507,7 @@ async def test_run_git_that_cannot_be_executed_fails_the_task(
     want_error = "commit failed: git: cannot be started: Permission denied"
 
     with pytest.raises(RunError) as caught:
-        await _run(_gated_task(), tasks_file, repo)
+        await run_loop(_gated_task(), tasks_file, repo=repo)
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
     assert _saved_states(tasks_file) == [(FAILED, want_error)]
@@ -553,10 +519,12 @@ async def test_run_commit_with_task_file_outside_the_tree(
 ) -> None:
     tasks_file = outside / "tasks.yaml"
 
-    await _run(_gated_task(_work_gate("one.txt")), tasks_file, await _open(tasks_file))
+    await run_loop(
+        _gated_task(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
+    )
 
-    assert _subjects(git_repo) == ["First", "init"]
-    assert _git(git_repo, "status", "--porcelain") == ""
+    assert commit_subjects(git_repo) == ["First", "init"]
+    assert git(git_repo, "status", "--porcelain") == ""
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -564,15 +532,15 @@ async def test_run_commit_from_subdirectory_commits_whole_tree(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sub = git_repo / "sub"
-    _write(sub / "keep.txt", "keep\n")
-    _git(git_repo, "add", "sub/keep.txt")
-    _git(git_repo, "commit", "-q", "-m", "add sub")
+    write_nested_file(sub / "keep.txt", "keep\n")
+    git(git_repo, "add", "sub/keep.txt")
+    git(git_repo, "commit", "-q", "-m", "add sub")
     monkeypatch.chdir(sub)
     tasks_file = _task_file(git_repo)
     # The gate runs in sub and writes one file there and one in the root.
     task_list = _gated_task(Gate(cmd="echo a > here.txt; echo b > ../top.txt"))
 
-    await _run(task_list, tasks_file, await _open(tasks_file))
+    await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
     assert _head_files(git_repo) == ["sub/here.txt", "top.txt"]
 
@@ -609,12 +577,12 @@ async def test_run_commit_odd_task_names(
         gates=[_work_gate("one.txt")], tasks=[Task(id=1, name=task_name, prompt="p")]
     )
 
-    await _run(task_list, tasks_file, await _open(tasks_file))
+    await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
-    assert _subjects(git_repo) == [want_subject, "init"]
+    assert commit_subjects(git_repo) == [want_subject, "init"]
     # The subject alone cannot tell a whole name from its first line: only
     # the announced line is cut, the message keeps the body.
-    assert _git(git_repo, "log", "-1", "--format=%B").rstrip("\n") == task_name
+    assert git(git_repo, "log", "-1", "--format=%B").rstrip("\n") == task_name
     assert want_line in capfd.readouterr().out
 
 
@@ -624,7 +592,9 @@ async def test_run_plain_prints_commit_line_and_git_output(
 ) -> None:
     tasks_file = _task_file(git_repo)
 
-    await _run(_gated_task(_work_gate("one.txt")), tasks_file, await _open(tasks_file))
+    await run_loop(
+        _gated_task(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
+    )
 
     output = capfd.readouterr().out
     assert "commit: First\n" in output
@@ -641,7 +611,7 @@ async def _cancel_during_commit(
     _install_hook(repo_dir, script.replace("READY", f"'{ready}'"))
     repo = await _open(tasks_file)
     run = asyncio.ensure_future(
-        _run(_gated_task(_work_gate("one.txt")), tasks_file, repo)
+        run_loop(_gated_task(_work_gate("one.txt")), tasks_file, repo=repo)
     )
     await wait_for_text(ready)
 
@@ -658,7 +628,7 @@ async def test_run_cancel_during_commit_leaves_file_untouched(
     git_repo: Path, tmp_path: Path
 ) -> None:
     tasks_yaml = "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
-    tasks_file = _write(_task_file(git_repo), tasks_yaml)
+    tasks_file = write_nested_file(_task_file(git_repo), tasks_yaml)
 
     _, error = await _cancel_during_commit(
         git_repo, tasks_file, tmp_path / "ready", "echo ready > READY\nsleep 60"
@@ -668,7 +638,7 @@ async def test_run_cancel_during_commit_leaves_file_untouched(
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml, (
         "the tasks file must be byte-for-byte unchanged after a cancel during the commit"
     )
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
     assert list((git_repo / ".git").glob("*.lock")) == [], (
         "git must be stopped politely so it removes its own lock"
     )
@@ -680,7 +650,7 @@ async def test_run_cancel_during_commit_leaves_file_untouched(
 async def test_run_cancel_during_commit_kills_a_hook_that_ignores_sigterm(
     git_repo: Path, tmp_path: Path
 ) -> None:
-    tasks_file = _write(
+    tasks_file = write_nested_file(
         _task_file(git_repo),
         "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
     )
@@ -695,7 +665,7 @@ async def test_run_cancel_during_commit_kills_a_hook_that_ignores_sigterm(
     assert "task 1: First: stopped during commit" in str(error)
     assert took < 6, "SIGKILL must follow the grace period"
     assert took >= proc._GENTLE_GRACE / 2, "SIGTERM must come first and be given time"
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
 
 
 async def test_check_log_dir_nil_repo_checks_nothing() -> None:

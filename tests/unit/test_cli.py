@@ -4,12 +4,11 @@ import asyncio
 import contextlib
 import os
 import signal
-import subprocess
-import sys
 import time
 from pathlib import Path
 
 import pytest
+from helpers import gone_within, start_alr, wait_for_file
 
 from alr import cli
 from alr.engine import proc
@@ -339,30 +338,6 @@ def test_sigint_during_the_startup_checks_is_one_error_line(
     assert capsys.readouterr().err == "error: interrupted\n"
 
 
-def _start_alr(*args: str) -> subprocess.Popen[str]:
-    """Start the real command, as a user's shell would."""
-    alr = Path(sys.executable).parent / "alr"
-    return subprocess.Popen(
-        [str(alr), *args],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-
-def _wait_for_text(path: Path) -> str:
-    """Wait for a child to write something to path and return it."""
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        text = path.read_text().strip() if path.exists() else ""
-        if text:
-            return text
-
-        time.sleep(0.01)
-
-    pytest.fail(f"{path.name} was never written")
-
-
 @pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM])
 @pytest.mark.usefixtures("fake_claude")
 def test_a_signal_leaves_no_traceback_and_no_change(
@@ -376,9 +351,9 @@ def test_a_signal_leaves_no_traceback_and_no_change(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = _start_alr("-t", str(tasks_file), "-p", str(prompt), "--skip-permissions")
+    process = start_alr("-t", str(tasks_file), "-p", str(prompt), "--skip-permissions")
     try:
-        claude_pid = int(_wait_for_text(ready))
+        claude_pid = int(wait_for_file(ready))
         process.send_signal(stop)
         _, err = process.communicate(timeout=10)
     finally:
@@ -412,17 +387,17 @@ def test_a_second_signal_does_not_leave_git_running(
     hook.write_text(f"#!/bin/sh\ntrap '' TERM\necho $$ > '{ready}'\nexec sleep 60\n")
     hook.chmod(0o700)
 
-    process = _start_alr(
+    process = start_alr(
         "-t", str(tasks_file), "-p", str(prompt), "--skip-permissions", "--commit"
     )
     hook_pid = 0
     try:
-        hook_pid = int(_wait_for_text(ready))
+        hook_pid = int(wait_for_file(ready))
         process.send_signal(signal.SIGINT)
         time.sleep(0.2)
         process.send_signal(signal.SIGINT)
         _, err = process.communicate(timeout=10)
-        hook_still_runs = _is_running(hook_pid)
+        hook_still_runs = not gone_within(hook_pid, proc._GENTLE_GRACE / 2)
     finally:
         process.kill()
         if hook_pid:
@@ -433,17 +408,3 @@ def test_a_second_signal_does_not_leave_git_running(
     assert process.returncode == 1
     assert err == "error: loop error: task 1: a: stopped during commit\n"
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
-
-
-def _is_running(pid: int) -> bool:
-    """Report whether pid is alive, allowing a killed process a moment to be reaped."""
-    deadline = time.monotonic() + proc._GENTLE_GRACE / 2
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-
-        time.sleep(0.01)
-
-    return True

@@ -7,13 +7,14 @@ from typing import Any
 
 import pytest
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     ONE_TASK_TABLE,
     TWO_TASKS_YAML,
     VALID_TASKS_YAML,
     Result,
     expected_stdin,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_dry_run,
@@ -63,7 +64,7 @@ def run_with_flags(
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
-    return SandboxRun(res, read_fake_claude_records(record_file), tasks_path)
+    return SandboxRun(res, fake_claude_records(record_file), tasks_path)
 
 
 def assert_sandboxed(argv: list[str]) -> None:

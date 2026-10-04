@@ -8,57 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from helpers import wait_for_text, wait_until_gone
 
 from alr.engine import proc
-
-
-def unix_process_is_running(pid: int) -> bool:
-    if not _probe(pid):
-        return False
-
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        # No /proc (macOS), or the process was reaped between the signal probe
-        # and this read; probe again to tell the two apart.
-        return _probe(pid)
-
-    fields = stat.rpartition(")")[2].split()
-    return not fields or fields[0] not in ("Z", "X")
-
-
-def _probe(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # The process exists; it just belongs to someone else.
-        pass
-
-    return True
-
-
-async def wait_until_gone(pid: int) -> None:
-    deadline = asyncio.get_running_loop().time() + 2
-    while unix_process_is_running(pid):
-        if asyncio.get_running_loop().time() > deadline:
-            pytest.fail(f"process {pid} remained running")
-
-        await asyncio.sleep(0.01)
-
-
-async def wait_for_text(path: Path) -> str:
-    """Wait for a child to write something to path and return it."""
-    deadline = asyncio.get_running_loop().time() + 5
-    while asyncio.get_running_loop().time() < deadline:
-        text = path.read_text().strip() if path.exists() else ""
-        if text:
-            return text
-
-        await asyncio.sleep(0.01)
-
-    pytest.fail(f"{path.name} was never written")
 
 
 async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> None:

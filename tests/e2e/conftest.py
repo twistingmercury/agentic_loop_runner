@@ -5,18 +5,14 @@ skill_check_test.go, and wizard_signal_linux_test.go. The skill, the wizard,
 and the full-screen view are out of scope until the TUI design.
 """
 
-import json
 import os
 import subprocess
-import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-ALR = Path(sys.executable).parent / "alr"
+from helpers import ALR
 
 VALID_TASKS_YAML = """tasks:
   - id: 1
@@ -64,18 +60,6 @@ def run_alr(
     return Result(done.returncode, done.stdout, done.stderr)
 
 
-def start_alr(*args: str, env: dict[str, str]) -> subprocess.Popen[str]:
-    """Start the real alr command without waiting for it, for the signal tests."""
-    return subprocess.Popen(
-        [str(ALR), *args],
-        env={**os.environ, **env},
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-
 def write_tasks_yaml(folder: Path, content: str) -> Path:
     path = folder / "tasks.yaml"
     path.write_text(content, encoding="utf-8")
@@ -97,28 +81,6 @@ def expected_stdin(shared_prompt: str, id: int, name: str, prompt: str) -> str:
     """The exact text a session gets on stdin: the trimmed shared prompt, then the task."""
     task_text = f"{id}: {name}\n\n{prompt}".strip()
     return f"{shared_prompt}\n\n{task_text}\n"
-
-
-def read_fake_claude_records(path: Path) -> list[dict[str, Any]]:
-    """Return the fake claude's calls in order; a missing file means it never ran."""
-    if not path.exists():
-        return []
-
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line]
-
-
-def wait_for_file(path: Path, timeout: float) -> str:
-    """Poll until path holds something and return its text."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        # An empty file is one its writer has created but not yet filled.
-        if path.exists() and (text := path.read_text(encoding="utf-8")):
-            return text
-
-        time.sleep(0.02)
-
-    raise AssertionError(f"timed out after {timeout}s waiting for {path} to appear")
 
 
 def read_tasks_yaml(path: Path) -> dict[str, Any]:

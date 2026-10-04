@@ -7,11 +7,12 @@ pinned here.
 from dataclasses import dataclass
 from pathlib import Path
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     ONE_TASK_TABLE,
     VALID_TASKS_YAML,
     Result,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_dry_run,
@@ -48,7 +49,7 @@ def run_with_log_dir(tmp_path: Path, *flags: str, empty: bool = False) -> LogDir
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
-    calls = len(read_fake_claude_records(record_file))
+    calls = len(fake_claude_records(record_file))
     return LogDirRun(res, tasks_path, log_dir, calls)
 
 

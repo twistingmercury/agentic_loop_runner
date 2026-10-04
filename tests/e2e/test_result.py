@@ -2,12 +2,13 @@
 
 from pathlib import Path
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     TWO_TASKS_YAML,
     Result,
     assert_no_tmp_file,
     expected_stdin,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -59,7 +60,7 @@ def test_loop_json_failed_result_writes_error_and_stops_loop(
     # The session's output still reaches stdout, though alr also reads it.
     assert result_line in res.out
 
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     assert len(records) == 1, "the loop must stop before the second task"
     # The error text is never sent to claude.
     assert records[0]["stdin"] == expected_stdin(
@@ -171,7 +172,7 @@ def test_loop_stale_error_cleared_when_task_completes(
     )
 
     assert res.code == 0, res
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     assert len(records) == 1
     assert "boom old" not in records[0]["stdin"]
 

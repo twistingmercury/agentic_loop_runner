@@ -27,6 +27,22 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
+def record(fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Use the fake claude and return the file it records its calls in."""
+    path = tmp_path / "record.log"
+    monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(path))
+    return path
+
+
+@pytest.fixture
+def outside(tmp_path: Path) -> Path:
+    """A folder next to the repository, so outside its work tree."""
+    path = tmp_path.resolve() / "outside"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
 def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a git repository holding one commit, and make it the working directory.
 

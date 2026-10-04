@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
+from helpers import fake_claude_records
+
 from e2e.conftest import (
     expected_stdin,
-    read_fake_claude_records,
     read_tasks_yaml,
     run_alr,
     task_states,
@@ -39,7 +40,7 @@ def test_dir_runs_the_folders_files(tmp_path: Path, fake_claude: Path) -> None:
     )
 
     assert res.code == 0, res
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     assert len(records) == 1
     assert records[0]["stdin"] == expected_stdin(
         "FOLDER PROMPT", 1, "Folder task", "Do the folder thing."
@@ -67,7 +68,7 @@ def test_dir_tasks_flag_wins(tmp_path: Path, fake_claude: Path) -> None:
     )
 
     assert res.code == 0, res
-    records = read_fake_claude_records(record_file)
+    records = fake_claude_records(record_file)
     assert len(records) == 1
     assert records[0]["stdin"] == expected_stdin(
         "FOLDER PROMPT", 7, "Other task", "Do the other thing."
@@ -88,7 +89,7 @@ def test_dir_missing_tasks_file(tmp_path: Path, fake_claude: Path) -> None:
 
     assert res.code == 1, res
     assert res.err == f"error: --dir: no tasks.yaml in {folder}\n"
-    assert read_fake_claude_records(record_file) == []
+    assert fake_claude_records(record_file) == []
 
 
 def test_dir_dry_run_needs_no_prompt(tmp_path: Path, fake_claude: Path) -> None:

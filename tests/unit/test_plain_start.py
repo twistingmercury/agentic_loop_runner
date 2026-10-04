@@ -1,9 +1,9 @@
 """The plain real run: load, check the repository, then run the loop."""
 
-import subprocess
 from pathlib import Path
 
 import pytest
+from helpers import commit_subjects, write_file
 
 from alr.engine.sandbox import bypass_args
 from alr.errors import (
@@ -27,29 +27,12 @@ VALID_TASKS_YAML = """tasks:
 ONE_TASK_YAML = "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
 
 
-def _write(path: Path, content: str) -> str:
-    path.write_text(content, encoding="utf-8")
-    return str(path)
-
-
 def _calls(record: Path) -> int:
     """How many times the fake claude was started."""
     if not record.exists():
         return 0
 
     return len(record.read_text(encoding="utf-8").splitlines())
-
-
-def _subjects(repo: Path) -> list[str]:
-    """The commit subjects, newest first."""
-    done = subprocess.run(
-        ["git", "log", "--format=%s"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return done.stdout.strip().split("\n")
 
 
 def _causes(exc: BaseException) -> list[BaseException]:
@@ -66,24 +49,8 @@ async def _start(prompt_file: str, tasks_file: str, commit: bool = False) -> Non
     await start(prompt_file, tasks_file, "", bypass_args(), commit)
 
 
-@pytest.fixture
-def record(fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Use the fake claude and return the file it records its calls in."""
-    path = tmp_path / "record.log"
-    monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(path))
-    return path
-
-
-@pytest.fixture
-def outside(tmp_path: Path) -> Path:
-    """A folder next to the repository, so outside its work tree."""
-    path = tmp_path.resolve() / "outside"
-    path.mkdir()
-    return path
-
-
 async def test_start_missing_prompt_file(tmp_path: Path) -> None:
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     with pytest.raises(PromptError) as caught:
         await _start(str(tmp_path / "missing.md"), tasks_file)
@@ -93,7 +60,7 @@ async def test_start_missing_prompt_file(tmp_path: Path) -> None:
 
 
 async def test_start_missing_tasks_file(tmp_path: Path) -> None:
-    prompt_file = _write(tmp_path / "prompt.md", "Do the task.\n")
+    prompt_file = write_file(tmp_path / "prompt.md", "Do the task.\n")
 
     with pytest.raises(TaskFileError) as caught:
         await _start(prompt_file, str(tmp_path / "missing.yaml"))
@@ -103,24 +70,24 @@ async def test_start_missing_tasks_file(tmp_path: Path) -> None:
 
 
 async def test_start_empty_prompt(tmp_path: Path) -> None:
-    prompt_file = _write(tmp_path / "prompt.md", "")
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    prompt_file = write_file(tmp_path / "prompt.md", "")
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     with pytest.raises(PromptError, match="the prompt file is empty"):
         await _start(prompt_file, tasks_file)
 
 
 async def test_start_whitespace_only_prompt(tmp_path: Path) -> None:
-    prompt_file = _write(tmp_path / "prompt.md", "  \t\n  ")
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    prompt_file = write_file(tmp_path / "prompt.md", "  \t\n  ")
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     with pytest.raises(PromptError, match="the prompt file is just whitespace"):
         await _start(prompt_file, tasks_file)
 
 
 async def test_start_invalid_tasks_yaml(tmp_path: Path) -> None:
-    prompt_file = _write(tmp_path / "prompt.md", "Do the task.\n")
-    tasks_file = _write(
+    prompt_file = write_file(tmp_path / "prompt.md", "Do the task.\n")
+    tasks_file = write_file(
         tmp_path / "tasks.yaml",
         "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
     )
@@ -130,8 +97,8 @@ async def test_start_invalid_tasks_yaml(tmp_path: Path) -> None:
 
 
 async def test_start_load_failures_keep_the_error_chain(tmp_path: Path) -> None:
-    prompt_file = _write(tmp_path / "prompt.md", "Do the task.\n")
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    prompt_file = write_file(tmp_path / "prompt.md", "Do the task.\n")
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     with pytest.raises(PromptError) as caught:
         await _start(str(tmp_path / "missing.md"), tasks_file)
@@ -149,8 +116,8 @@ async def test_start_run_loop_failure_is_wrapped_with_loop_error_prefix(
 ) -> None:
     # The folder holds no claude, so the first session cannot start.
     monkeypatch.setenv("PATH", str(tmp_path))
-    prompt_file = _write(tmp_path / "prompt.md", "Do the task.\n")
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    prompt_file = write_file(tmp_path / "prompt.md", "Do the task.\n")
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     with pytest.raises(RunError) as caught:
         await _start(prompt_file, tasks_file)
@@ -160,8 +127,8 @@ async def test_start_run_loop_failure_is_wrapped_with_loop_error_prefix(
 
 
 async def test_start_success(record: Path, tmp_path: Path) -> None:
-    prompt_file = _write(tmp_path / "prompt.md", "Follow the plan.\n")
-    tasks_file = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    prompt_file = write_file(tmp_path / "prompt.md", "Follow the plan.\n")
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
     await _start(prompt_file, tasks_file)
 
@@ -185,8 +152,8 @@ async def test_start_refuses_when_any_task_failed(
     prompt: Do the third thing.
     state: failed
 """
-    prompt_file = _write(tmp_path / "prompt.md", "Follow the plan.\n")
-    tasks_file = _write(tmp_path / "tasks.yaml", content)
+    prompt_file = write_file(tmp_path / "prompt.md", "Follow the plan.\n")
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
 
     with pytest.raises(FailedTasksError) as caught:
         await _start(prompt_file, tasks_file)
@@ -205,8 +172,8 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
     record: Path, git_repo: Path, outside: Path
 ) -> None:
     (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
-    prompt_file = _write(outside / "prompt.md", "prompt\n")
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    prompt_file = write_file(outside / "prompt.md", "prompt\n")
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     with pytest.raises(RepoError) as caught:
         await _start(prompt_file, tasks_file, commit=True)
@@ -223,24 +190,24 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
 async def test_start_commit_flag_commits_the_task(
     record: Path, git_repo: Path, outside: Path
 ) -> None:
-    prompt_file = _write(outside / "prompt.md", "prompt\n")
-    tasks_file = _write(
+    prompt_file = write_file(outside / "prompt.md", "prompt\n")
+    tasks_file = write_file(
         outside / "tasks.yaml",
         "gates:\n  - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
     await _start(prompt_file, tasks_file, commit=True)
 
-    assert _subjects(git_repo) == ["First", "init"]
+    assert commit_subjects(git_repo) == ["First", "init"]
 
 
 async def test_start_without_commit_flag_ignores_a_dirty_tree(
     record: Path, git_repo: Path, outside: Path
 ) -> None:
     (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
-    prompt_file = _write(outside / "prompt.md", "prompt\n")
-    tasks_file = _write(outside / "tasks.yaml", ONE_TASK_YAML)
+    prompt_file = write_file(outside / "prompt.md", "prompt\n")
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     await _start(prompt_file, tasks_file)
 
-    assert _subjects(git_repo) == ["init"]
+    assert commit_subjects(git_repo) == ["init"]
