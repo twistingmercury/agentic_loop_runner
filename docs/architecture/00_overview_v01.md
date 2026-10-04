@@ -52,7 +52,7 @@ For each pending task, `alr` joins the shared prompt and the task, hands the tex
 
 ## Key Principles
 
-1. **Drop-in compatible with gralph** — Same flags, task file, result line, behavior, and error text. Existing files and scripts keep working, and gralph's tests become the port's acceptance tests.
+1. **Drop-in compatible with gralph** — Same flags, task file, result line, and behavior. Existing files and scripts keep working, and gralph's tests guide the port. Inside, the code is plain Python and does not imitate Go libraries (ADR-007).
 2. **One engine, two front ends** — The rules of a run live in one place. Plain mode and the full-screen path differ only in how a subprocess is run and shown, so they cannot disagree on what counts as completed.
 3. **The engine never prints and never asks which mode it is in** — It is handed a front end and calls it. This keeps the plain path readable on its own and gives the later TUI and agent layer a clean surface to plug into.
 4. **Async from the start** — The engine is built on `asyncio` because the planned TUI (Textual) and agent frameworks are async, and because cancelling a run cleanly is simpler there.

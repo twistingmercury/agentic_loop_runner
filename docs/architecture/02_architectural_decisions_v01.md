@@ -239,7 +239,7 @@ Compatibility does not cover internal representation:
 
 - YAML is read and written with PyYAML's standard safe loader and dumper rules. A plain value that YAML 1.1 reads as a boolean or a number (`yes`, `on`, `12:30`) must be quoted to be a string; `alr` rejects it with a clear message otherwise
 - Error messages must be clear and name the task and field. They do not have to match gralph's wording, and a ported test that asserts Go-specific wording may be adapted
-- No new code is added only to imitate a Go library. The small helpers already in `alr.gocompat` stay because they are tested and the saved `error` text has to say something
+- No new code is added only to imitate a Go library. The `alr.gocompat` module from the first tasks is removed: duration parsing and formatting live in `alr.durations` because that is the task file's own format, and the few message helpers live where they are used
 
 The saver keeps two behaviors because they serve `alr`'s own users: multi-line text is written as a `|` block, and lists are indented under their key.
 

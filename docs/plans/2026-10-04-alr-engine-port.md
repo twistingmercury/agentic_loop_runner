@@ -16,8 +16,9 @@
 
 - Python 3.12 or later; `src/` layout; uv for everything (`uv run ...`).
 - Runtime dependency: PyYAML only. Remove `pydantic`. Dev dependencies: `pytest`, `pytest-asyncio`, `ruff`.
-- Drop-in compatible with gralph at `170dc6f`: same flags, task file format, stdin text, Claude argv, outcome rule, gate and commit behavior, and error text. Messages that name the command say `alr`.
-- Allowed differences, and only these: `--install-skill` is not accepted; no wizard, no TUI, no terminal detection (always plain); `--help` text; `--version` prints one line, `alr version: <version>`; saved YAML is equivalent, not byte-identical; text that comes from a library after a gralph prefix (YAML syntax errors, JSON syntax errors) may differ after the prefix; a cancel that lands before a process starts may word its error differently.
+- Compatible with gralph at `170dc6f` in what a user sees and types (ADR-007): same flags, task file format, stdin text, Claude argv, outcome rule, and gate and commit behavior. Messages that name the command say `alr`.
+- Python-native inside (ADR-007): no code that exists only to imitate a Go library. YAML is read and written with PyYAML's standard safe rules. Error messages must be clear and name the task and field; they do not have to match gralph's wording.
+- Known differences from gralph: `--install-skill` is not accepted; no wizard, no TUI, no terminal detection (always plain); `--help` text; `--version` prints one line, `alr version: <version>`; saved YAML is equivalent, not byte-identical; error wording; a plain YAML value such as `yes` or `12:30` must be quoted to be a string; `<<` merge keys are rejected.
 - Import rules: `alr.engine` imports neither `alr.plain`, `alr.stream`, nor `alr.tui`. `alr.plain` and `alr.stream` never import each other. `alr.engine` never writes to stdout or stderr.
 - Linux and macOS only. No Windows branches.
 - Type-hint every function signature. Catch specific exceptions. Re-raise with `raise ... from ...`.
@@ -32,8 +33,8 @@
 These apply to every task that says "port".
 
 1. **Tests first.** Port the listed Go test functions to pytest before writing the code. Each Go `TestFoo_BarBaz` becomes `test_foo_bar_baz`. Keep every assertion. A Go table test becomes `@pytest.mark.parametrize` with one case per table row and the row's name as the id.
-2. **Read the Go test, then the Go code.** The Go files named in each task are the source for behavior. Where this plan and the Go code disagree on behavior, the Go code wins unless the difference is listed under Global Constraints.
-3. **Error text is part of the behavior.** Use the helpers in `alr.gocompat` to reproduce Go wording: `exit status 1`, `signal: killed`, `open <path>: no such file or directory`, and `%q` quoting.
+2. **Read the Go test, then the Go code.** The Go files named in each task are the source for behavior. Where this plan and the Go code disagree on what a user sees or types, the Go code wins unless the difference is listed under Global Constraints. How the Go code gets there is not binding.
+3. **Error text must be clear, not identical.** Keep the shape gralph uses where the plan gives it (`tasks[<i>] (id <id>): <field>: <problem>`, `gate "<cmd>" failed: <reason>`). When a Go test asserts wording that comes from a Go library (`open <path>: no such file or directory`, `signal: killed`), assert alr's own wording instead: `exc.strerror` for file errors, `proc.exit_text` for exits, `errors.quote` for quoted names.
 4. **Async tests** need no decorator: `asyncio_mode = "auto"` is set in `pyproject.toml`.
 5. **Tests that depend on file permissions** (unreadable file, unwritable folder) must skip when `os.geteuid() == 0`, because the Docker build runs the tests as root.
 6. **Skip, with a one-line comment naming the reason, any Go test that only exercises something out of scope**: the TUI, the wizard, `--install-skill`, the skill check, terminal detection, Windows.
@@ -50,7 +51,7 @@ src/alr/
   main.py                      rewrite: entry point
   cli.py                       rewrite: flags, startup checks, routing, signals
   errors.py                    create: AlrError family
-  gocompat.py                  create: Go-flavored text and duration helpers
+  durations.py                 create: parse and format durations such as 90s and 1m30.5s
   tasks.py                     rewrite: parse, validate, save
   engine/__init__.py           create (empty)
   engine/frontend.py           create: FrontEnd protocol, SessionResult
@@ -97,15 +98,12 @@ class SandboxError(AlrError): ...
 class RepoError(AlrError): ...
 class RunLogError(AlrError): ...
 class RunError(AlrError): ...          # a task failed, or its state could not be saved
-class RunCancelled(RunError): ...      # the run was stopped
+class RunCancelledError(RunError): ...  # the run was stopped
+def quote(text: str) -> str                         # wraps text in double quotes for messages
 
-# alr/gocompat.py  [Task 1]
-def goquote(text: str) -> str                       # Go's %q
-def os_error_text(op: str, path: str, exc: OSError) -> str   # "open x: no such file or directory"
-def exit_error(returncode: int) -> str | None       # None, "exit status 3", "signal: killed"
-def not_found_error(name: str) -> str               # 'exec: "claude": executable file not found in $PATH'
+# alr/durations.py
 def parse_duration(text: str) -> float              # seconds; ValueError when invalid
-def format_duration(seconds: float) -> str          # Go Duration.String() after rounding to the millisecond
+def format_duration(seconds: float) -> str          # "1m30.5s", rounded to the millisecond
 
 # alr/tasks.py  [Tasks 2, 3]
 PENDING = "pending"; FAILED = "failed"; COMPLETED = "completed"
@@ -158,6 +156,8 @@ async def finish(process: asyncio.subprocess.Process, drain: Awaitable[None] | N
 async def capture(argv: Sequence[str], *, cwd: str | None = None, env: Mapping[str, str] | None = None,
                   gentle: bool = False) -> tuple[int, str, str]      # returncode, stdout, stderr
 async def read_lines(stream: asyncio.StreamReader, on_line: Callable[[bytes], None]) -> None
+def exit_text(returncode: int) -> str | None       # None, "exit status 3", "signal: SIGKILL"
+def not_found_text(name: str) -> str               # "claude: not found on PATH"
 
 # alr/engine/result.py  [Task 4]
 def parse_result(line: str) -> tuple[str, str] | None
@@ -220,13 +220,15 @@ class RunLog:
 
 ## Review Focus
 
-1. **YAML 1.1 scalars.** PyYAML reads `yes`, `on`, and `12:30` as a bool and an int; gralph's YAML library reads them as strings. A task named `yes` or `12:30` must load, as it does in gralph. Test in Task 2.
-2. **Multi-line prompts across a save.** A long prompt must come back from a save as a readable `|` block with the exact same text, including colons, quotes, non-ASCII characters, and a trailing newline. Names such as `yes`, `true`, `~`, and `0o17` must still be strings after a save and reload. Test in Task 3.
+1. **YAML 1.1 scalars.** PyYAML reads an unquoted `yes`, `on`, or `12:30` as a bool or an int. Such a name must be rejected with a clear `name: must be a string` message, and the quoted form must load. Test in Task 2.
+2. **Multi-line prompts across a save.** A long prompt must come back from a save as a readable `|` block with the exact same text, including colons, quotes, non-ASCII characters, and a trailing newline. Tabs must not stop a prompt being written as a block. Names such as `yes`, `true`, and `~` must still be strings after a save and reload. Test in Task 3.
 3. **Session output that is not valid UTF-8.** Claude or a tool it runs can print arbitrary bytes. Plain mode must pass them through and still find the result line, not crash. Test in Task 6.
 4. **A stop when no subprocess is running.** SIGINT during startup or between two tasks must exit 1 with a one-line `error:` message and no traceback, and leave the task file as it was. Test in Task 12.
-5. **Quotes and non-ASCII text in gate names.** A gate such as `echo "héllo" && test -f a\b` appears inside `gate "..." failed` in the saved `error`. The quoting must match Go's `%q`. Test in Task 1.
+5. **Quotes and non-ASCII text in gate names.** A gate such as `echo "héllo" && test -f a\b` appears inside `gate "..." failed` in the saved `error`. The quoting must keep the message on one line and unambiguous. Test in `tests/unit/test_errors.py`.
 
 ---
+
+> **Status, 2026-10-04:** Tasks 1 to 5 are implemented (commits `bc9508a` to `e4a91a0`), followed by a cleanup pass (`a0079ec` and the commit after it) that applied ADR-007 and the review findings. The text of Tasks 1 to 5 below is kept as it was written and no longer matches the code in these ways: `gocompat.py` is gone (see `durations.py`, `errors.quote`, `proc.exit_text`, `proc.not_found_text`), the custom YAML loader is gone, `_GoDumper` is `_TaskDumper`, and `RunCancelled` is `RunCancelledError`. The sections above this note and Tasks 6 to 14 are current.
 
 ### Task 1: Clear the old code, set up the project, add the shared helpers
 
@@ -1165,7 +1167,7 @@ Translation notes:
 - Go's `runLoop(ctx, prompt, tl, tasksFile, gateTimeout, sessionArgs, repo, nil)` is `await loop.run(prompt, task_list, RunOptions(tasks_file=..., gate_timeout="", session_args=[...]), PlainFrontEnd())`.
 - A failed task or a failed save raises `RunError`; assert on its text. `LoadTasks` returning the list with `ErrFailedTasks` is `FailedTasksError` with `.task_list`.
 - Go tests capture stdout by swapping `os.Stdout`; use pytest's `capfd` fixture, which also sees what child processes write.
-- A cancelled context is a cancelled asyncio task: wrap the call with `asyncio.ensure_future`, cancel it, and expect `RunCancelled`. For `TestRunLoop_ContextAlreadyCancelled`, assert that `RunCancelled` is raised and the task file is unchanged; do not assert the error text.
+- A cancelled context is a cancelled asyncio task: wrap the call with `asyncio.ensure_future`, cancel it, and expect `RunCancelledError`. For `TestRunLoop_ContextAlreadyCancelled`, assert that `RunCancelledError` is raised and the task file is unchanged; do not assert the error text.
 
 Add the Review Focus test:
 
@@ -1191,8 +1193,8 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'alr.engine.loop'`.
 
 Loading, with gralph's exact messages:
 
-- `load_prompt(path)`: an `OSError` becomes `PromptError(f"prompt file {goquote(path)} is not accessible: {os_error_text('open', path, exc)}")`. Zero bytes: `PromptError("the prompt file is empty")`. Only whitespace: `PromptError("the prompt file is just whitespace")`. Otherwise return the text stripped. Read with `encoding="utf-8", errors="replace"`.
-- `load_tasks(path)`: an `OSError` becomes `TaskFileError(f"tasks file {goquote(path)} is not accessible: {os_error_text('open', path, exc)}")`. A `TaskFileError` from `parse_tasks` is re-raised as `TaskFileError(f"failed to parse tasks yaml: {exc}") from exc`. When any task is `FAILED`, raise `FailedTasksError(task_list)`.
+- `load_prompt(path)`: an `OSError` becomes `PromptError(f"prompt file {quote(path)} is not accessible: {exc.strerror}")`. Zero bytes: `PromptError("the prompt file is empty")`. Only whitespace: `PromptError("the prompt file is just whitespace")`. Otherwise return the text stripped. Read with `encoding="utf-8", errors="replace"`.
+- `load_tasks(path)`: an `OSError` becomes `TaskFileError(f"tasks file {quote(path)} is not accessible: {exc.strerror}")`. A `TaskFileError` from `parse_tasks` is re-raised as `TaskFileError(f"failed to parse tasks yaml: {exc}") from exc`. When any task is `FAILED`, raise `FailedTasksError(task_list)`.
 
 The loop:
 
@@ -1241,7 +1243,7 @@ async def _run_and_save(prompt: str, task: Task, task_list: TaskList, options: R
 
 - `_save` calls `save_tasks`. On `TaskFileError` for a completed task raise `RunError(f"task {task.id}: {task.name}: failed to save task state: {exc}") from exc`. For a failed task raise `RunError(f"{failure}\n{exc}") from exc` (Go's `errors.Join` puts each error on its own line).
 - `_run_task` builds `stdin_text = f"{prompt}\n\n{task.text()}\n"` and `argv = ["claude", "--print", *front_end.session_flags, *options.session_args]`, awaits `front_end.run_session(replace(task), argv, stdin_text)`, and resolves `outcome(result.error, last_result_line(result.text))`. It then calls `front_end.session_finished(task_copy_with_state_and_error, seconds)`. In this task it returns the session's outcome; Tasks 7 and 8 add the gates and the commit after a completed session.
-- Cancellation: wrap the session call in `try`/`except asyncio.CancelledError` and raise `RunCancelled(f"task {task.id}: {task.name} failed: signal: killed") from None`. Nothing is saved and neither `session_finished` nor `task_finished` is called.
+- Cancellation: wrap the session call in `try`/`except asyncio.CancelledError` and raise `RunCancelledError(f"task {task.id}: {task.name}: stopped") from None`. Nothing is saved and neither `session_finished` nor `task_finished` is called.
 - The engine never prints. `import` nothing from `alr.plain` or `alr.stream`.
 - Re-export `FAILED_TASKS_MESSAGE` from `alr.errors`. Import `Repo` under `TYPE_CHECKING` only; `alr.engine.commit` does not exist until Task 8, so until then annotate the field as `object | None`.
 
@@ -1275,7 +1277,7 @@ class PlainFrontEnd:
         try:
             process = await proc.start(argv, stdin=PIPE, stdout=PIPE)
         except FileNotFoundError:
-            return SessionResult(text="", error=not_found_error(argv[0]))
+            return SessionResult(text="", error=not_found_text(argv[0]))
 
         chunks: list[bytes] = []
         error = await proc.finish(process, _pump(process, stdin_text.encode(), chunks))
@@ -1313,7 +1315,7 @@ git commit -m "Port the run loop and the plain session from gralph"
 **Port from:** `gralph:src/internal/looper/gates.go`, the plain-path tests in `gates_test.go`
 
 **Interfaces:**
-- Consumes: `FrontEnd`, `proc.start`, `proc.finish`, `tasks.parse_timeout`, `gocompat.goquote`, `loop.run`.
+- Consumes: `FrontEnd`, `proc.start`, `proc.finish`, `tasks.parse_timeout`, `errors.quote`, `loop.run`.
 - Produces: `first_line`, `gate_limit`, `gate_failure`, `run_gates` in `alr.engine.gates`; `PlainFrontEnd.run_gate` and `gate_finished`.
 
 - [ ] **Step 1: Port the tests**
@@ -1356,7 +1358,7 @@ def gate_limit(gate: Gate, override: str) -> tuple[str, str]:
 
 
 def gate_failure(gate: Gate, limit: str, error: str | None, timed_out: bool) -> str:
-    name = goquote(first_line(gate.cmd))
+    name = quote(first_line(gate.cmd))
     if timed_out:
         return f"gate {name} timed out after {limit}"
 
@@ -1382,7 +1384,7 @@ async def run_gates(task: Task, gates: Sequence[Gate], override: str, front_end:
 2. Run `await front_end.run_gate(task, gate)` inside `async with asyncio.timeout(seconds):`. A `TimeoutError` means the gate hit its limit: `(None, True)`.
 3. Measure the time with `time.monotonic()` and call `front_end.gate_finished(task, gate, limit, error, timed_out, seconds_taken)` for a gate that ended on its own or timed out. A cancelled gate reports nothing: let `asyncio.CancelledError` pass through untouched.
 
-In `alr.engine.loop._run_task`, after a completed session: `state, error = await run_gates(task_copy, gates, options.gate_timeout, front_end)`. Extend the cancellation handling: a cancel during the gates raises `RunCancelled(f"task {task.id}: {task.name} failed: gate {goquote(first_line(gate.cmd))}: signal: killed")`. To know which gate was running, catch `asyncio.CancelledError` inside `run_gates` around each gate and re-raise it as a small private exception carrying the gate, or keep the current gate on a local the handler can read; pick whichever keeps `run_gates` flat.
+In `alr.engine.loop._run_task`, after a completed session: `state, error = await run_gates(task_copy, gates, options.gate_timeout, front_end)`. Extend the cancellation handling: a cancel during the gates raises `RunCancelledError(f"task {task.id}: {task.name}: stopped during gate {quote(first_line(gate.cmd))}")`. To know which gate was running, catch `asyncio.CancelledError` inside `run_gates` around each gate and re-raise it as a small private exception carrying the gate, or keep the current gate on a local the handler can read; pick whichever keeps `run_gates` flat.
 
 - [ ] **Step 4: Add `run_gate` and `gate_finished` to `PlainFrontEnd`**
 
@@ -1445,13 +1447,13 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'alr.engine.commit'`.
 Port `commit.go` function by function. Points where the Python differs:
 
 - Quiet git commands (`rev-parse --show-toplevel`, `status`, `check-ignore`, `diff --cached --quiet`, `rev-parse HEAD`) run through `proc.capture(["git", ...], cwd=repo.root, gentle=True)`. Only `add -A` and `commit -m <name>` go through `front_end.run_git(task, argv, repo.root)`.
-- `find_root`: run with `env={**os.environ, "LC_ALL": "C"}` and no `cwd`. `FileNotFoundError` (git not installed) returns `None`. A non-zero exit whose stderr contains `not a git repository` or `must be run in a work tree` returns `None`. Any other failure raises `RepoError(f"--commit: git rev-parse: {reason}")`, where `reason` is `gitMessage`: the first line of stderr, trimmed, without a leading `fatal: `, or the exit text from `gocompat.exit_error` when stderr is empty.
+- `find_root`: run with `env={**os.environ, "LC_ALL": "C"}` and no `cwd`. `FileNotFoundError` (git not installed) returns `None`. A non-zero exit whose stderr contains `not a git repository` or `must be run in a work tree` returns `None`. Any other failure raises `RepoError(f"--commit: git rev-parse: {reason}")`, where `reason` is `gitMessage`: the first line of stderr, trimmed, without a leading `fatal: `, or the exit text from `proc.exit_text` when stderr is empty.
 - `_relative(repo, path)`: `os.path.abspath`, resolve only the parent folder's symlinks (`os.path.realpath` on the nearest existing ancestor, as `resolveExisting` does), `os.path.relpath` against the root, and treat a result that is `..`, starts with `../`, or is absolute as outside the tree.
 - Error text, exact: `--commit needs the task file ignored by git or outside the repository: <rel>`; `--commit needs the log directory ignored by git or outside the repository: <dir of rel>`; `--commit needs a clean work tree; commit, stash, or remove:\n<files>`; `--commit: git status: <reason>`; `--commit: git check-ignore: <reason>`.
 - `commit(repo, task, front_end) -> tuple[str, str]`: `add -A`; if it fails return `(FAILED, f"commit failed: {error}")`. Check `git diff --cached --quiet`: exit 0 means nothing staged, return `(COMPLETED, "")`; exit 1 means staged; any other exit is a failure, `(FAILED, f"commit failed: {exit text}")`. When staged: `front_end.commit_started(task)`, then `commit -m <task.name>`; on failure `(FAILED, f"commit failed: {error}")`. On success read `git rev-parse HEAD`; when that works call `front_end.committed(task, hash)`; when it does not, call nothing and still return `(COMPLETED, "")`.
 - The engine does not print. The `commit:` line belongs to the plain front end.
 
-In `alr.engine.loop`: type `RunOptions.repo` as `Repo | None`. In `_run_task`, after the gates return `COMPLETED` and `options.repo` is not `None`: `state, error = await commit(options.repo, task_copy, front_end)`. A cancel during the commit raises `RunCancelled(f"task {task.id}: {task.name} failed: commit: signal: terminated")`.
+In `alr.engine.loop`: type `RunOptions.repo` as `Repo | None`. In `_run_task`, after the gates return `COMPLETED` and `options.repo` is not `None`: `state, error = await commit(options.repo, task_copy, front_end)`. A cancel during the commit raises `RunCancelledError(f"task {task.id}: {task.name}: stopped during commit")`.
 
 - [ ] **Step 4: Add the commit calls to `PlainFrontEnd`**
 
@@ -1530,8 +1532,8 @@ async def start(prompt_file: str, tasks_file: str, gate_timeout: str, session_ar
     options = RunOptions(tasks_file=tasks_file, gate_timeout=gate_timeout, session_args=session_args, repo=repo)
     try:
         await run(prompt, task_list, options, PlainFrontEnd())
-    except RunCancelled as exc:
-        raise RunCancelled(f"loop error: {exc}") from exc
+    except RunCancelledError as exc:
+        raise RunCancelledError(f"loop error: {exc}") from exc
     except RunError as exc:
         raise RunError(f"loop error: {exc}") from exc
 ```
@@ -1665,7 +1667,7 @@ class StreamFrontEnd:
 
 - `task_skipped`: nothing (gralph sends no event for a skipped task).
 - `task_started`: `TaskStarted(task)`.
-- `run_session`: start with `stdin=PIPE, stdout=PIPE, stderr=PIPE`. A `FileNotFoundError` returns `SessionResult("", not_found_error(argv[0]))`. Feed stdin, and read stdout and stderr at the same time with `proc.read_lines`. Each stdout line goes through `parse_stream_line`: every activity line becomes `Activity(task, line)`, and a result event's text is kept. Each stderr line becomes `Activity(task, line.decode("utf-8", errors="replace").rstrip("\r\n"))`. Return `SessionResult(text=<kept result text>, error=<exit text>)`. Nothing is written to stdout or stderr.
+- `run_session`: start with `stdin=PIPE, stdout=PIPE, stderr=PIPE`. A `FileNotFoundError` returns `SessionResult("", not_found_text(argv[0]))`. Feed stdin, and read stdout and stderr at the same time with `proc.read_lines`. Each stdout line goes through `parse_stream_line`: every activity line becomes `Activity(task, line)`, and a result event's text is kept. Each stderr line becomes `Activity(task, line.decode("utf-8", errors="replace").rstrip("\r\n"))`. Return `SessionResult(text=<kept result text>, error=<exit text>)`. Nothing is written to stdout or stderr.
 - `session_finished`: `SessionFinished(task, seconds)`.
 - `run_gate`: report `Activity(task, "→ gate " + first_line(gate.cmd))`, then run `sh -c <cmd>` with both pipes and report each stdout and stderr line as `Activity`, stripped of its line ending.
 - `gate_finished`: `GateFinished(task, gate, limit, error, timed_out, seconds)`.
@@ -1702,7 +1704,7 @@ git commit -m "Port the stream path: events, stream-json parsing, and the stream
 **Port from:** `gralph:src/internal/runlog/runlog.go`, `ledger.go`, `runlog_test.go`
 
 **Interfaces:**
-- Consumes: the event classes from Task 10; `alr.errors.RunLogError`; `alr.gocompat.format_duration`, `os_error_text`; `alr.engine.gates.first_line`; `alr.tasks.FAILED`.
+- Consumes: the event classes from Task 10; `alr.errors.RunLogError`; `alr.durations.format_duration`; `alr.engine.gates.first_line`; `alr.tasks.FAILED`.
 - Produces: `run_dir`, `Info`, `RunLog.open`, `RunLog.record`, `RunLog.close`.
 
 - [ ] **Step 1: Port the tests**
@@ -1719,7 +1721,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'alr.stream.runlog'`.
 Port `runlog.go`. Exact formats:
 
 - `run_dir(log_dir, start)`: `os.path.join(log_dir, start.strftime("%Y%m%dT%H%M%S"))`.
-- `RunLog.open`: `os.makedirs(parent, mode=0o700, exist_ok=True)`, then `os.mkdir(run_dir, 0o700)` (an existing run folder is an error). Open `run.jsonl` with `os.open(path, O_CREAT | O_WRONLY | O_APPEND, 0o600)`. Write the `run_started` line. Any `OSError` becomes `RunLogError(os_error_text(op, path, exc)) from exc`, with `op` `mkdir` or `open`.
+- `RunLog.open`: `os.makedirs(parent, mode=0o700, exist_ok=True)`, then `os.mkdir(run_dir, 0o700)` (an existing run folder is an error). Open `run.jsonl` with `os.open(path, O_CREAT | O_WRONLY | O_APPEND, 0o600)`. Write the `run_started` line. Any `OSError` becomes `RunLogError(f"{path}: {exc.strerror}") from exc`.
 - Every ledger line is `json.dumps(line, separators=(",", ":"), ensure_ascii=False) + "\n"`, where `line` is a `dict` built in the key order of the matching struct in `ledger.go`, starting with `time` and `event`. Leave out a key marked `omitempty` when its value is empty: `sandbox_settings`, `gate_timeout`, `error`.
 - `time` is the clock's value as RFC 3339 with seconds precision and the local offset: `now().astimezone().isoformat(timespec="seconds")`, with a trailing `+00:00` written as `Z`.
 - Event to line: `TaskStarted` → `task_started` (`task`, `name`), and open `task-<id>.log` for appending; `Activity` → append `HH:MM:SS <line>\n` to that file; `SessionFinished` → `session_finished` (`task`, `state`, `error`, `duration`); `GateFinished` → `gate_finished` (`task`, `cmd` first line only, `result` one of `passed`, `timed_out`, `failed`, `timeout`, `duration`); `Committed` → `committed` (`task`, `hash`); `TaskFinished` → `task_finished` (same shape as `session_finished`), remember whether the task failed, and close the detail file; `RunDone` → `run_finished` (`result`, `error`, `duration`), where `result` is `completed` with no error, `failed` when the last finished task failed, and `stopped` otherwise.
@@ -1924,6 +1926,8 @@ async def _with_signals(coro: Coroutine[None, None, None]) -> None:
 ```
 
 Write the `task is None` check as an explicit `if task is None: raise RuntimeError("no running task")` instead of the `assert` shown; asserts are stripped under `-O`.
+
+One known gap to cover here: when a commit is being stopped gently (SIGTERM, then up to 2 seconds), a second SIGINT or SIGTERM must not let `alr` exit while git or one of its hooks is still running. Make a second signal during that wait a no-op, and add a test with a hook that ignores SIGTERM.
 
 - [ ] **Step 4: Run the tests to see them pass**
 

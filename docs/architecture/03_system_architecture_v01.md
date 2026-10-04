@@ -54,7 +54,7 @@ src/alr/
   main.py          entry point: runs cli, sets the exit code
   cli.py           flags, startup checks in gralph's order, routing
   errors.py        AlrError and its subclasses
-  gocompat.py      text and durations worded the way gralph's Go code words them
+  durations.py     parse and format durations such as 90s and 1m30.5s
   tasks.py         task file: parse, validate, atomic save, timeout parsing
   engine/
     frontend.py    the FrontEnd interface
@@ -119,12 +119,12 @@ How gralph's packages map onto this:
 
 **Responsibilities:**
 
-- Compose the file into YAML nodes and reject any tag outside the core set before reading values
-- Validate the optional top-level `gates` list and every task with gralph's rules and error text (`tasks[<index>] (id <id>): <field>: <problem>`, `gates[<j>]: <field>: <problem>`)
+- Compose the file into YAML nodes with PyYAML's standard safe loader and reject any tag outside the core set, including `<<` merge keys, before reading values
+- Validate the optional top-level `gates` list and every task with gralph's field rules and errors shaped as (`tasks[<index>] (id <id>): <field>: <problem>`, `gates[<j>]: <field>: <problem>`)
 - Keep the difference between an absent `gates` key (not decided) and `gates: []` (decided: none)
 - Normalize an empty `state` to `pending`; never alter `name` or `prompt`
 - Produce the task text sent to Claude: `<id>: <name>`, a blank line, then the prompt, trimmed
-- Parse Go-style durations (`90s`, `10m`) for gate timeouts and `--gate-timeout`
+- Parse durations (`90s`, `10m`, `1h30m`) for gate timeouts and `--gate-timeout`
 - Save atomically: write a temp file, then rename over the original; 2-space indent, `gates` above `tasks`
 
 **Key Characteristics:**
@@ -278,7 +278,7 @@ SIGINT or SIGTERM cancels the run. The process group of whatever is running is k
 
 Two kinds of failure are kept apart.
 
-**A task that fails is an outcome, not an exception.** A bad or missing result line, a non-zero exit from Claude, a failed or timed-out gate, or a commit git refuses makes the task `failed`, with the reason in its `error` field. The file is saved, the run stops, and `alr` exits 1. Error text matches gralph's, including Go's wording for exits (for example `gate "<cmd>" failed: exit status 1`, `gate "<cmd>" timed out after <timeout>`, `commit failed: exit status 1`).
+**A task that fails is an outcome, not an exception.** A bad or missing result line, a non-zero exit from Claude, a failed or timed-out gate, or a commit git refuses makes the task `failed`, with the reason in its `error` field. The file is saved, the run stops, and `alr` exits 1. Error text keeps gralph's shape (for example `gate "<cmd>" failed: exit status 1`, `gate "<cmd>" timed out after <timeout>`, `commit failed: exit status 1`) without having to match it word for word (ADR-007).
 
 **A problem with the run itself is an exception** under `AlrError` in `alr.errors`:
 
@@ -292,7 +292,7 @@ Two kinds of failure are kept apart.
 | `RepoError`           | `--commit` finds a dirty work tree, a tracked task file, or a broken git |
 | `RunLogError`         | The run log cannot be opened or written                                  |
 | `RunError`            | A task failed (after its state was saved), or its state cannot be saved  |
-| `RunCancelled`        | The run was stopped by a signal; a kind of `RunError`                    |
+| `RunCancelledError`   | The run was stopped by a signal; a kind of `RunError`                    |
 
 A failed task is saved as an outcome first. The engine then raises `RunError` so the run stops and the command exits 1 with `error: loop error: task <id>: <name> failed: <reason>`, as gralph does.
 
