@@ -7,18 +7,18 @@ OUTPUT_DIR="${OUTPUT_DIR:-${PROJ_ROOT}/dist}"
 
 BUILD_VER="${BUILD_VER:-$(git -C "${PROJ_ROOT}" describe --tags --abbrev=0 2>/dev/null || echo '0.0.0.dev0')}"
 
-run_quiet() {
-    local log
-    local rc=0
-    log="$(mktemp 2>/dev/null || mktemp -t 'gralph-build')"
-    "$@" >"${log}" 2>&1 || rc=$?
-    if [ "${rc}" -ne 0 ]; then
-        cat "${log}"
-    fi
+# run_quiet() {
+#     local log
+#     local rc=0
+#     log="$(mktemp 2>/dev/null || mktemp -t 'gralph-build')"
+#     "$@" >"${log}" 2>&1 || rc=$?
+#     if [ "${rc}" -ne 0 ]; then
+#         cat "${log}"
+#     fi
 
-    rm -f "${log}"
-    return "${rc}"
-}
+#     rm -f "${log}"
+#     return "${rc}"
+# }
 
 COMPOSE_FILE_PATH="${PROJ_ROOT}/tests/docker-compose.yaml"
 
@@ -34,7 +34,7 @@ build() {
     clean_output
 
     printf "building alr..."
-    run_quiet docker build --rm --no-cache --pull --progress=plain \
+    docker build --rm --no-cache --pull --progress=plain \
         --file "${SCRIPT_DIR}/Dockerfile" \
         --build-arg BUILD_VER="${BUILD_VER}" \
         --target export \
@@ -78,7 +78,7 @@ e2e_tests() {
     export ALR_WHEEL="${wheel}"
 
     printf "starting end-to-end tests with %s..." "${wheel}"
-    run_quiet docker compose --progress=plain -f "${COMPOSE_FILE_PATH}" build
+    docker compose --progress=plain -f "${COMPOSE_FILE_PATH}" build --progress=plain
     docker compose -f "${COMPOSE_FILE_PATH}" up --remove-orphans --exit-code-from tests || rc=$?
     docker compose -f "${COMPOSE_FILE_PATH}" down --remove-orphans --rmi local >/dev/null 2>&1 || true
 
