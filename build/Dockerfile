@@ -4,6 +4,10 @@ ARG BUILD_VER
 
 WORKDIR /workspace
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
