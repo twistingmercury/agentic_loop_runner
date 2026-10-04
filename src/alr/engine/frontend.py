@@ -15,7 +15,7 @@ class SessionResult:
     """Where the result line is read from."""
 
     error: str | None
-    """Go-style exit text; None on a zero exit."""
+    """`exit status 3` or `signal: SIGKILL`; None on a zero exit."""
 
 
 class FrontEnd(Protocol):

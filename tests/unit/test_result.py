@@ -32,24 +32,6 @@ EXIT_ERROR = "exit status 1"
             (COMPLETED, ""),
             id="unknown fields are ignored",
         ),
-        pytest.param("{state: completed}", None, id="invalid json"),
-        pytest.param('["completed",""]', None, id="json array is not an object"),
-        pytest.param('"completed"', None, id="json string is not an object"),
-        pytest.param("42", None, id="json number is not an object"),
-        pytest.param('{"state":"in_progress","error":""}', None, id="unknown state"),
-        pytest.param('{"error":"boom"}', None, id="missing state"),
-        pytest.param("", None, id="empty line"),
-    ],
-)
-def test_parse_result(line: str, want: tuple[str, str] | None) -> None:
-    assert parse_result(line) == want
-
-
-# gralph decodes the line with Go's encoding/json; these pin what that decoder
-# does where Python's json module would otherwise decide differently.
-@pytest.mark.parametrize(
-    ("line", "want"),
-    [
         pytest.param('{"state":"completed"}', (COMPLETED, ""), id="missing error"),
         pytest.param(
             '{"state":"failed","error":null}', (FAILED, ""), id="null error is empty"
@@ -57,35 +39,41 @@ def test_parse_result(line: str, want: tuple[str, str] | None) -> None:
         pytest.param('{"state":null,"error":""}', None, id="null state is empty"),
         pytest.param(
             '{"State":"completed","ERROR":"x"}',
-            (COMPLETED, "x"),
-            id="keys match ignoring case",
+            None,
+            id="keys in another case are not the keys",
         ),
         pytest.param(
             '{"state":"completed","State":"failed","error":"x"}',
-            (FAILED, "x"),
-            id="the last of two keys differing in case wins",
-        ),
-        pytest.param(
-            '{"state":"completed","State":null}',
-            (COMPLETED, ""),
-            id="a null does not clear an earlier value",
+            (COMPLETED, "x"),
+            id="a key in another case is ignored",
         ),
         pytest.param('{"state":1,"error":""}', None, id="state is not a string"),
         pytest.param(
             '{"state":"failed","error":["boom"]}', None, id="error is not a string"
         ),
-        pytest.param(
-            '{"state":"completed","error":"","extra":NaN}',
-            None,
-            id="NaN is not valid json",
-        ),
+        pytest.param("{state: completed}", None, id="invalid json"),
+        pytest.param('["completed",""]', None, id="json array is not an object"),
+        pytest.param('"completed"', None, id="json string is not an object"),
+        pytest.param("42", None, id="json number is not an object"),
         pytest.param("null", None, id="json null is not a result"),
+        pytest.param('{"state":"in_progress","error":""}', None, id="unknown state"),
+        pytest.param('{"error":"boom"}', None, id="missing state"),
+        pytest.param("", None, id="empty line"),
         pytest.param("[" * 100_000, None, id="deeply nested line"),
+        # A lone surrogate cannot be written as UTF-8, so it must not reach the saved error.
+        pytest.param(
+            '{"state":"failed","error":"bad \\ud800 text"}',
+            (FAILED, "bad \ufffd text"),
+            id="a lone surrogate escape is replaced",
+        ),
+        pytest.param(
+            '{"state":"failed","error":"ok \\ud83d\\ude00"}',
+            (FAILED, "ok \U0001f600"),
+            id="a surrogate pair escape is kept",
+        ),
     ],
 )
-def test_parse_result_matches_go_decoding(
-    line: str, want: tuple[str, str] | None
-) -> None:
+def test_parse_result(line: str, want: tuple[str, str] | None) -> None:
     assert parse_result(line) == want
 
 
@@ -184,16 +172,3 @@ def test_outcome(
     run_error: str | None, last_line: str, want_state: str, want_error: str
 ) -> None:
     assert outcome(run_error, last_line) == (want_state, want_error)
-
-
-def test_parse_result_replaces_a_lone_surrogate_escape() -> None:
-    # A lone surrogate cannot be written as UTF-8, so it must not reach the saved error.
-    line = '{"state":"failed","error":"bad \\ud800 text"}'
-
-    assert parse_result(line) == (FAILED, "bad \ufffd text")
-
-
-def test_parse_result_keeps_a_surrogate_pair_escape() -> None:
-    line = '{"state":"failed","error":"ok \\ud83d\\ude00"}'
-
-    assert parse_result(line) == (FAILED, "ok \U0001f600")

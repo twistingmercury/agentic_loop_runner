@@ -8,10 +8,13 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from subprocess import DEVNULL
 
 # How long a gentle stop waits for the group to exit on SIGTERM before SIGKILL,
-# and how long a gentle capture keeps reading after its process has exited.
+# and how long a gentle finish keeps draining after its process has exited.
 # Tests patch it to stay fast.
 _GENTLE_GRACE = 2.0
 _GENTLE_POLL = 0.01
+# How often to look at the exit code when waiting on the process does not wake
+# up; see _wait_for_exit.
+_EXIT_POLL = 0.1
 _READ_SIZE = 64 * 1024
 
 
@@ -47,22 +50,81 @@ async def finish(
     *,
     gentle: bool = False,
 ) -> str | None:
-    """Wait for process after drain is done and return its exit text.
+    """Run drain alongside process until both are done and return the exit text.
 
     If the drain or the wait raises anything, cancellation included, the whole
     group is stopped before the error carries on.
     gentle is for git, which cleans up its index lock on SIGTERM but not on SIGKILL.
+    It also bounds the drain: once the process has exited, a drain still held
+    open by a background process is cut off after a grace period, keeping what
+    it had read.
     """
-    try:
-        if drain is not None:
-            await drain
+    return exit_text(await _run_to_exit(process, drain, gentle))
 
-        returncode = await _wait_for_exit(process)
+
+async def _run_to_exit(
+    process: asyncio.subprocess.Process,
+    drain: Awaitable[None] | None,
+    gentle: bool,
+) -> int:
+    """Wait for the child to exit, then for the drain; stop the group if either fails."""
+    task = None if drain is None else asyncio.ensure_future(drain)
+    try:
+        await _wait_for_exit(process, task)
+        if task is not None:
+            await _finish_drain(task, gentle)
     except BaseException:
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
         await asyncio.shield(_stop_group(process, gentle))
         raise
 
-    return exit_text(returncode)
+    if process.returncode is None:
+        raise RuntimeError(f"process {process.pid} finished without an exit code")
+
+    return process.returncode
+
+
+async def _wait_for_exit(
+    process: asyncio.subprocess.Process, drain: asyncio.Future[None] | None
+) -> None:
+    """Wait until the child itself has exited, whoever still holds its pipes.
+
+    Waiting on the process wakes at once in the normal case. On Python 3.12 it
+    also waits for the pipes to close, so a descendant that keeps them open
+    would block it forever; the exit code is set the moment the child exits, so
+    looking at it every _EXIT_POLL seconds covers that case. A drain that fails
+    ends the wait early. A drain that finishes cleanly is left out of the next
+    round, or the wait would return at once every time.
+    """
+    exited = asyncio.ensure_future(process.wait())
+    try:
+        while process.returncode is None:
+            waiting: set[asyncio.Future[object]] = {exited}
+            if drain is not None and not drain.done():
+                waiting.add(drain)
+
+            await asyncio.wait(
+                waiting, timeout=_EXIT_POLL, return_when=asyncio.FIRST_COMPLETED
+            )
+            if drain is not None and drain.done():
+                drain.result()
+    finally:
+        exited.cancel()
+        await asyncio.gather(exited, return_exceptions=True)
+
+
+async def _finish_drain(drain: asyncio.Future[None], gentle: bool) -> None:
+    """Let the drain finish; when gentle, only for the grace period."""
+    if not gentle:
+        await drain
+        return
+
+    # wait_for cancels the drain at the deadline; what it read is kept.
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(drain, _GENTLE_GRACE)
 
 
 def exit_text(returncode: int) -> str | None:
@@ -107,12 +169,11 @@ async def capture(
         env=env,
     )
     stdout, stderr = bytearray(), bytearray()
-    await finish(process, _read_pipes(process, stdout, stderr, gentle), gentle=gentle)
-    if process.returncode is None:
-        raise RuntimeError(f"{argv[0]} finished without an exit code")
-
+    returncode = await _run_to_exit(
+        process, _read_pipes(process, stdout, stderr), gentle
+    )
     return (
-        process.returncode,
+        returncode,
         stdout.decode("utf-8", errors="replace"),
         stderr.decode("utf-8", errors="replace"),
     )
@@ -143,43 +204,15 @@ async def read_lines(
 
 
 async def _read_pipes(
-    process: asyncio.subprocess.Process,
-    stdout: bytearray,
-    stderr: bytearray,
-    gentle: bool,
+    process: asyncio.subprocess.Process, stdout: bytearray, stderr: bytearray
 ) -> None:
     """Read both pipes at the same time, so a full one never blocks the child."""
     if process.stdout is None or process.stderr is None:
         raise RuntimeError("the process was started without output pipes")
 
-    reads = asyncio.gather(
+    await asyncio.gather(
         _read_all(process.stdout, stdout), _read_all(process.stderr, stderr)
     )
-    try:
-        if not gentle:
-            await reads
-            return
-
-        await _wait_for_exit(process)
-        # wait_for cancels the reads at the deadline; what they read is kept.
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(reads, _GENTLE_GRACE)
-    finally:
-        reads.cancel()
-        await asyncio.gather(reads, return_exceptions=True)
-
-
-async def _wait_for_exit(process: asyncio.subprocess.Process) -> int:
-    """Wait until the child itself has exited, whoever still holds its pipes.
-
-    On Python 3.12 `Process.wait()` also waits for the pipes to close, so a
-    descendant that keeps them open would block it; `returncode` is set the
-    moment the child exits, on every version.
-    """
-    while (returncode := process.returncode) is None:
-        await asyncio.sleep(_GENTLE_POLL)
-
-    return returncode
 
 
 async def _read_all(stream: asyncio.StreamReader, buffer: bytearray) -> None:
@@ -208,10 +241,8 @@ def _signal_group(pgid: int, sig: int) -> bool:
     """Send sig to the group; False when the group is already gone."""
     try:
         os.killpg(pgid, sig)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
+    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
+    except (ProcessLookupError, PermissionError):
         return False
 
     return True

@@ -3,8 +3,12 @@
 import json
 import os
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
+
+import pytest
 
 STREAM_ARGS = [
     "--print",
@@ -43,19 +47,12 @@ def test_fake_claude_stream_json(fake_claude: Path) -> None:
 
 
 def test_fake_claude_stream_json_big_event(fake_claude: Path) -> None:
-    lines = run_stream_fake(fake_claude, FAKE_CLAUDE_BIG_EVENT="200000")
+    lines = run_stream_fake(fake_claude, FAKECLAUDE_BIG_EVENT="200000")
 
     for line in lines:
         json.loads(line)
 
     assert max(len(line) for line in lines) >= 200000
-
-
-def test_fake_claude_records_args(fake_claude: Path, tmp_path: Path) -> None:
-    args_file = tmp_path / "args"
-    run_stream_fake(fake_claude, FAKE_CLAUDE_ARGS=str(args_file))
-
-    assert args_file.read_text(encoding="utf-8") == " ".join(STREAM_ARGS) + "\n"
 
 
 def test_fake_claude_records_each_call_as_json(
@@ -79,7 +76,48 @@ def test_fake_claude_plain_output(fake_claude: Path) -> None:
         )
 
     assert run().stdout == b'{"state":"completed","error":""}\n'
-    assert run(FAKE_CLAUDE_OUTPUT="").stdout == b""
+    assert run(FAKECLAUDE_OUTPUT="").stdout == b""
 
-    failed = run(FAKECLAUDE_EXIT_CODE="3", FAKECLAUDE_STDERR_MSG="boom")
-    assert (failed.returncode, failed.stdout, failed.stderr) == (3, b"", b"boom\n")
+    failed = run(FAKECLAUDE_EXIT_CODE="3", FAKECLAUDE_STDERR="boom")
+    assert (failed.returncode, failed.stdout, failed.stderr) == (3, b"", b"boom")
+
+
+def test_fake_claude_blocks_with_a_descendant_until_killed(
+    fake_claude: Path, tmp_path: Path
+) -> None:
+    ready, descendant = tmp_path / "ready", tmp_path / "descendant"
+    env = {
+        **os.environ,
+        "FAKECLAUDE_BLOCK": "1",
+        "FAKECLAUDE_READY_FILE": str(ready),
+        "FAKECLAUDE_DESCENDANT_PID_FILE": str(descendant),
+    }
+    process = subprocess.Popen(["claude", "--print"], env=env, stdin=subprocess.PIPE)
+    try:
+        assert process.stdin is not None
+        process.stdin.write(b"prompt\n")
+        process.stdin.close()
+        while not ready.exists() or not ready.read_text():
+            time.sleep(0.01)
+
+        assert ready.read_text() == str(process.pid)
+        assert process.poll() is None
+        os.kill(int(descendant.read_text()), signal.SIGKILL)
+    finally:
+        process.kill()
+        process.wait()
+
+
+def test_fake_claude_blocks_only_when_stdin_matches(fake_claude: Path) -> None:
+    def run(stdin: bytes) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["claude", "--print"],
+            env={**os.environ, "FAKECLAUDE_BLOCK_ON": "second task"},
+            input=stdin,
+            capture_output=True,
+            timeout=0.5,
+        )
+
+    assert run(b"first task\n").returncode == 0
+    with pytest.raises(subprocess.TimeoutExpired):
+        run(b"the second task\n")

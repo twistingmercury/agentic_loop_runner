@@ -3,65 +3,18 @@
 import asyncio
 import os
 import signal
-import sys
 import time
-from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from alr.engine import proc
 
-# The parent starts a descendant,
-# writes its PID to the ready file named in argv, and blocks.
-_DESCENDANT = "import time\nwhile True:\n    time.sleep(3600)\n"
-_PARENT = f"""
-import subprocess, sys, time
-from pathlib import Path
-
-descendant = subprocess.Popen([sys.executable, "-c", {_DESCENDANT!r}])
-Path(sys.argv[1]).write_text(str(descendant.pid))
-while True:
-    time.sleep(3600)
-"""
-
-
-@pytest.fixture
-def descendant_ready(tmp_path: Path) -> Iterator[Path]:
-    """The ready file path; whatever PID it ends up holding is killed afterwards."""
-    path = tmp_path / "descendant-ready"
-    yield path
-    if not path.exists():
-        return
-
-    try:
-        os.kill(int(path.read_text()), signal.SIGKILL)
-    except (ProcessLookupError, ValueError):
-        return
-
-
-async def wait_for_process_tree_pid(path: Path, waiter: asyncio.Future) -> int:
-    deadline = asyncio.get_running_loop().time() + 5
-    while asyncio.get_running_loop().time() < deadline:
-        text = path.read_text() if path.exists() else ""
-        if text:
-            return int(text)
-
-        if waiter.done():
-            pytest.fail("process exited before descendant was ready")
-
-        await asyncio.sleep(0.01)
-
-    pytest.fail("descendant did not become ready")
-
 
 def unix_process_is_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+    if not _probe(pid):
         return False
-    except PermissionError:
-        pass
 
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
@@ -80,32 +33,32 @@ def _probe(pid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        # The process exists; it just belongs to someone else.
+        pass
 
     return True
 
 
-async def test_terminate_process_tree(descendant_ready: Path) -> None:
-    process = await proc.start([sys.executable, "-c", _PARENT, str(descendant_ready)])
-    waiter = asyncio.ensure_future(proc.finish(process))
-    descendant_pid = await wait_for_process_tree_pid(descendant_ready, waiter)
-
-    waiter.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(waiter, 5)
-
-    assert process.returncode == -signal.SIGKILL
-
+async def wait_until_gone(pid: int) -> None:
     deadline = asyncio.get_running_loop().time() + 2
-    while (
-        unix_process_is_running(descendant_pid)
-        and asyncio.get_running_loop().time() < deadline
-    ):
+    while unix_process_is_running(pid):
+        if asyncio.get_running_loop().time() > deadline:
+            pytest.fail(f"process {pid} remained running")
+
         await asyncio.sleep(0.01)
 
-    assert not unix_process_is_running(descendant_pid), (
-        f"descendant process {descendant_pid} remained running after cancellation"
-    )
+
+async def wait_for_text(path: Path) -> str:
+    """Wait for a child to write something to path and return it."""
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        text = path.read_text().strip() if path.exists() else ""
+        if text:
+            return text
+
+        await asyncio.sleep(0.01)
+
+    pytest.fail(f"{path.name} was never written")
 
 
 async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> None:
@@ -114,8 +67,7 @@ async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> No
         ["sh", "-c", f"trap 'exit 7' TERM; echo ready > {ready}; sleep 60 & wait"]
     )
     waiter = asyncio.ensure_future(proc.finish(process, gentle=True))
-    while not ready.exists():
-        await asyncio.sleep(0.01)
+    await wait_for_text(ready)
 
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -138,23 +90,14 @@ async def test_cancel_kills_the_whole_group(tmp_path: Path) -> None:
     pid_file = tmp_path / "child.pid"
     process = await proc.start(["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"])
     waiter = asyncio.ensure_future(proc.finish(process))
-    while not pid_file.exists() or not pid_file.read_text().strip():
-        await asyncio.sleep(0.01)
+    await wait_for_text(pid_file)
 
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
 
-    child = int(pid_file.read_text())
-    for _ in range(200):
-        try:
-            os.kill(child, 0)
-        except ProcessLookupError:
-            return
-
-        await asyncio.sleep(0.01)
-
-    pytest.fail("the grandchild outlived the cancel")
+    assert process.returncode == -signal.SIGKILL
+    await wait_until_gone(int(pid_file.read_text()))
 
 
 async def test_read_lines_has_no_length_limit() -> None:
@@ -228,15 +171,6 @@ async def test_finish_stops_the_group_when_the_drain_fails(tmp_path: Path) -> No
     await wait_until_gone(int(pid_file.read_text()))
 
 
-async def wait_until_gone(pid: int) -> None:
-    deadline = asyncio.get_running_loop().time() + 2
-    while unix_process_is_running(pid):
-        if asyncio.get_running_loop().time() > deadline:
-            pytest.fail(f"process {pid} remained running")
-
-        await asyncio.sleep(0.01)
-
-
 async def _kill_holder_and_let_pipes_close(pid_file: Path) -> None:
     os.kill(int(pid_file.read_text()), signal.SIGKILL)
     # Closing the pipes lets asyncio finish with the transport; one left open
@@ -288,6 +222,62 @@ async def test_finish_returns_when_a_descendant_holds_the_pipes(
     assert result is None
 
 
+async def test_gentle_finish_cuts_off_a_drain_held_open_by_a_background_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "holder.pid"
+    process = await proc.start(
+        ["sh", "-c", f"sleep 3 & echo $! > {pid_file}; echo line"],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+    started = time.monotonic()
+
+    try:
+        result = await proc.finish(
+            process, proc.read_lines(process.stdout, lines.append), gentle=True
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        await _kill_holder_and_let_pipes_close(pid_file)
+
+    assert result is None
+    assert lines == [b"line\n"]
+    assert elapsed < 2
+
+
+async def test_finish_does_not_spin_when_the_drain_ends_before_the_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waits = 0
+    real_wait = asyncio.wait
+
+    async def counting_wait(*args: Any, **kwargs: Any) -> Any:
+        nonlocal waits
+        waits += 1
+        return await real_wait(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "wait", counting_wait)
+    # The child closes its output at once, so the drain is done while it runs on.
+    process = await proc.start(
+        ["sh", "-c", "exec >/dev/null 2>&1; sleep 0.3"],
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+
+    result = await asyncio.wait_for(
+        proc.finish(process, proc.read_lines(process.stdout, lines.append)), 5
+    )
+
+    assert result is None
+    # A busy loop would count thousands; a sleeping one a handful.
+    assert waits < 10
+
+
 async def test_gentle_cancel_kills_a_child_that_ignores_sigterm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -297,8 +287,7 @@ async def test_gentle_cancel_kills_a_child_that_ignores_sigterm(
         ["sh", "-c", f"trap '' TERM; echo ready > {ready}; while :; do sleep 0.1; done"]
     )
     waiter = asyncio.ensure_future(proc.finish(process, gentle=True))
-    while not ready.exists():
-        await asyncio.sleep(0.01)
+    await wait_for_text(ready)
 
     started = time.monotonic()
     waiter.cancel()
@@ -319,8 +308,7 @@ async def test_gentle_cancel_kills_a_grandchild_that_ignores_sigterm(
         ["sh", "-c", f"trap 'exit 0' TERM; sh -c \"{grandchild}\" & wait"]
     )
     waiter = asyncio.ensure_future(proc.finish(process, gentle=True))
-    while not pid_file.exists() or not pid_file.read_text().strip():
-        await asyncio.sleep(0.01)
+    await wait_for_text(pid_file)
 
     started = time.monotonic()
     waiter.cancel()

@@ -25,14 +25,11 @@ def sandbox_args(path: str) -> list[str]:
 
 def _read_settings(path: str) -> str:
     try:
-        data = Path(path).read_bytes()
+        return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise SandboxError(
             f"{_FLAG}: file {quote(path)} is not accessible: {exc.strerror}"
         ) from exc
-
-    # Bytes that are not UTF-8 become U+FFFD instead of failing the read.
-    return data.decode("utf-8", errors="replace")
 
 
 def _force_sandbox(text: str) -> str:
@@ -44,8 +41,7 @@ def _force_sandbox(text: str) -> str:
     try:
         settings = json.loads(text, parse_constant=_reject_constant)
     except (ValueError, RecursionError) as exc:
-        # Settings nested deeply enough overflow Python's parser; Go's reports
-        # them as invalid JSON.
+        # Settings nested deeply enough overflow the parser.
         raise SandboxError(f"{_FLAG}: must be a JSON object: {exc}") from exc
 
     if not isinstance(settings, dict):
@@ -59,9 +55,11 @@ def _force_sandbox(text: str) -> str:
     sandbox["allowUnsandboxedCommands"] = False
     sandbox["failIfUnavailable"] = True
     settings["sandbox"] = sandbox
-    return json.dumps(settings, separators=(",", ":"), ensure_ascii=False)
+    # ASCII only, so the argument can be encoded whatever the file holds, a
+    # lone surrogate included.
+    return json.dumps(settings, separators=(",", ":"))
 
 
 def _reject_constant(name: str) -> None:
-    """Refuse NaN and Infinity, which Python's json accepts and Go's does not."""
+    """Refuse NaN and Infinity: the settings are re-serialized for Claude, and they would come out as invalid JSON."""
     raise ValueError(f"invalid JSON constant {name}")

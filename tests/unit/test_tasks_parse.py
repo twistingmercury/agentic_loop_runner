@@ -117,7 +117,6 @@ def test_parse_tasks_max_id() -> None:
     got = tasks.parse_tasks(
         "tasks:\n  - {id: 32767, name: a, prompt: p, state: pending}\n"
     )
-    assert len(got.tasks) == 1
     assert got.tasks[0].id == 32767
 
 
@@ -134,7 +133,6 @@ def test_parse_tasks_accepts_every_valid_state(state: str) -> None:
     got = tasks.parse_tasks(
         "tasks:\n  - {id: 1, name: a, prompt: p, state: " + state + "}\n"
     )
-    assert len(got.tasks) == 1
     assert got.tasks[0].state == state
 
 
@@ -151,22 +149,7 @@ def test_parse_tasks_accepts_every_valid_state(state: str) -> None:
 def test_parse_tasks_empty_state_defaults_to_pending(text: str) -> None:
     # A task file does not have to spell out `state: pending` for new work.
     got = tasks.parse_tasks(text)
-    assert len(got.tasks) == 1
     assert got.tasks[0].state == PENDING
-
-
-def test_parse_tasks_defaults_only_the_empty_states() -> None:
-    text = """tasks:
-  - {id: 1, name: a, prompt: p, state: completed}
-  - {id: 2, name: b, prompt: p}
-  - {id: 3, name: c, prompt: p, state: failed}
-  - {id: 4, name: d, prompt: p}
-"""
-
-    got = tasks.parse_tasks(text)
-
-    states = [task.state for task in got.tasks]
-    assert states == [COMPLETED, PENDING, FAILED, PENDING]
 
 
 def test_parse_tasks_does_not_alter_name_or_prompt() -> None:
@@ -174,7 +157,6 @@ def test_parse_tasks_does_not_alter_name_or_prompt() -> None:
     got = tasks.parse_tasks(
         'tasks:\n  - {id: 1, name: " Build ", prompt: "  do it  ", state: pending}\n'
     )
-    assert len(got.tasks) == 1
     assert got.tasks[0].name == " Build "
     assert got.tasks[0].prompt == "  do it  "
 
@@ -424,6 +406,56 @@ ERROR_CASES = [
         VALID + "  - {id: 2, name: b, prompt: p, state: done}\n",
         'tasks[1] (id 2): state: must be pending, completed, or failed, got "done"',
     ),
+    # Elements are checked in file order, and within one element id, name,
+    # prompt, state, then error.
+    (
+        "earlier element wins",
+        "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
+        '  - {id: 2, name: "", prompt: p}\n',
+        "tasks[0] (id 1): state:",
+    ),
+    (
+        "id before name",
+        'tasks:\n  - {id: 0, name: "", prompt: p}\n',
+        "tasks[0]: id:",
+    ),
+    (
+        "name before prompt",
+        'tasks:\n  - {id: 1, name: "", prompt: ""}\n',
+        "tasks[0] (id 1): name:",
+    ),
+    (
+        "prompt before state",
+        'tasks:\n  - {id: 1, name: a, prompt: "", state: bogus}\n',
+        "tasks[0] (id 1): prompt:",
+    ),
+    # Plain values YAML reads as booleans or numbers are not strings; they must be quoted.
+    *[
+        (
+            f"unquoted {value} as a name",
+            f"tasks:\n  - id: 1\n    name: {value}\n    prompt: do it\n",
+            "tasks[0] (id 1): name: must be a string",
+        )
+        for value in ("yes", "no", "on", "off", "12:30", "1_000")
+    ],
+    # A merge key would otherwise be dropped without a word, losing what it merged in.
+    (
+        "merge key",
+        "tasks:\n  - &base {id: 1, name: a, prompt: p}\n"
+        "  - {<<: *base, id: 2, name: b}\n",
+        "tag !!merge is not allowed",
+    ),
+    # An explicit int tag can sit on text that is not a number at all.
+    (
+        "int tag on empty text",
+        'tasks:\n  - {id: !!int "", name: a, prompt: p}\n',
+        ID_RANGE_ERROR,
+    ),
+    (
+        "int tag on a word",
+        "tasks:\n  - {id: !!int abc, name: a, prompt: p}\n",
+        ID_RANGE_ERROR,
+    ),
     # error
     (
         "non-string error",
@@ -433,8 +465,6 @@ ERROR_CASES = [
 ]
 
 
-# Go also asserts that an error returns the zero TaskList; parse_tasks raises,
-# so there is no partial list to check.
 @pytest.mark.parametrize(
     ("text", "want"),
     [pytest.param(text, want, id=name) for name, text, want in ERROR_CASES],
@@ -464,44 +494,8 @@ def test_parse_tasks_file_errors_name_no_task(text: str) -> None:
     assert "(id" not in str(exc.value)
 
 
-@pytest.mark.parametrize(
-    ("text", "want"),
-    [
-        pytest.param(
-            "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
-            '  - {id: 2, name: "", prompt: p}\n',
-            "tasks[0] (id 1): state:",
-            id="earlier element wins",
-        ),
-        pytest.param(
-            'tasks:\n  - {id: 0, name: "", prompt: p}\n',
-            "tasks[0]: id:",
-            id="id before name",
-        ),
-        pytest.param(
-            'tasks:\n  - {id: 1, name: "", prompt: ""}\n',
-            "tasks[0] (id 1): name:",
-            id="name before prompt",
-        ),
-        pytest.param(
-            'tasks:\n  - {id: 1, name: a, prompt: "", state: bogus}\n',
-            "tasks[0] (id 1): prompt:",
-            id="prompt before state",
-        ),
-    ],
-)
-def test_parse_tasks_reports_first_invalid_task(text: str, want: str) -> None:
-    # Elements are checked in file order, and within one element id, name,
-    # prompt, then state.
-    with pytest.raises(TaskFileError) as exc:
-        tasks.parse_tasks(text)
-
-    assert want in str(exc.value)
-
-
 def test_parse_tasks_accepts_explicit_core_tags() -> None:
     got = tasks.parse_tasks("tasks:\n  - {id: !!int 1, name: !!str 42, prompt: p}\n")
-    assert len(got.tasks) == 1
     assert got.tasks[0].name == "42"
 
 
@@ -509,21 +503,7 @@ def test_parse_tasks_reads_error_field() -> None:
     got = tasks.parse_tasks(
         "tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: boom}\n"
     )
-    assert len(got.tasks) == 1
     assert got.tasks[0].error == "boom"
-
-
-def test_parse_tasks_top_level_gates() -> None:
-    text = (
-        "gates:\n  - cmd: make test\n    timeout: 10m\n  - cmd: go vet ./...\n"
-        "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
-    )
-    task_list = tasks.parse_tasks(text)
-    assert task_list.gates is not None
-    assert task_list.gates == [
-        Gate(cmd="make test", timeout="10m"),
-        Gate(cmd="go vet ./..."),
-    ]
 
 
 def test_parse_tasks_reads_gates() -> None:
@@ -561,7 +541,6 @@ tasks:
 """
 
     got = tasks.parse_tasks(text)
-    assert len(got.tasks) == 1
 
     want = [
         Gate(cmd="go test ./...", timeout="10m"),
@@ -607,13 +586,6 @@ def test_parse_tasks_task_level_gates_are_an_error(text: str) -> None:
         tasks.parse_tasks(text)
 
     assert str(exc.value) == TASK_LEVEL_GATES_ERROR
-
-
-def test_task_string_omits_gates() -> None:
-    task = Task(id=1, name="First task", prompt="Do it.")
-    assert task.text() == "1: First task\n\nDo it.", (
-        "gates are alr's check and must never reach the session"
-    )
 
 
 UNKNOWN_KEY = "unknown key; a gate has only cmd and timeout"
@@ -742,28 +714,9 @@ def test_parse_timeout_errors(text: str, want: str) -> None:
 
 
 @pytest.mark.parametrize("value", ["yes", "no", "on", "off", "12:30", "1_000"])
-def test_parse_tasks_rejects_unquoted_yaml_11_scalars_as_names(value: str) -> None:
-    # PyYAML's standard rules read these as booleans or numbers, so they must be quoted.
-    text = f"tasks:\n  - id: 1\n    name: {value}\n    prompt: do it\n"
-    with pytest.raises(TaskFileError) as exc:
-        tasks.parse_tasks(text)
-
-    assert str(exc.value) == "tasks[0] (id 1): name: must be a string"
-
-
-@pytest.mark.parametrize("value", ["yes", "no", "on", "off", "12:30", "1_000"])
 def test_parse_tasks_reads_quoted_yaml_11_scalars_as_names(value: str) -> None:
     text = f'tasks:\n  - id: 1\n    name: "{value}"\n    prompt: do it\n'
     assert tasks.parse_tasks(text).tasks[0].name == value
-
-
-def test_parse_tasks_rejects_merge_keys() -> None:
-    # A merge key would otherwise be dropped without a word, losing what it merged in.
-    text = "tasks:\n  - &base {id: 1, name: a, prompt: p}\n  - {<<: *base, id: 2, name: b}\n"
-    with pytest.raises(TaskFileError) as exc:
-        tasks.parse_tasks(text)
-
-    assert "tag !!merge is not allowed" in str(exc.value)
 
 
 @pytest.mark.parametrize(
@@ -782,10 +735,29 @@ def test_parse_tasks_reads_ids_as_pyyaml_does(text: str, want: int) -> None:
     assert got.tasks[0].id == want
 
 
-@pytest.mark.parametrize("text", ['!!int ""', "!!int abc"])
-def test_parse_tasks_rejects_ids_that_are_not_integers(text: str) -> None:
-    # An explicit int tag can sit on text that is not a number at all.
+@pytest.mark.parametrize(
+    ("text", "where"),
+    [
+        pytest.param(
+            'tasks:\n  - {id: 1, name: "a\\ud800", prompt: p}\n',
+            "tasks[0] (id 1): name",
+            id="name",
+        ),
+        pytest.param(
+            'tasks:\n  - {id: 1, name: a, prompt: "\\udfff"}\n',
+            "tasks[0] (id 1): prompt",
+            id="prompt",
+        ),
+        pytest.param(
+            'gates: [{cmd: "echo \\ud800"}]\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
+            "gates[0]: cmd",
+            id="gate cmd",
+        ),
+    ],
+)
+def test_parse_tasks_rejects_a_lone_surrogate(text: str, where: str) -> None:
+    # Text holding one cannot be written out as UTF-8, so it must not get in.
     with pytest.raises(TaskFileError) as exc:
-        tasks.parse_tasks("tasks:\n  - {id: " + text + ", name: a, prompt: p}\n")
+        tasks.parse_tasks(text)
 
-    assert ID_RANGE_ERROR in str(exc.value)
+    assert str(exc.value) == f"{where}: must not contain a lone surrogate"

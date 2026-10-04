@@ -96,6 +96,22 @@ def test_sandbox_args_forces_sandbox_keys(
             "--sandbox-settings: sandbox: must be a JSON object",
             id="sandbox bool",
         ),
+        # The settings are re-serialized for Claude, so NaN would turn into invalid JSON.
+        pytest.param(
+            '{"sandbox":{"x":NaN}}',
+            "--sandbox-settings: must be a JSON object: ",
+            id="NaN",
+        ),
+        pytest.param(
+            '\ufeff{"sandbox":{}}',
+            "--sandbox-settings: must be a JSON object: ",
+            id="byte order mark",
+        ),
+        pytest.param(
+            "[" * 100_000,
+            "--sandbox-settings: must be a JSON object: ",
+            id="deeply nested",
+        ),
     ],
 )
 def test_sandbox_args_rejects_bad_files(
@@ -107,45 +123,30 @@ def test_sandbox_args_rejects_bad_files(
     assert want_error in str(excinfo.value)
 
 
-def test_sandbox_args_unreadable_path(tmp_path: Path) -> None:
-    missing = tmp_path / "missing.json"
-    reasons = {
-        str(missing): os.strerror(errno.ENOENT),
-        str(tmp_path): os.strerror(errno.EISDIR),
-    }
-
-    for path, reason in reasons.items():
-        with pytest.raises(SandboxError) as excinfo:
-            sandbox_args(path)
-
-        assert str(excinfo.value) == (
-            f'--sandbox-settings: file "{path}" is not accessible: {reason}'
-        )
-
-
-# gralph rejects what Go's encoding/json rejects; Python's json module is
-# looser unless told otherwise.
 @pytest.mark.parametrize(
-    "content",
-    [
-        pytest.param('{"sandbox":{"x":NaN}}', id="NaN"),
-        pytest.param('﻿{"sandbox":{}}', id="byte order mark"),
-        pytest.param("[" * 100_000, id="deeply nested"),
-    ],
+    ("name", "code"),
+    [("missing.json", errno.ENOENT), ("", errno.EISDIR)],
+    ids=["missing file", "directory"],
 )
-def test_sandbox_args_rejects_what_go_json_rejects(
-    tmp_path: Path, content: str
-) -> None:
+def test_sandbox_args_unreadable_path(tmp_path: Path, name: str, code: int) -> None:
+    path = str(tmp_path / name) if name else str(tmp_path)
+
     with pytest.raises(SandboxError) as excinfo:
-        sandbox_args(str(_write_settings(tmp_path, content)))
+        sandbox_args(path)
 
-    assert str(excinfo.value).startswith("--sandbox-settings: must be a JSON object: ")
+    assert str(excinfo.value) == (
+        f'--sandbox-settings: file "{path}" is not accessible: {os.strerror(code)}'
+    )
 
 
-def test_sandbox_args_keeps_non_ascii_text(tmp_path: Path) -> None:
-    path = _write_settings(tmp_path, '{"sandbox":{"note":"héllo"}}')
+@pytest.mark.parametrize(
+    "text", ["héllo", "\\ud800"], ids=["non-ASCII", "lone surrogate"]
+)
+def test_sandbox_args_settings_can_always_be_encoded(tmp_path: Path, text: str) -> None:
+    # The argument goes to a child process, so it must be encodable whatever the file holds.
+    path = _write_settings(tmp_path, '{"sandbox":{"note":"' + text + '"}}')
 
     settings = sandbox_args(str(path))[3]
 
-    assert "héllo" in settings
-    assert json.loads(settings) == {"sandbox": {"note": "héllo", **FORCED}}
+    settings.encode("utf-8")
+    assert json.loads(settings)["sandbox"]["note"] == json.loads(f'"{text}"')

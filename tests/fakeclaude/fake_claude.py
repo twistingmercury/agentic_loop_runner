@@ -2,64 +2,46 @@
 
 alr always starts claude with an argv it builds itself and the assembled
 prompt on stdin, so nothing here can be driven by flags. Every behavior is
-controlled through environment variables instead. This one script honors both
-sets gralph's two fake claudes use, so tests ported from either keep working.
+controlled through the environment variables below, which are the whole
+interface.
 
-The looper set:
-
-    FAKE_CLAUDE_EXIT      exit code to return (default "0")
-    FAKE_CLAUDE_RECORD    path to append one entry per call: the exact stdin
-                          bytes followed by RECORD_SEPARATOR, so a test can
-                          recover each call's stdin verbatim and in call order
-    FAKE_CLAUDE_BLOCK     "1" to write the ready file (if set) and then block
-                          forever, instead of reading stdin, recording it, and
-                          exiting
-    FAKE_CLAUDE_BLOCK_ON  text; when stdin contains it, write the ready file
-                          (if set) and block forever after reading stdin,
-                          before recording it, so a test can block only one
-                          task's call
-    FAKE_CLAUDE_READY     path to write a ready marker to just before blocking
-    FAKE_CLAUDE_OUTPUT    if set (even to the empty string), its value is
-                          written verbatim to stdout before exiting, instead
-                          of the default result line. In stream mode it is the
-                          result event's text instead. When unset, the default
-                          is `{"state":"completed","error":""}` on a zero exit
-                          and nothing on a non-zero exit.
-    FAKE_CLAUDE_ARGS      path to append one line per call: the argv, without
-                          the program name, joined by spaces
-    FAKE_CLAUDE_STDERR    text written verbatim to stderr just before exiting
+    FAKECLAUDE_OUTPUT               if set (even to the empty string), its value
+                                    is written verbatim to stdout before
+                                    exiting, instead of the default result
+                                    line; in stream mode it is the result
+                                    event's text. When unset, the default is
+                                    `{"state":"completed","error":""}` on a
+                                    zero exit and nothing on a non-zero exit
+    FAKECLAUDE_EXIT_CODE            exit code to return (default 0)
+    FAKECLAUDE_STDERR               text written verbatim to stderr just before
+                                    exiting
+    FAKECLAUDE_RECORD_FILE          path to append one JSON line per call:
+                                    {"argv": [...], "stdin": "..."}, with argv
+                                    excluding the program name; its line count
+                                    is the number of calls
+    FAKECLAUDE_READY_FILE           path to write this process's own PID once
+                                    setup is complete and it is about to block
+                                    or exit
+    FAKECLAUDE_BLOCK                "1" to block forever, after reading stdin and
+                                    completing setup (record, descendant spawn,
+                                    ready file), instead of exiting
+    FAKECLAUDE_BLOCK_ON             text; block as FAKECLAUDE_BLOCK does, but
+                                    only when stdin contains it, so a test can
+                                    block just one task's call
+    FAKECLAUDE_DESCENDANT_PID_FILE  path to write the PID of a spawned blocking
+                                    descendant process (unset: none is spawned)
+    FAKECLAUDE_MODE                 "descendant" to ignore every other variable,
+                                    read nothing, and block until killed; the
+                                    spawned descendant is this script run in
+                                    this mode
+    FAKECLAUDE_BIG_EVENT            stream mode only: byte count; one extra user
+                                    event, padded to at least that many bytes,
+                                    is written just before the result event
 
 Stream mode is on only when argv contains "--output-format" followed by
 "stream-json". Stdout is then one JSON event per line instead of the plain
 result line: a system init event, an assistant text event, and, only on a
-zero exit, a result event. One variable applies only in stream mode:
-
-    FAKE_CLAUDE_BIG_EVENT byte count; when set, one extra user event, padded
-                          to at least that many bytes, is written just before
-                          the result event
-
-The e2e set:
-
-    FAKECLAUDE_MODE                empty for normal operation, or "descendant"
-                                   to ignore every other variable, read
-                                   nothing, and block until killed
-    FAKECLAUDE_RECORD_FILE         path to append one JSON line per call:
-                                   {"argv": [...], "stdin": "..."}, with argv
-                                   excluding the program name
-    FAKECLAUDE_ATTEMPT_LOG_FILE    path to append one line to per call, used to
-                                   count calls across a run
-    FAKECLAUDE_EXIT_CODE           exit code to use (default "0"); it wins over
-                                   FAKE_CLAUDE_EXIT when both are set
-    FAKECLAUDE_STDERR_MSG          text to print to stderr, with a newline,
-                                   before exiting
-    FAKECLAUDE_DESCENDANT_PID_FILE path to write the PID of a spawned blocking
-                                   descendant process (empty: none is spawned)
-    FAKECLAUDE_BLOCK               "1" to block forever after reading stdin
-                                   and completing setup (descendant spawn,
-                                   ready file) instead of exiting
-    FAKECLAUDE_READY_FILE          path to write this process's own PID once
-                                   setup is complete and it is about to block
-                                   or exit
+zero exit, a result event.
 """
 
 import json
@@ -70,7 +52,6 @@ import time
 from pathlib import Path
 from typing import NoReturn
 
-RECORD_SEPARATOR = b"\x00---FAKE-CLAUDE-RECORD-SEPARATOR---\x00"
 DEFAULT_RESULT = '{"state":"completed","error":""}'
 
 _BIG_EVENT_PREFIX = '{"type":"user","message":{"content":[{"type":"text","text":"'
@@ -82,27 +63,16 @@ def main() -> NoReturn:
         block_forever()
 
     args = sys.argv[1:]
-    record_args(args)
-    if os.environ.get("FAKE_CLAUDE_BLOCK") == "1":
-        ready_then_block()
-
     stdin = sys.stdin.buffer.read()
-    block_on = os.environb.get(b"FAKE_CLAUDE_BLOCK_ON", b"")
-    if block_on and block_on in stdin:
-        ready_then_block()
-
     record_call(args, stdin)
     spawn_descendant()
     ready_file = os.environ.get("FAKECLAUDE_READY_FILE")
     if ready_file:
         Path(ready_file).write_text(str(os.getpid()), encoding="utf-8")
 
-    if os.environ.get("FAKECLAUDE_BLOCK") == "1":
+    block_on = os.environb.get(b"FAKECLAUDE_BLOCK_ON", b"")
+    if os.environ.get("FAKECLAUDE_BLOCK") == "1" or (block_on and block_on in stdin):
         block_forever()
-
-    message = os.environ.get("FAKECLAUDE_STDERR_MSG")
-    if message:
-        print(message, file=sys.stderr)
 
     code = exit_code()
     if stream_mode(args):
@@ -111,32 +81,19 @@ def main() -> NoReturn:
         write_output(code)
 
     sys.stdout.flush()
-    sys.stderr.buffer.write(os.environb.get(b"FAKE_CLAUDE_STDERR", b""))
+    sys.stderr.buffer.write(os.environb.get(b"FAKECLAUDE_STDERR", b""))
     sys.stderr.flush()
     sys.exit(code)
 
 
-def record_args(args: list[str]) -> None:
-    args_file = os.environ.get("FAKE_CLAUDE_ARGS")
-    if not args_file:
+def record_call(args: list[str], stdin: bytes) -> None:
+    record_file = os.environ.get("FAKECLAUDE_RECORD_FILE")
+    if not record_file:
         return
 
-    append(args_file, os.fsencode(" ".join(args) + "\n"))
-
-
-def record_call(args: list[str], stdin: bytes) -> None:
-    record_file = os.environ.get("FAKE_CLAUDE_RECORD")
-    if record_file:
-        append(record_file, stdin + RECORD_SEPARATOR)
-
-    json_record_file = os.environ.get("FAKECLAUDE_RECORD_FILE")
-    if json_record_file:
-        record = {"argv": args, "stdin": stdin.decode("utf-8", errors="replace")}
-        append(json_record_file, json.dumps(record).encode("utf-8") + b"\n")
-
-    attempt_log = os.environ.get("FAKECLAUDE_ATTEMPT_LOG_FILE")
-    if attempt_log:
-        append(attempt_log, b"attempt\n")
+    record = {"argv": args, "stdin": stdin.decode("utf-8", errors="replace")}
+    with open(record_file, "ab") as file:
+        file.write(json.dumps(record).encode("utf-8") + b"\n")
 
 
 def spawn_descendant() -> None:
@@ -144,8 +101,8 @@ def spawn_descendant() -> None:
     if not pid_file:
         return
 
-    # The standard streams go to /dev/null, as Go's exec.Command does by
-    # default, so the descendant never holds the session's pipes open.
+    # The standard streams go to /dev/null so the descendant never holds the
+    # session's pipes open.
     descendant = subprocess.Popen(
         [sys.executable, __file__],
         env={**os.environ, "FAKECLAUDE_MODE": "descendant"},
@@ -161,17 +118,14 @@ def spawn_descendant() -> None:
 
 
 def exit_code() -> int:
-    for name in ("FAKECLAUDE_EXIT_CODE", "FAKE_CLAUDE_EXIT"):
-        raw = os.environ.get(name)
-        if not raw:
-            continue
+    raw = os.environ.get("FAKECLAUDE_EXIT_CODE")
+    if not raw:
+        return 0
 
-        try:
-            return int(raw)
-        except ValueError as exc:
-            fail(f"invalid {name} {raw!r}: {exc}")
-
-    return 0
+    try:
+        return int(raw)
+    except ValueError as exc:
+        fail(f"invalid FAKECLAUDE_EXIT_CODE {raw!r}: {exc}")
 
 
 def stream_mode(args: list[str]) -> bool:
@@ -179,7 +133,7 @@ def stream_mode(args: list[str]) -> bool:
 
 
 def write_output(code: int) -> None:
-    output = os.environb.get(b"FAKE_CLAUDE_OUTPUT")
+    output = os.environb.get(b"FAKECLAUDE_OUTPUT")
     if output is not None:
         sys.stdout.buffer.write(output)
         return
@@ -197,35 +151,22 @@ def write_stream(code: int) -> None:
     if code != 0:
         return
 
-    text = os.environ.get("FAKE_CLAUDE_OUTPUT", DEFAULT_RESULT)
+    text = os.environ.get("FAKECLAUDE_OUTPUT", DEFAULT_RESULT)
     print(f'{{"type":"result","subtype":"success","result":{json.dumps(text)}}}')
 
 
 def write_big_event() -> None:
-    raw = os.environ.get("FAKE_CLAUDE_BIG_EVENT")
+    raw = os.environ.get("FAKECLAUDE_BIG_EVENT")
     if not raw:
         return
 
     try:
         size = int(raw)
     except ValueError as exc:
-        fail(f"invalid FAKE_CLAUDE_BIG_EVENT {raw!r}: {exc}")
+        fail(f"invalid FAKECLAUDE_BIG_EVENT {raw!r}: {exc}")
 
     pad = max(size - len(_BIG_EVENT_PREFIX) - len(_BIG_EVENT_SUFFIX), 0)
     print(_BIG_EVENT_PREFIX + "x" * pad + _BIG_EVENT_SUFFIX)
-
-
-def append(path: str, data: bytes) -> None:
-    with open(path, "ab") as file:
-        file.write(data)
-
-
-def ready_then_block() -> NoReturn:
-    ready_file = os.environ.get("FAKE_CLAUDE_READY")
-    if ready_file:
-        Path(ready_file).write_text("ready", encoding="utf-8")
-
-    block_forever()
 
 
 def block_forever() -> NoReturn:

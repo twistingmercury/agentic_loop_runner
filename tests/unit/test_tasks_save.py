@@ -16,62 +16,65 @@ def _saved(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_save_tasks_error_round_trip(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-    want = TaskList(
-        tasks=[
-            Task(id=1, name="First", prompt="p", state=FAILED, error="exit status 1")
-        ]
-    )
-
-    tasks.save_tasks(str(path), want)
-
-    # The error message must round-trip verbatim.
-    assert tasks.parse_tasks(_saved(path)) == want
-
-
-def test_save_tasks_omits_empty_error(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-    want = TaskList(
-        tasks=[Task(id=1, name="First", prompt="p", state=COMPLETED, error="")]
-    )
-
-    tasks.save_tasks(str(path), want)
-
-    saved = _saved(path)
-    assert "error:" not in saved
-    assert tasks.parse_tasks(saved) == want
-
-
-def test_save_tasks_round_trip(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-    want = TaskList(
-        tasks=[
-            Task(
-                id=3,
-                name="Third",
-                prompt="Do the third thing.\nAcross\nmultiple lines.\n",
-                state=FAILED,
+@pytest.mark.parametrize(
+    ("want", "existing"),
+    [
+        pytest.param(
+            TaskList(
+                tasks=[
+                    Task(
+                        id=1,
+                        name="First",
+                        prompt="p",
+                        state=FAILED,
+                        error="exit status 1",
+                    )
+                ]
             ),
-            Task(id=1, name="First", prompt="Do the first thing.", state=PENDING),
-            Task(id=2, name="Second", prompt="Do the second thing.", state=COMPLETED),
-        ]
-    )
+            None,
+            id="error text",
+        ),
+        pytest.param(
+            TaskList(
+                tasks=[
+                    Task(
+                        id=3,
+                        name="Third",
+                        prompt="Do the third thing.\nAcross\nmultiple lines.\n",
+                        state=FAILED,
+                    ),
+                    Task(id=1, name="First", prompt="Do the first thing."),
+                    Task(id=2, name="Second", prompt="Do the second.", state=COMPLETED),
+                ]
+            ),
+            None,
+            id="ids, multi-line prompts, states, and file order",
+        ),
+        pytest.param(
+            TaskList(tasks=[Task(id=1, name="Only", prompt="p", state=COMPLETED)]),
+            "stale contents",
+            id="over an existing file",
+        ),
+        pytest.param(
+            TaskList(
+                gates=[Gate(cmd="go test ./..."), Gate(cmd='echo one\necho "two"\n')],
+                tasks=[Task(id=1, name="First", prompt="p")],
+            ),
+            None,
+            id="gates",
+        ),
+    ],
+)
+def test_save_tasks_round_trip(
+    tmp_path: Path, want: TaskList, existing: str | None
+) -> None:
+    path = tmp_path / "tasks.yaml"
+    if existing is not None:
+        path.write_text(existing, encoding="utf-8")
 
     tasks.save_tasks(str(path), want)
 
     assert not Path(f"{path}.tmp").exists()
-    # Ids, names, multi-line prompts, states, and file order must round-trip.
-    assert tasks.parse_tasks(_saved(path)) == want
-
-
-def test_save_tasks_overwrites_existing_file(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-    path.write_text("stale contents", encoding="utf-8")
-    want = TaskList(tasks=[Task(id=1, name="Only", prompt="p", state=COMPLETED)])
-
-    tasks.save_tasks(str(path), want)
-
     assert tasks.parse_tasks(_saved(path)) == want
 
 
@@ -200,49 +203,6 @@ def test_save_tasks_keeps_gates_absent_empty_or_set(
     assert absent not in saved
 
 
-def test_save_tasks_gates_round_trip(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-    want = TaskList(
-        gates=[Gate(cmd="go test ./..."), Gate(cmd='echo one\necho "two"\n')],
-        tasks=[Task(id=1, name="First", prompt="p", state=PENDING)],
-    )
-
-    tasks.save_tasks(str(path), want)
-
-    # Gates must round-trip verbatim and in order.
-    assert tasks.parse_tasks(_saved(path)) == want
-
-
-def test_save_tasks_omits_absent_gates(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-
-    tasks.save_tasks(
-        str(path), TaskList(tasks=[Task(id=1, name="First", prompt="p", state=PENDING)])
-    )
-
-    # A file without a gates key must not gain one on save.
-    assert "gates" not in _saved(path)
-
-
-def test_save_tasks_gate_timeout_kept_as_written_and_omitted_when_absent(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "tasks.yaml"
-    want = TaskList(
-        gates=[Gate(cmd="go test ./...", timeout="90s"), Gate(cmd="echo one")],
-        tasks=[Task(id=1, name="First", prompt="p", state=PENDING)],
-    )
-
-    tasks.save_tasks(str(path), want)
-
-    saved = _saved(path)
-    # Only the gate that set a timeout may carry the key.
-    assert saved.count("timeout:") == 1
-    # The duration must not be normalized to 1m30s.
-    assert "timeout: 90s" in saved
-    assert tasks.parse_tasks(saved) == want
-
-
 @pytest.mark.parametrize(
     "prompt",
     [
@@ -255,11 +215,9 @@ def test_save_tasks_writes_multi_line_prompt_as_block(
     tmp_path: Path, prompt: str
 ) -> None:
     path = tmp_path / "tasks.yaml"
-    tasks.save_tasks(
-        str(path), tasks.TaskList(tasks=[tasks.Task(id=1, name="a", prompt=prompt)])
-    )
+    tasks.save_tasks(str(path), TaskList(tasks=[Task(id=1, name="a", prompt=prompt)]))
 
-    saved = path.read_text(encoding="utf-8")
+    saved = _saved(path)
     assert "prompt: |" in saved
     assert "\\n" not in saved
     assert tasks.parse_tasks(saved).tasks[0].prompt == prompt
@@ -271,11 +229,9 @@ def test_save_tasks_writes_multi_line_prompt_as_block(
 )
 def test_save_tasks_keeps_awkward_names_as_strings(tmp_path: Path, name: str) -> None:
     path = tmp_path / "tasks.yaml"
-    tasks.save_tasks(
-        str(path), tasks.TaskList(tasks=[tasks.Task(id=1, name=name, prompt="p")])
-    )
+    tasks.save_tasks(str(path), TaskList(tasks=[Task(id=1, name=name, prompt="p")]))
 
-    assert tasks.parse_tasks(path.read_text(encoding="utf-8")).tasks[0].name == name
+    assert tasks.parse_tasks(_saved(path)).tasks[0].name == name
 
 
 def _round_trips(tmp_path: Path, name: str, prompt: str) -> tuple[str, str]:

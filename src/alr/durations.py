@@ -15,7 +15,8 @@ _UNIT_SECONDS = {
 
 # "ms" is listed before "m" so the longer unit wins. [0-9] and not \d, which
 # also matches digits from other scripts.
-_DURATION_PART = re.compile(r"([0-9]+\.?[0-9]*|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h)")
+_PART = re.compile(r"([0-9]+\.?[0-9]*|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h)")
+_WHOLE = re.compile(f"(?:{_PART.pattern})+")
 
 
 def parse_duration(text: str) -> float:
@@ -25,18 +26,14 @@ def parse_duration(text: str) -> float:
     if body == "0":
         return 0.0
 
-    if body == "":
+    if _WHOLE.fullmatch(body) is None:
         raise ValueError(f"invalid duration {text!r}")
 
+    # Added one at a time: sum() compensates its rounding on Python 3.12 and
+    # up, which would change the last digit of a long duration.
     total = 0.0
-    position = 0
-    while position < len(body):
-        part = _DURATION_PART.match(body, position)
-        if part is None:
-            raise ValueError(f"invalid duration {text!r}")
-
-        total += float(part.group(1)) * _UNIT_SECONDS[part.group(2)]
-        position = part.end()
+    for number, unit in _PART.findall(body):
+        total += float(number) * _UNIT_SECONDS[unit]
 
     return sign * total
 

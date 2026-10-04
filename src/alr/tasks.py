@@ -1,6 +1,8 @@
 """The task file: parse, validate, save."""
 
+import contextlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,8 +17,8 @@ COMPLETED = "completed"
 
 _STATES = (PENDING, COMPLETED, FAILED)
 _DURATION_HINT = "must be a duration string such as 90s or 10m"
-_ID_ERROR = "id: must be a positive integer no greater than 32767"
 _MAX_ID = 32767
+_ID_ERROR = f"id: must be a positive integer no greater than {_MAX_ID}"
 
 _TAG = "tag:yaml.org,2002:"
 _STR = _TAG + "str"
@@ -30,41 +32,13 @@ _ALLOWED_TAGS = frozenset(
     for name in ("str", "int", "float", "bool", "null", "map", "seq", "timestamp")
 )
 
+# A YAML escape such as "\ud800" produces one, and text holding it cannot be
+# written out as UTF-8.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
 # YAML reads these as line breaks and folds them in every style but a
 # double-quoted one, which escapes them.
 _UNICODE_BREAKS = frozenset("\x85\u2028\u2029")
-
-
-class _TaskDumper(yaml.SafeDumper):
-    """Writes the task file with lists indented under their key and multi-line text as blocks."""
-
-    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
-        # PyYAML leaves a list under a key unindented; the task file indents it.
-        super().increase_indent(flow, False)
-
-    def analyze_scalar(self, scalar: str) -> yaml.emitter.ScalarAnalysis:
-        analysis = super().analyze_scalar(scalar)
-        if _UNICODE_BREAKS.intersection(scalar):
-            analysis.allow_flow_plain = analysis.allow_block_plain = False
-            analysis.allow_single_quoted = analysis.allow_block = False
-            return analysis
-
-        # PyYAML counts a tab as a special character that only a double-quoted
-        # string may hold, but a block scalar keeps it as it is.
-        if "\t" in scalar and not analysis.allow_block:
-            analysis.allow_block = (
-                super().analyze_scalar(scalar.replace("\t", "x")).allow_block
-            )
-
-        return analysis
-
-
-def _represent_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
-    style = "|" if "\n" in value else None
-    return dumper.represent_scalar(_STR, value, style=style)
-
-
-_TaskDumper.add_representer(str, _represent_str)
 
 
 @dataclass
@@ -128,25 +102,32 @@ def parse_tasks(text: str) -> TaskList:
     seq, gates_node = _root_nodes(doc)
 
     # Gates are checked before the tasks so a file with an error in each
-    # reports the same one whatever order its keys are in.
-    task_list = TaskList(tasks=[], gates=_decode_gates(gates_node))
+    # reports the same one whatever order its keys are in. `gates: []` stays an
+    # empty list, not None, so a save writes the key back.
+    gates = None if gates_node is None else _check_gates(gates_node)
+    tasks: list[Task] = []
     ids: dict[int, int] = {}
     names: dict[str, int] = {}
     for i, el in enumerate(seq.value):
-        task, where = _parse_task(i, el)
-        _check_duplicate(ids, names, i, task, where)
-        task_list.tasks.append(task)
+        task = _parse_task(i, el)
+        _check_duplicate(ids, names, i, task)
+        tasks.append(task)
 
-    return task_list
+    return TaskList(tasks=tasks, gates=gates)
+
+
+def _where(i: int, task_id: int) -> str:
+    return f"tasks[{i}] (id {task_id})"
 
 
 def _check_duplicate(
-    ids: dict[int, int], names: dict[str, int], i: int, task: Task, where: str
+    ids: dict[int, int], names: dict[str, int], i: int, task: Task
 ) -> None:
     """Reject a task whose id or name repeats an earlier one, recording both.
 
     Names compare ignoring case and surrounding whitespace.
     """
+    where = _where(i, task.id)
     if task.id in ids:
         raise TaskFileError(f"{where}: id: duplicates tasks[{ids[task.id]}]")
 
@@ -163,26 +144,24 @@ def _check_duplicate(
 def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.SequenceNode, yaml.Node | None]:
     """Return the non-empty sequence under the single tasks key and the gates node.
 
-    The gates node is None when the file has no gates key.
+    The gates node is None when the file has no gates key. Other root keys may
+    repeat.
     """
     if not isinstance(doc, yaml.MappingNode):
         raise TaskFileError("tasks: is required")
 
-    seq: yaml.Node | None = None
-    gates: yaml.Node | None = None
-    for key, value in doc.value:
-        if key.value == "tasks":
-            if seq is not None:
-                raise TaskFileError("tasks: duplicate key")
+    roots: dict[str, yaml.Node] = {}
+    for key_node, value in doc.value:
+        key = _key_text(key_node)
+        if key not in ("tasks", "gates"):
+            continue
 
-            seq = value
+        if key in roots:
+            raise TaskFileError(f"{key}: duplicate key")
 
-        if key.value == "gates":
-            if gates is not None:
-                raise TaskFileError("gates: duplicate key")
+        roots[key] = value
 
-            gates = value
-
+    seq = roots.get("tasks")
     if seq is None:
         raise TaskFileError("tasks: is required")
 
@@ -192,31 +171,30 @@ def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.SequenceNode, yaml.Node | N
     if not seq.value:
         raise TaskFileError("tasks: must contain at least one task")
 
-    return seq, gates
+    return seq, roots.get("gates")
 
 
-def _decode_gates(node: yaml.Node | None) -> list[Gate] | None:
-    """Return a list, not None, for `gates: []` so a save writes the key back."""
-    if node is None:
-        return None
-
-    return _check_gates(node)
-
-
-def _parse_task(i: int, el: yaml.Node) -> tuple[Task, str]:
+def _parse_task(i: int, el: yaml.Node) -> Task:
     """Check element i of the tasks sequence and build its task.
 
-    Also returns the task's location, tasks[<i>] (id <id>), for the caller's
-    own errors.
+    The fields are checked in a fixed order, so the first error reported does
+    not depend on key order in the file.
     """
-    where = f"tasks[{i}]"
     if not isinstance(el, yaml.MappingNode):
-        raise TaskFileError(f"{where}: must be a mapping")
+        raise TaskFileError(f"tasks[{i}]: must be a mapping")
 
-    fields = _task_fields(where, el)
-    task_id = _task_id(where, fields)
-    where = f"{where} (id {task_id})"
-    _check_string_fields(where, fields)
+    fields = _fields(f"tasks[{i}]", el)
+    task_id = _task_id(i, fields)
+    where = _where(i, task_id)
+    name = _text(where, fields, "name", required=True)
+    prompt = _text(where, fields, "prompt", required=True)
+    state = _text(where, fields, "state")
+    if state != "" and state not in _STATES:
+        raise TaskFileError(
+            f"{where}: state: must be pending, completed, or failed, got {quote(state)}"
+        )
+
+    error = _text(where, fields, "error")
 
     # An error rather than a quietly dropped key: dropping it would leave an
     # old file running every task with no checks at all.
@@ -226,10 +204,12 @@ def _parse_task(i: int, el: yaml.Node) -> tuple[Task, str]:
             "as a top-level gates: list; see the HOWTO"
         )
 
-    return _decode_task(task_id, fields), where
+    return Task(
+        id=task_id, name=name, prompt=prompt, state=state or PENDING, error=error
+    )
 
 
-def _task_fields(where: str, el: yaml.MappingNode) -> dict[str, yaml.Node]:
+def _fields(where: str, el: yaml.MappingNode) -> dict[str, yaml.Node]:
     """Map each key of the mapping to its value node, rejecting a repeated key."""
     fields: dict[str, yaml.Node] = {}
     for key_node, value in el.value:
@@ -243,66 +223,61 @@ def _task_fields(where: str, el: yaml.MappingNode) -> dict[str, yaml.Node]:
 
 
 def _key_text(key_node: yaml.Node) -> str:
-    """A key's text; a sequence or mapping used as a key reads as empty, as in Go."""
+    """A key's text; a sequence or mapping used as a key reads as empty."""
     if not isinstance(key_node, yaml.ScalarNode):
         return ""
 
     return key_node.value
 
 
-def _task_id(where: str, fields: dict[str, yaml.Node]) -> int:
-    """Read the id, checking the node's tag so only a YAML integer is accepted."""
+def _task_id(i: int, fields: dict[str, yaml.Node]) -> int:
+    """Read the id; only a YAML integer from 1 to 32767 is accepted."""
     node = fields.get("id")
     if node is None:
-        raise TaskFileError(f"{where}: id: is required")
-
-    if not isinstance(node, yaml.ScalarNode) or node.tag != _INT:
-        raise TaskFileError(f"{where}: {_ID_ERROR}")
+        raise TaskFileError(f"tasks[{i}]: id: is required")
 
     task_id = _int_value(node)
     if task_id is None or not 0 < task_id <= _MAX_ID:
-        raise TaskFileError(f"{where}: {_ID_ERROR}")
+        raise TaskFileError(f"tasks[{i}]: {_ID_ERROR}")
 
     return task_id
 
 
-def _int_value(node: yaml.ScalarNode) -> int | None:
-    """Convert an int-tagged node as PyYAML's safe constructor does; None if it cannot."""
-    # An explicit !!int tag can sit on any text, so the conversion can fail.
+def _int_value(node: yaml.Node) -> int | None:
+    """Convert an int-tagged scalar as PyYAML's safe constructor does.
+
+    None for any other node, and for text an explicit !!int tag cannot read.
+    """
+    if not isinstance(node, yaml.ScalarNode) or node.tag != _INT:
+        return None
+
     try:
         return yaml.SafeLoader("").construct_yaml_int(node)
     except (ValueError, IndexError):
         return None
 
 
-def _check_string_fields(where: str, fields: dict[str, yaml.Node]) -> None:
-    """Check the string fields in a fixed order.
-
-    The first error reported must not depend on key order in the file.
-    """
-    for field in ("name", "prompt", "state", "error"):
-        _check_string_field(where, field, fields.get(field))
-
-
-def _check_string_field(where: str, field: str, node: yaml.Node | None) -> None:
-    required = field in ("name", "prompt")
+def _text(
+    where: str, fields: dict[str, yaml.Node], name: str, *, required: bool = False
+) -> str:
+    """Read a string field; "" when the key is absent and not required."""
+    node = fields.get(name)
     if node is None and required:
-        raise TaskFileError(f"{where}: {field}: is required")
+        raise TaskFileError(f"{where}: {name}: is required")
 
     if node is None:
-        return
+        return ""
 
     if not _is_string(node):
-        raise TaskFileError(f"{where}: {field}: must be a string")
+        raise TaskFileError(f"{where}: {name}: must be a string")
 
     if required and node.value.strip() == "":
-        raise TaskFileError(f"{where}: {field}: must not be empty or whitespace")
+        raise TaskFileError(f"{where}: {name}: must not be empty or whitespace")
 
-    if field == "state" and node.value != "" and node.value not in _STATES:
-        raise TaskFileError(
-            f"{where}: state: must be pending, completed, or failed, "
-            f"got {quote(node.value)}"
-        )
+    if _LONE_SURROGATE.search(node.value):
+        raise TaskFileError(f"{where}: {name}: must not contain a lone surrogate")
+
+    return node.value
 
 
 def _is_string(node: yaml.Node) -> bool:
@@ -330,26 +305,15 @@ def _check_gate(where: str, el: yaml.Node) -> Gate:
     if not isinstance(el, yaml.MappingNode):
         raise TaskFileError(f"{where}: must be a mapping")
 
-    fields = _task_fields(where, el)
+    fields = _fields(where, el)
     for key in fields:
         if key not in ("cmd", "timeout"):
             raise TaskFileError(
                 f"{where}: {key}: unknown key; a gate has only cmd and timeout"
             )
 
-    cmd = fields.get("cmd")
-    if cmd is None:
-        raise TaskFileError(f"{where}: cmd: is required")
-
-    if not _is_string(cmd):
-        raise TaskFileError(f"{where}: cmd: must be a string")
-
-    if cmd.value.strip() == "":
-        raise TaskFileError(f"{where}: cmd: must not be empty or whitespace")
-
-    return Gate(
-        cmd=cmd.value, timeout=_check_gate_timeout(where, fields.get("timeout"))
-    )
+    cmd = _text(where, fields, "cmd", required=True)
+    return Gate(cmd=cmd, timeout=_check_gate_timeout(where, fields.get("timeout")))
 
 
 def _check_gate_timeout(where: str, node: yaml.Node | None) -> str:
@@ -391,6 +355,39 @@ def parse_timeout(text: str) -> float:
     return seconds
 
 
+def _check_tags(node: yaml.Node, seen: set[int]) -> None:
+    """Reject any node carrying a tag outside the allowed set."""
+    # An alias is the same node again, and an anchor can point back into itself.
+    if id(node) in seen:
+        return
+
+    seen.add(id(node))
+    if node.tag not in _ALLOWED_TAGS:
+        raise TaskFileError(
+            f"line {node.start_mark.line + 1}: tag {_short_tag(node.tag)} is not allowed"
+        )
+
+    for child in _children(node):
+        _check_tags(child, seen)
+
+
+def _short_tag(tag: str) -> str:
+    if tag.startswith(_TAG):
+        return "!!" + tag.removeprefix(_TAG)
+
+    return tag
+
+
+def _children(node: yaml.Node) -> list[yaml.Node]:
+    if isinstance(node, yaml.SequenceNode):
+        return node.value
+
+    if isinstance(node, yaml.MappingNode):
+        return [child for pair in node.value for child in pair]
+
+    return []
+
+
 def save_tasks(path: str, task_list: TaskList) -> None:
     """Write the task file as YAML.
 
@@ -402,9 +399,7 @@ def save_tasks(path: str, task_list: TaskList) -> None:
         Dumper=_TaskDumper,
         sort_keys=False,
         allow_unicode=True,
-        default_flow_style=False,
-        indent=2,
-        width=2**31 - 1,
+        width=float("inf"),
     )
     target = Path(path)
     tmp = target.with_name(target.name + ".tmp")
@@ -412,10 +407,45 @@ def save_tasks(path: str, task_list: TaskList) -> None:
         _write_file(tmp, text)
         tmp.replace(target)
     except OSError as exc:
-        _remove(tmp)
+        # Only the temporary file is alr's to remove.
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
         raise TaskFileError(
             f"failed to save tasks to {quote(str(target))}: {exc.strerror}"
         ) from exc
+
+
+class _TaskDumper(yaml.SafeDumper):
+    """Writes the task file with lists indented under their key and multi-line text as blocks."""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        # PyYAML leaves a list under a key unindented; the task file indents it.
+        super().increase_indent(flow, False)
+
+    def analyze_scalar(self, scalar: str) -> yaml.emitter.ScalarAnalysis:
+        analysis = super().analyze_scalar(scalar)
+        # PyYAML counts a tab as a special character that only a double-quoted
+        # string may hold, but a block scalar keeps it as it is.
+        if "\t" in scalar and not analysis.allow_block:
+            analysis.allow_block = (
+                super().analyze_scalar(scalar.replace("\t", "x")).allow_block
+            )
+
+        return analysis
+
+
+def _represent_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
+    style = None
+    if _UNICODE_BREAKS.intersection(value):
+        style = '"'
+    elif "\n" in value:
+        style = "|"
+
+    return dumper.represent_scalar(_STR, value, style=style)
+
+
+_TaskDumper.add_representer(str, _represent_str)
 
 
 def _document(task_list: TaskList) -> dict[str, object]:
@@ -454,60 +484,3 @@ def _write_file(path: Path, text: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as file:
         file.write(text)
-
-
-def _remove(path: Path) -> None:
-    """Remove a leftover temporary file or empty directory; failure is ignored."""
-    for remove in (path.unlink, path.rmdir):
-        try:
-            remove()
-        except OSError:
-            continue
-
-        return
-
-
-def _decode_task(task_id: int, fields: dict[str, yaml.Node]) -> Task:
-    """Build the task from its checked fields, stored exactly as written."""
-    state = fields.get("state")
-    error = fields.get("error")
-    return Task(
-        id=task_id,
-        name=fields["name"].value,
-        prompt=fields["prompt"].value,
-        state=(state.value if state is not None else "") or PENDING,
-        error=error.value if error is not None else "",
-    )
-
-
-def _check_tags(node: yaml.Node, seen: set[int]) -> None:
-    """Reject any node carrying a tag outside the allowed set."""
-    # An alias is the same node again, and an anchor can point back into itself.
-    if id(node) in seen:
-        return
-
-    seen.add(id(node))
-    if node.tag not in _ALLOWED_TAGS:
-        raise TaskFileError(
-            f"line {node.start_mark.line + 1}: tag {_short_tag(node.tag)} is not allowed"
-        )
-
-    for child in _children(node):
-        _check_tags(child, seen)
-
-
-def _short_tag(tag: str) -> str:
-    if tag.startswith(_TAG):
-        return "!!" + tag.removeprefix(_TAG)
-
-    return tag
-
-
-def _children(node: yaml.Node) -> list[yaml.Node]:
-    if isinstance(node, yaml.SequenceNode):
-        return node.value
-
-    if isinstance(node, yaml.MappingNode):
-        return [child for pair in node.value for child in pair]
-
-    return []
