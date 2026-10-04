@@ -1,7 +1,8 @@
-"""What plain mode prints about the task file: the task table and the failed-tasks notice."""
+"""What plain mode prints before a run: the task table, the failed-tasks notice, the repository notice."""
 
 from typing import TextIO
 
+from alr.engine.commit import Repo, open_repo
 from alr.engine.loop import load_tasks
 from alr.errors import FailedTasksError
 from alr.tasks import COMPLETED, FAILED, Task, TaskList
@@ -42,3 +43,16 @@ def load_tasks_report(out: TextIO, tasks_file: str) -> TaskList:
         out.write("Some tasks failed previous runs:\n")
         print_tasks(out, exc.task_list)
         raise
+
+
+async def repo_for(out: TextIO, tasks_file: str, commit: bool) -> Repo | None:
+    """Open the work tree for a --commit run; None without the flag or outside a repository."""
+    if not commit:
+        return None
+
+    repo = await open_repo(tasks_file)
+    if repo is None:
+        # Said out loud, so a run that commits nothing is not mistaken for one that did.
+        out.write("commit: not a git repository, nothing will be committed\n")
+
+    return repo
