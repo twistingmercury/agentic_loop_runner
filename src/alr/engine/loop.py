@@ -62,11 +62,15 @@ def load_prompt(path: str) -> str:
 def load_tasks(path: str) -> TaskList:
     """Read and validate the task file; a file holding a failed task is refused."""
     try:
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        # Strict, unlike the prompt: the file is saved back, and a replacement
+        # character would overwrite the user's byte on the first save.
+        text = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         raise TaskFileError(
             f"tasks file {quote(path)} is not accessible: {exc.strerror}"
         ) from exc
+    except UnicodeDecodeError as exc:
+        raise TaskFileError(f"tasks file {quote(path)} is not valid UTF-8") from exc
 
     try:
         task_list = parse_tasks(text)

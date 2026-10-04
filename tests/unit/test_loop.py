@@ -156,6 +156,19 @@ def test_load_tasks_invalid_yaml(tmp_path: Path) -> None:
         loop.load_tasks(path)
 
 
+def test_load_tasks_rejects_a_file_that_is_not_utf8(tmp_path: Path) -> None:
+    # A Latin-1 e-acute; reading it leniently would let the next save replace it.
+    content = b"tasks:\n  - {id: 1, name: Caf\xe9, prompt: p}\n"
+    path = tmp_path / "tasks.yaml"
+    path.write_bytes(content)
+
+    with pytest.raises(TaskFileError, match="is not valid UTF-8") as caught:
+        loop.load_tasks(str(path))
+
+    assert quote(str(path)) in str(caught.value)
+    assert path.read_bytes() == content
+
+
 def test_load_tasks_success(tmp_path: Path) -> None:
     path = _write(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
