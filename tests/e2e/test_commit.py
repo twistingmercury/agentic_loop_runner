@@ -10,10 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from helpers import fake_claude_records
-
-from e2e.conftest import (
+from e2e_helpers import (
     Result,
+    fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_args,

@@ -1,4 +1,4 @@
-"""Helpers shared by the unit and e2e tests.
+"""Helpers for the unit tests.
 
 Plain functions live here and fixtures in conftest.py. pytest puts this folder
 on sys.path for every run, so any test module can `from helpers import ...`.

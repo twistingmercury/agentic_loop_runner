@@ -2,10 +2,9 @@
 
 from pathlib import Path
 
-from helpers import fake_claude_records
-
-from e2e.conftest import (
+from e2e_helpers import (
     expected_stdin,
+    fake_claude_records,
     read_tasks_yaml,
     run_alr,
     task_states,

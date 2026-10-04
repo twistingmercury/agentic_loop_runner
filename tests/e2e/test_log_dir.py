@@ -7,12 +7,11 @@ pinned here.
 from dataclasses import dataclass
 from pathlib import Path
 
-from helpers import fake_claude_records
-
-from e2e.conftest import (
+from e2e_helpers import (
     ONE_TASK_TABLE,
     VALID_TASKS_YAML,
     Result,
+    fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_dry_run,

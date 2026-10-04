@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from e2e.conftest import ONE_TASK_TABLE, VALID_TASKS_YAML, run_alr, run_dry_run
+from e2e_helpers import ONE_TASK_TABLE, VALID_TASKS_YAML, run_alr, run_dry_run
 
 
 def test_dry_run_valid_file(tmp_path: Path, fake_claude: Path) -> None:

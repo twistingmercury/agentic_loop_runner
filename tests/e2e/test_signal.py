@@ -8,11 +8,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from helpers import start_alr, wait_for_file, wait_process_gone
-
-from e2e.conftest import (
+from e2e_helpers import (
     assert_no_tmp_file,
     run_args,
+    start_alr,
+    wait_for_file,
+    wait_process_gone,
     write_prompt,
     write_tasks_yaml,
 )

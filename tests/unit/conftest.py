@@ -1,4 +1,4 @@
-"""Fixtures shared by the unit and e2e tests."""
+"""Fixtures for the unit tests."""
 
 import os
 import subprocess
