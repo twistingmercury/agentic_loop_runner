@@ -1,6 +1,9 @@
 """The task file: parse, validate, save."""
 
+import errno
+import os
 import re
+import stat
 from dataclasses import dataclass
 
 import yaml
@@ -69,6 +72,27 @@ for _first, _resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items():
             _GoLoader.yaml_implicit_resolvers.setdefault(_first, []).append(
                 (_tag, _pattern)
             )
+
+
+class _GoDumper(yaml.SafeDumper):
+    """Writes the task file the way gralph does: nested lists indented, long text as blocks."""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        # PyYAML leaves a list under a key unindented; gralph's files indent it.
+        super().increase_indent(flow, False)
+
+
+def _represent_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
+    style = "|" if "\n" in value else None
+    return dumper.represent_scalar(_STR, value, style=style)
+
+
+_GoDumper.add_representer(str, _represent_str)
+# Quote any string gralph's library would read back as a number, on top of PyYAML's own rules.
+_GoDumper.add_implicit_resolver(_INT, re.compile(_INT_PATTERN), list("-+0123456789"))
+_GoDumper.add_implicit_resolver(
+    _TAG + "float", re.compile(_FLOAT_PATTERN), list("-+0123456789.")
+)
 
 
 @dataclass
@@ -402,6 +426,107 @@ def parse_timeout(text: str) -> float:
         raise ValueError("must be greater than zero")
 
     return seconds
+
+
+def save_tasks(path: str, task_list: TaskList) -> None:
+    """Write the task file as YAML.
+
+    The text goes to a temporary file that is renamed over path, so a failed
+    save leaves the original file untouched.
+    """
+    text = yaml.dump(
+        _document(task_list),
+        Dumper=_GoDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        indent=2,
+        width=2**31 - 1,
+    )
+    path = os.path.normpath(path)
+    tmp = path + ".tmp"
+    try:
+        _write_file(tmp, text)
+    except OSError as exc:
+        raise _save_error(path, tmp, gocompat.os_error_text("open", tmp, exc)) from exc
+
+    try:
+        _rename(tmp, path)
+    except OSError as exc:
+        reason = gocompat.os_error_text("rename", f"{tmp} {path}", exc)
+        raise _save_error(path, tmp, reason) from exc
+
+
+def _document(task_list: TaskList) -> dict[str, object]:
+    """Lay the task list out as it is written: gates above tasks, empty optional keys left out."""
+    doc: dict[str, object] = {}
+    if task_list.gates is not None:
+        doc["gates"] = [_gate_entry(gate) for gate in task_list.gates]
+
+    doc["tasks"] = [_task_entry(task) for task in task_list.tasks]
+    return doc
+
+
+def _gate_entry(gate: Gate) -> dict[str, str]:
+    entry = {"cmd": gate.cmd}
+    if gate.timeout:
+        entry["timeout"] = gate.timeout
+
+    return entry
+
+
+def _task_entry(task: Task) -> dict[str, int | str]:
+    entry: dict[str, int | str] = {
+        "id": task.id,
+        "name": task.name,
+        "prompt": task.prompt,
+        "state": task.state,
+    }
+    if task.error:
+        entry["error"] = task.error
+
+    return entry
+
+
+def _write_file(path: str, text: str) -> None:
+    # The task file can hold prompts and commands, so only its owner may read it.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as file:
+        file.write(text)
+
+
+def _rename(tmp: str, path: str) -> None:
+    """Rename tmp over path, refusing a directory as Go's os.Rename does.
+
+    Go reports `file exists` there; the system call alone words it differently
+    on Linux and macOS.
+    """
+    try:
+        is_dir = stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        is_dir = False
+
+    if is_dir:
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST))
+
+    os.replace(tmp, path)
+
+
+def _save_error(path: str, tmp: str, reason: str) -> TaskFileError:
+    """Clear away the temporary file and build the error for a failed save."""
+    _remove(tmp)
+    return TaskFileError(f"failed to save tasks to {gocompat.goquote(path)}: {reason}")
+
+
+def _remove(path: str) -> None:
+    """Remove a file or an empty directory, as Go's os.Remove does; failure is ignored."""
+    for remove in (os.unlink, os.rmdir):
+        try:
+            remove(path)
+        except OSError:
+            continue
+
+        return
 
 
 def _decode_task(task_id: int, fields: dict[str, yaml.Node]) -> Task:
