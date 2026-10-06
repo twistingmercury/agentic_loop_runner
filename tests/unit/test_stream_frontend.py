@@ -66,10 +66,9 @@ async def _run(
     return events
 
 
-async def _run_failing(
+async def _run_ending_in_a_failed_task(
     task_list: TaskList, tasks_file: Path, *, gate_timeout: str = ""
 ) -> list[Event]:
-    """Run a loop that must end in a failed task and return the events it reported."""
     events: list[Event] = []
     with pytest.raises(RunError):
         await _run(task_list, tasks_file, gate_timeout=gate_timeout, events=events)
@@ -134,7 +133,7 @@ async def test_result_reporting_failed_fails_the_task(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"boom"}')
 
-    events = await _run_failing(_task_list(), tmp_path / "tasks.yaml")
+    events = await _run_ending_in_a_failed_task(_task_list(), tmp_path / "tasks.yaml")
 
     assert _kinds(events) == SESSION_KINDS
     assert events[3].task.state == FAILED
@@ -146,7 +145,7 @@ async def test_non_zero_exit_fails_the_task(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
 
-    events = await _run_failing(_task_list(), tmp_path / "tasks.yaml")
+    events = await _run_ending_in_a_failed_task(_task_list(), tmp_path / "tasks.yaml")
 
     assert _kinds(events) == SESSION_KINDS
     assert events[3].task.state == FAILED
@@ -234,7 +233,7 @@ async def test_failed_task_stops_the_run(
     monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
     task_list = _task_list(names=("First", "Second"))
 
-    events = await _run_failing(task_list, tmp_path / "tasks.yaml")
+    events = await _run_ending_in_a_failed_task(task_list, tmp_path / "tasks.yaml")
 
     assert _kinds(events) == SESSION_KINDS
     assert events[3].error is not None
@@ -268,7 +267,7 @@ async def test_session_finished_carries_a_failed_outcome(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"boom"}')
 
-    events = await _run_failing(_task_list(), tmp_path / "tasks.yaml")
+    events = await _run_ending_in_a_failed_task(_task_list(), tmp_path / "tasks.yaml")
 
     [session] = _of(events, SessionFinished)
     assert session.task.state == FAILED
@@ -308,7 +307,9 @@ async def test_session_that_writes_only_to_stderr_arrives_as_activity(
 
 
 async def test_gate_failure_reports_a_failed_task(tmp_path: Path) -> None:
-    events = await _run_failing(_task_list(Gate(cmd="exit 3")), tmp_path / "t.yaml")
+    events = await _run_ending_in_a_failed_task(
+        _task_list(Gate(cmd="exit 3")), tmp_path / "t.yaml"
+    )
 
     [finished] = _of(events, TaskFinished)
     assert finished.task.state == FAILED
@@ -319,7 +320,9 @@ async def test_gate_failure_reports_a_failed_task(tmp_path: Path) -> None:
 async def test_gate_finished_reports_each_gate_that_ran(tmp_path: Path) -> None:
     gates = [Gate(cmd="true"), Gate(cmd="sleep 5", timeout="100ms"), Gate(cmd="true")]
 
-    events = await _run_failing(_task_list(*gates), tmp_path / "tasks.yaml")
+    events = await _run_ending_in_a_failed_task(
+        _task_list(*gates), tmp_path / "tasks.yaml"
+    )
 
     passed, timed_out = _of(events, GateFinished)
     assert passed.task.id == 1
@@ -333,7 +336,7 @@ async def test_gate_finished_reports_each_gate_that_ran(tmp_path: Path) -> None:
 
 
 async def test_gate_finished_carries_a_non_zero_exit(tmp_path: Path) -> None:
-    events = await _run_failing(
+    events = await _run_ending_in_a_failed_task(
         _task_list(Gate(cmd="exit 3")), tmp_path / "tasks.yaml", gate_timeout="30s"
     )
 

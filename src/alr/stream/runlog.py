@@ -37,8 +37,6 @@ _APPEND = os.O_CREAT | os.O_WRONLY | os.O_APPEND
 
 @dataclass(frozen=True)
 class Info:
-    """What the run_started line says about the run."""
-
     version: str
     tasks_file: str
     permissions: str  # "sandbox" or "skip"
@@ -61,12 +59,20 @@ def _open_append(path: Path) -> TextIO:
     try:
         fd = os.open(path, _APPEND, _FILE_MODE)
     except OSError as exc:
-        raise RunLogError(f"{path}: {exc.strerror}") from exc
+        raise _io_error(path, exc) from exc
 
     # errors="replace" is the last resort for text that never passed through the
     # stream path's scrub (task names, Info fields): a lone surrogate cannot be
     # encoded as UTF-8, and it is written as "?" rather than failing the run.
     return os.fdopen(fd, "a", encoding="utf-8", errors="replace", newline="\n")
+
+
+def _io_error(path: Path, exc: OSError) -> RunLogError:
+    return RunLogError(f"{path}: {exc.strerror}")
+
+
+def _not_open(path: Path) -> RunLogError:
+    return RunLogError(f"{path}: the run log is not open")
 
 
 def _close(file: TextIO | None, path: Path) -> None:
@@ -76,24 +82,33 @@ def _close(file: TextIO | None, path: Path) -> None:
     try:
         file.close()
     except OSError as exc:
-        raise RunLogError(f"{path}: {exc.strerror}") from exc
+        raise _io_error(path, exc) from exc
+
+
+def _write(file: TextIO | None, path: Path, text: str) -> None:
+    if file is None:
+        raise _not_open(path)
+
+    try:
+        file.write(text)
+        file.flush()
+    except OSError as exc:
+        raise _io_error(path, exc) from exc
 
 
 def _rfc3339(stamp: datetime) -> str:
     # Written like Go's RFC 3339: the clock's own offset, and Z for UTC.
-    text = stamp.isoformat(timespec="seconds")
-    return text.removesuffix("+00:00") + "Z" if text.endswith("+00:00") else text
+    return stamp.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 class RunLog:
-    """One run's record, written as the run's events arrive."""
-
     def __init__(self, path: Path, now: Callable[[], datetime]) -> None:
         self._path = path
+        self._ledger_path = path / _LEDGER_NAME
         self._now = now
         self._ledger: TextIO | None = None
         self._detail: TextIO | None = None
-        self._detail_path = path
+        self._detail_path: Path | None = None
         # Says the last finished task failed, which is what tells a failed run
         # from one stopped for any other reason.
         self._failed = False
@@ -112,7 +127,7 @@ class RunLog:
             # Not exist_ok: an existing run folder holds another run's record.
             path.mkdir(mode=_DIR_MODE)
         except OSError as exc:
-            raise RunLogError(f"{path}: {exc.strerror}") from exc
+            raise _io_error(path, exc) from exc
 
         log = cls(path, now)
         try:
@@ -124,7 +139,7 @@ class RunLog:
         return log
 
     def _start(self, info: Info) -> None:
-        self._ledger = _open_append(self._path / _LEDGER_NAME)
+        self._ledger = _open_append(self._ledger_path)
         fields: dict[str, Any] = {
             "version": info.version,
             "tasks_file": info.tasks_file,
@@ -142,19 +157,6 @@ class RunLog:
     def record(self, event: Event) -> None:
         """Write what event adds to the record. An error means the record is no
         longer complete; the caller stops the run."""
-        self._dispatch(event)
-
-    def close(self) -> None:
-        """Close the record's files. Safe to call twice."""
-        detail, ledger = self._detail, self._ledger
-        self._detail = self._ledger = None
-        # The ledger closes even when the detail file's close fails.
-        try:
-            _close(detail, self._detail_path)
-        finally:
-            _close(ledger, self._path / _LEDGER_NAME)
-
-    def _dispatch(self, event: Event) -> None:
         match event:
             case TaskStarted():
                 self._task_started(event)
@@ -173,28 +175,29 @@ class RunLog:
             case RunDone():
                 self._run_done(event)
 
-    def _write(self, file: TextIO | None, path: Path, text: str) -> None:
-        if file is None:
-            raise RunLogError(f"{path}: the run log is not open")
-
+    def close(self) -> None:
+        """Close the record's files. Safe to call twice."""
+        detail, ledger = self._detail, self._ledger
+        self._detail = self._ledger = None
+        # The ledger closes even when the detail file's close fails.
         try:
-            file.write(text)
-            file.flush()
-        except OSError as exc:
-            raise RunLogError(f"{path}: {exc.strerror}") from exc
+            _close(detail, self._detail_path or self._path)
+        finally:
+            _close(ledger, self._ledger_path)
 
     def _write_ledger(self, event: str, fields: dict[str, Any]) -> None:
         line = {"time": _rfc3339(self._now()), "event": event, **fields}
         text = json.dumps(line, separators=(",", ":"), ensure_ascii=False) + "\n"
-        self._write(self._ledger, self._path / _LEDGER_NAME, text)
+        _write(self._ledger, self._ledger_path, text)
 
     def _task_started(self, event: TaskStarted) -> None:
         # Checked first so a closed log does not open a detail file it would leak.
         if self._ledger is None:
-            raise RunLogError(f"{self._path / _LEDGER_NAME}: the run log is not open")
+            raise _not_open(self._ledger_path)
 
-        self._detail_path = self._path / f"task-{event.task.id}.log"
-        self._detail = _open_append(self._detail_path)
+        detail_path = self._path / f"task-{event.task.id}.log"
+        self._detail = _open_append(detail_path)
+        self._detail_path = detail_path
         self._failed = False
         self._write_ledger(
             "task_started", {"task": event.task.id, "name": event.task.name}
@@ -202,7 +205,11 @@ class RunLog:
 
     def _activity(self, event: Activity) -> None:
         clock = self._now().strftime("%H:%M:%S")
-        self._write(self._detail, self._detail_path, f"{clock} {event.line}\n")
+        _write(
+            self._detail,
+            self._detail_path or self._path,
+            f"{clock} {event.line}\n",
+        )
 
     def _step_finished(self, event: str, task: Task, seconds: float) -> None:
         fields: dict[str, Any] = {"task": task.id, "state": task.state}
@@ -228,14 +235,12 @@ class RunLog:
         self._failed = event.task.state == FAILED
         self._step_finished("task_finished", event.task, event.seconds)
         detail, self._detail = self._detail, None
-        _close(detail, self._detail_path)
+        _close(detail, self._detail_path or self._path)
 
     def _run_done(self, event: RunDone) -> None:
-        fields: dict[str, Any] = {"result": "completed"}
-        if event.error is not None:
-            fields["result"] = "failed" if self._failed else "stopped"
-            if event.error:
-                fields["error"] = event.error
+        fields: dict[str, Any] = {"result": _run_result(event.error, self._failed)}
+        if event.error:
+            fields["error"] = event.error
 
         fields["duration"] = format_duration(event.seconds)
         self._write_ledger("run_finished", fields)
@@ -249,3 +254,10 @@ def _gate_result(event: GateFinished) -> str:
         return "failed"
 
     return "passed"
+
+
+def _run_result(error: str | None, failed: bool) -> str:
+    if error is None:
+        return "completed"
+
+    return "failed" if failed else "stopped"
