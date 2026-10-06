@@ -69,11 +69,20 @@ async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> 
     error: str | None = None
     try:
         await _run_loop(task_list, options, front_end)
-    except RunError as exc:
-        error = str(exc)
+    except BaseException as exc:
+        # Whatever ends the run is recorded, so a crash never reads as a clean finish.
+        error = _error_text(exc)
         raise
     finally:
         front_end.run_done(error, time.monotonic() - started)
+
+
+def _error_text(exc: BaseException) -> str:
+    if isinstance(exc, RunError):
+        return str(exc)
+
+    name = type(exc).__name__
+    return f"{name}: {exc}" if str(exc) else name
 
 
 async def _run_loop(

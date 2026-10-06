@@ -16,12 +16,14 @@ from helpers import (
 
 from alr import tasks
 from alr.engine import loop
+from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FailedTasksError,
     RunError,
     TaskFileError,
     quote,
 )
+from alr.plain.frontend import PlainFrontEnd
 from alr.tasks import COMPLETED, FAILED, PENDING, Shared, Task, TaskList
 
 VALID_TASKS_YAML = """shared:
@@ -545,3 +547,71 @@ async def test_plain_session_survives_output_that_is_not_utf8(
 
     assert task_list.tasks[0].state == COMPLETED
     assert " binary\n" in capfd.readouterr().out
+
+
+class _RecordingFrontEnd(PlainFrontEnd):
+    """The plain front end that notes run_done and can fail in task_started."""
+
+    def __init__(self, crash: BaseException | None = None) -> None:
+        super().__init__()
+        self.crash = crash
+        self.done: list[str | None] = []
+
+    def task_started(self, task: Task) -> None:
+        if self.crash is not None:
+            raise self.crash
+
+        super().task_started(task)
+
+    def run_done(self, error: str | None, seconds: float) -> None:
+        self.done.append(error)
+
+
+async def _run_recorded(
+    task_list: TaskList, tasks_file: Path, front_end: _RecordingFrontEnd
+) -> None:
+    options = loop.RunOptions(
+        tasks_file=str(tasks_file), gate_timeout="", session_args=bypass_args()
+    )
+    await loop.run(task_list, options, front_end)
+
+
+async def test_run_done_names_a_crash_and_the_crash_propagates(
+    record: Path, tmp_path: Path
+) -> None:
+    front_end = _RecordingFrontEnd(crash=RuntimeError("boom"))
+    task_list = tasks.parse_tasks(TWO_PENDING_YAML)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await _run_recorded(task_list, tmp_path / "tasks.yaml", front_end)
+
+    assert front_end.done == ["RuntimeError: boom"]
+
+
+async def test_run_done_reports_a_cancellation_with_a_non_empty_error(
+    record: Path, tmp_path: Path
+) -> None:
+    front_end = _RecordingFrontEnd(crash=asyncio.CancelledError())
+    task_list = tasks.parse_tasks(TWO_PENDING_YAML)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_recorded(task_list, tmp_path / "tasks.yaml", front_end)
+
+    assert front_end.done == ["CancelledError"]
+
+
+async def test_run_done_reports_a_failed_task_and_a_clean_run(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    clean = _RecordingFrontEnd()
+    await _run_recorded(tasks.parse_tasks(TWO_PENDING_YAML), tasks_file, clean)
+
+    assert clean.done == [None]
+
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
+    failed = _RecordingFrontEnd()
+    with pytest.raises(RunError):
+        await _run_recorded(tasks.parse_tasks(TWO_PENDING_YAML), tasks_file, failed)
+
+    assert failed.done == ["task 1: First failed: exit status 1"]
