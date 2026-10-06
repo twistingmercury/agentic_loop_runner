@@ -96,6 +96,20 @@ def test_save_tasks_round_trip(
     assert tasks.parse_tasks(_saved(path)) == want
 
 
+def test_save_tasks_is_readable_by_the_owner_only(tmp_path: Path) -> None:
+    # The file can hold prompts and commands. A save replaces the file, so an
+    # old file's looser mode must not carry over.
+    path = tmp_path / "tasks.yaml"
+    path.write_text("old\n", encoding="utf-8")
+    path.chmod(0o644)
+
+    tasks.save_tasks(
+        str(path), TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")])
+    )
+
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
 def test_save_tasks_path_is_directory(tmp_path: Path) -> None:
     target = tmp_path / "tasks.yaml"
     target.mkdir(mode=0o700)
