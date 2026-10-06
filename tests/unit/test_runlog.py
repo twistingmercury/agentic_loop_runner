@@ -351,6 +351,12 @@ def test_record_lone_surrogate_in_the_ledger_is_replaced(
     assert '"error":"bad?end"' in lines[2]
 
 
+needs_dev_full = pytest.mark.skipif(
+    not Path("/dev/full").exists(),
+    reason="/dev/full is Linux-only; macOS has no device that fails writes with ENOSPC",
+)
+
+
 def open_full_detail_log(tmp_path: Path) -> tuple[RunLog, Task]:
     """A log whose first task's detail file is /dev/full, which accepts the open
     and fails every write with ENOSPC, a real OSError from the kernel."""
@@ -362,6 +368,7 @@ def open_full_detail_log(tmp_path: Path) -> tuple[RunLog, Task]:
     return log, task
 
 
+@needs_dev_full
 def test_record_write_that_fails_is_a_run_log_error(tmp_path: Path) -> None:
     log, task = open_full_detail_log(tmp_path)
 
@@ -372,6 +379,7 @@ def test_record_write_that_fails_is_a_run_log_error(tmp_path: Path) -> None:
         log.close()
 
 
+@needs_dev_full
 def test_record_task_finished_with_a_failing_detail_close_is_a_run_log_error(
     tmp_path: Path,
 ) -> None:
@@ -387,9 +395,10 @@ def test_record_task_finished_with_a_failing_detail_close_is_a_run_log_error(
 
 
 def open_fds() -> int:
-    return len(os.listdir("/proc/self/fd"))
+    return len(os.listdir("/dev/fd"))
 
 
+@needs_dev_full
 def test_close_with_a_failing_detail_close_still_closes_the_ledger(
     tmp_path: Path,
 ) -> None:
