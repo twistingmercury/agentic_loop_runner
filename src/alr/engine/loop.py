@@ -22,6 +22,10 @@ from alr.tasks import COMPLETED, FAILED, Gate, Task, TaskList, parse_tasks, save
 
 __all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_tasks", "run"]
 
+# What a stop that carries no task of its own is recorded as; a stop inside a
+# task says "task N: name: stopped" through RunCancelledError.
+_STOPPED = "stopped"
+
 
 @dataclass(frozen=True)
 class RunOptions:
@@ -80,6 +84,10 @@ async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> 
 def _error_text(exc: BaseException) -> str:
     if isinstance(exc, RunError):
         return str(exc)
+
+    # A stop is not a crash, so it must not read like one in the record.
+    if isinstance(exc, asyncio.CancelledError | KeyboardInterrupt):
+        return _STOPPED
 
     name = type(exc).__name__
     return f"{name}: {exc}" if str(exc) else name

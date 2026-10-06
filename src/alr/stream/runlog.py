@@ -63,8 +63,9 @@ def _open_append(path: Path) -> TextIO:
     except OSError as exc:
         raise RunLogError(f"{path}: {exc.strerror}") from exc
 
-    # errors="replace" because Claude's text can hold a lone surrogate, which
-    # UTF-8 cannot encode; it is written as "?" rather than failing the run.
+    # errors="replace" is the last resort for text that never passed through the
+    # stream path's scrub (task names, Info fields): a lone surrogate cannot be
+    # encoded as UTF-8, and it is written as "?" rather than failing the run.
     return os.fdopen(fd, "a", encoding="utf-8", errors="replace", newline="\n")
 
 

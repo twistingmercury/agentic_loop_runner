@@ -75,5 +75,9 @@ class FrontEnd(Protocol):
         ...
 
     def run_done(self, error: str | None, seconds: float) -> None:
-        """Note the end of the run, with its error if any."""
+        """Note the end of the run.
+
+        error is None only for a run that finished cleanly; otherwise it is the
+        text of whatever ended the run, a stop included.
+        """
         ...

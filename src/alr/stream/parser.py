@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from alr.engine.gates import first_line
+from alr.engine.result import replace_lone_surrogates
 
 # The input field each tool's target comes from.
 _TARGET_FIELDS = {
@@ -74,7 +75,8 @@ def _block_activity(block: dict[str, Any]) -> list[str]:
 
 
 def _text_activity(text: str) -> list[str]:
-    return [line for line in text.split("\n") if line.strip()]
+    clean = replace_lone_surrogates(text)
+    return [line for line in clean.split("\n") if line.strip()]
 
 
 def _tool_activity(name: str, tool_input: Any) -> str:
@@ -84,7 +86,7 @@ def _tool_activity(name: str, tool_input: Any) -> str:
     if field is None or not isinstance(tool_input, dict):
         return f"→ {name}"
 
-    target = first_line(_text(tool_input.get(field)))
+    target = replace_lone_surrogates(first_line(_text(tool_input.get(field))))
     if not target:
         return f"→ {name}"
 

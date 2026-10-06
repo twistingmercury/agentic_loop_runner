@@ -324,8 +324,8 @@ def test_record_many_activity_events_each_land_whole(
     assert lines == ["14:02:11 " + line] * 1000
 
 
-# Claude's stream-json can carry a \\ud800 escape, which decodes to a lone
-# surrogate that UTF-8 cannot encode; gralph writes U+FFFD in its place.
+# A task name or an Info field can hold a lone surrogate, which UTF-8 cannot
+# encode; the log writes "?" in its place rather than failing the run.
 def test_record_lone_surrogate_in_activity_is_replaced(
     opened: tuple[RunLog, Path],
 ) -> None:

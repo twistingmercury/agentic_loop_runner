@@ -30,10 +30,10 @@ def parse_result(line: str) -> tuple[str, str] | None:
     if state not in (COMPLETED, FAILED):
         return None
 
-    return state, _replace_lone_surrogates(error.strip())
+    return state, replace_lone_surrogates(error.strip())
 
 
-def _replace_lone_surrogates(text: str) -> str:
+def replace_lone_surrogates(text: str) -> str:
     """A `\\ud800` escape decodes to a character that cannot be written as UTF-8.
 
     The json module joins a valid pair into one character, so any surrogate

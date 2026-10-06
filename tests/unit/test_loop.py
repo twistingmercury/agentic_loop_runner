@@ -578,16 +578,19 @@ async def test_run_done_names_a_crash_and_the_crash_propagates(
     assert front_end.done == ["RuntimeError: boom"]
 
 
-async def test_run_done_reports_a_cancellation_with_a_non_empty_error(
-    record: Path, tmp_path: Path
+@pytest.mark.parametrize(
+    "stop", [asyncio.CancelledError(), KeyboardInterrupt()], ids=["cancel", "ctrl-c"]
+)
+async def test_run_done_records_a_stop_as_a_stop(
+    record: Path, tmp_path: Path, stop: BaseException
 ) -> None:
-    front_end = _RecordingFrontEnd(crash=asyncio.CancelledError())
+    front_end = _RecordingFrontEnd(crash=stop)
     task_list = tasks.parse_tasks(TWO_PENDING_YAML)
 
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(type(stop)):
         await run_loop(task_list, tmp_path / "tasks.yaml", front_end=front_end)
 
-    assert front_end.done == ["CancelledError"]
+    assert front_end.done == ["stopped"]
 
 
 async def test_run_done_reports_a_failed_task_and_a_clean_run(

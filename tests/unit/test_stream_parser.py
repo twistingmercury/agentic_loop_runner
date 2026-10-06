@@ -72,6 +72,21 @@ ACTIVITY_CASES = [
         id="known tool with missing target has no trailing space",
     ),
     pytest.param(
+        assistant('{"type":"text","text":"x\\ud800y"}'),
+        ["x\ufffdy"],
+        id="lone surrogate in text becomes U+FFFD",
+    ),
+    pytest.param(
+        assistant(tool("Read", '{"file_path":"a\\udfffb"}')),
+        ["→ Read a\ufffdb"],
+        id="lone surrogate in a tool target becomes U+FFFD",
+    ),
+    pytest.param(
+        assistant('{"type":"text","text":"pair \\ud83d\\ude00"}'),
+        ["pair \U0001f600"],
+        id="surrogate pair in text is kept",
+    ),
+    pytest.param(
         assistant(
             '{"type":"text","text":"Checking."}',
             tool("Read", '{"file_path":"x.go"}'),
