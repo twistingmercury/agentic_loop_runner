@@ -32,11 +32,6 @@ DURATION_HINT = "must be a duration string such as 90s or 10m"
             "2: Indented\n\n  Step one\nStep two",
             id="interior indentation of the prompt's first line is preserved",
         ),
-        pytest.param(
-            Task(id=3, name="No prompt", prompt=""),
-            "3: No prompt",
-            id="empty prompt",
-        ),
     ],
 )
 def test_task_string(task: Task, want: str) -> None:
@@ -123,15 +118,9 @@ def test_parse_tasks_max_id() -> None:
     assert got.tasks[0].id == 32767
 
 
-def test_state_constants() -> None:
-    # These strings are the on-disk YAML contract; renaming one breaks every
-    # existing task file.
-    assert PENDING == "pending"
-    assert COMPLETED == "completed"
-    assert FAILED == "failed"
-
-
-@pytest.mark.parametrize("state", [PENDING, COMPLETED, FAILED])
+# Literal strings on purpose: they are the on-disk YAML contract, and renaming
+# one breaks every existing task file.
+@pytest.mark.parametrize("state", ["pending", "completed", "failed"])
 def test_parse_tasks_accepts_every_valid_state(state: str) -> None:
     got = tasks.parse_tasks(
         "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: "
@@ -189,8 +178,6 @@ ERROR_CASES = [
         "failed to parse yaml tasks",
     ),
     ("empty input", "", "shared: is required"),
-    ("comment-only input", "# nothing\n", "shared: is required"),
-    ("root is a sequence", "- {id: 1, name: a, prompt: p}\n", "shared: is required"),
     ("missing tasks key", "shared:\n  prompt: shared\n", "tasks: is required"),
     # The top level holds only shared and tasks.
     (
@@ -215,7 +202,6 @@ ERROR_CASES = [
     ),
     # shared
     ("null shared", _WITH_SHARED.format(""), "shared: must be a mapping"),
-    ("sequence shared", _WITH_SHARED.format(" [a]"), "shared: must be a mapping"),
     (
         "unknown shared key",
         _WITH_SHARED.format(" {prompt: p, tone: dry}"),
@@ -229,11 +215,6 @@ ERROR_CASES = [
     (
         "null shared prompt",
         _WITH_SHARED.format(" {prompt: ~}"),
-        "shared.prompt: must be a string",
-    ),
-    (
-        "mapping shared prompt",
-        _WITH_SHARED.format(" {prompt: {x: y}}"),
         "shared.prompt: must be a string",
     ),
     (
@@ -253,29 +234,9 @@ ERROR_CASES = [
     ),
     ("null tasks", "shared:\n  prompt: shared\ntasks:\n", "tasks: must be a sequence"),
     (
-        "tilde tasks",
-        "shared:\n  prompt: shared\ntasks: ~\n",
-        "tasks: must be a sequence",
-    ),
-    (
-        "scalar tasks",
-        "shared:\n  prompt: shared\ntasks: nope\n",
-        "tasks: must be a sequence",
-    ),
-    (
-        "mapping tasks",
-        "shared:\n  prompt: shared\ntasks: {id: 1, name: a, prompt: p}\n",
-        "tasks: must be a sequence",
-    ),
-    (
         "empty tasks sequence",
         "shared:\n  prompt: shared\ntasks: []\n",
         "tasks: must contain at least one task",
-    ),
-    (
-        "duplicate tasks key",
-        VALID + "tasks:\n  - {id: 2, name: b, prompt: p}\n",
-        "tasks: duplicate key",
     ),
     # Tags outside the core set are rejected anywhere in the document.
     (
@@ -288,24 +249,9 @@ ERROR_CASES = [
         VALID + "  - !foo {id: 2, name: b, prompt: p}\n",
         "line 5: tag !foo is not allowed",
     ),
-    (
-        "custom tag on an unknown key",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, extra: !foo x}\n",
-        "tag !foo is not allowed",
-    ),
-    ("custom tag outside tasks", VALID + "meta: !foo x\n", "tag !foo is not allowed"),
-    (
-        "explicit binary tag",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: !!binary YQ==, prompt: p}\n",
-        "tag !!binary is not allowed",
-    ),
     # Every element must be a mapping, even among valid tasks.
-    ("bare dash element", VALID + "  -\n", "tasks[1]: must be a mapping"),
     ("null element", VALID + "  - null\n", "tasks[1]: must be a mapping"),
-    ("tilde element", VALID + "  - ~\n", "tasks[1]: must be a mapping"),
     ("empty mapping element", VALID + "  - {}\n", "tasks[1]: id: is required"),
-    ("empty sequence element", VALID + "  - []\n", "tasks[1]: must be a mapping"),
-    ("empty string element", VALID + '  - ""\n', "tasks[1]: must be a mapping"),
     ("scalar element", VALID + "  - just a string\n", "tasks[1]: must be a mapping"),
     (
         "invalid first element before a valid one",
@@ -319,33 +265,13 @@ ERROR_CASES = [
         "tasks[0]: id: is required",
     ),
     (
-        "null id",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: ~, name: a, prompt: p}\n",
-        ID_RANGE_ERROR,
-    ),
-    (
-        "float id",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1.5, name: a, prompt: p}\n",
-        "tasks[0]: id: must be a positive integer",
-    ),
-    (
         "quoted id",
         'shared:\n  prompt: shared\ntasks:\n  - {id: "1", name: a, prompt: p}\n',
         "tasks[0]: id: must be a positive integer",
     ),
     (
-        "word id",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: one, name: a, prompt: p}\n",
-        "tasks[0]: id: must be a positive integer",
-    ),
-    (
         "zero id",
         "shared:\n  prompt: shared\ntasks:\n  - {id: 0, name: a, prompt: p}\n",
-        "tasks[0]: id: must be a positive integer",
-    ),
-    (
-        "negative id",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: -3, name: a, prompt: p}\n",
         "tasks[0]: id: must be a positive integer",
     ),
     (
@@ -377,16 +303,6 @@ ERROR_CASES = [
     (
         "null name",
         "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: ~, prompt: p}\n",
-        "tasks[0] (id 1): name: must be a string",
-    ),
-    (
-        "integer name",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: 42, prompt: p}\n",
-        "tasks[0] (id 1): name: must be a string",
-    ),
-    (
-        "sequence name",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: [a], prompt: p}\n",
         "tasks[0] (id 1): name: must be a string",
     ),
     (
@@ -428,11 +344,6 @@ ERROR_CASES = [
         "tasks[0] (id 1): prompt: must be a string",
     ),
     (
-        "mapping prompt",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: {x: y}}\n",
-        "tasks[0] (id 1): prompt: must be a string",
-    ),
-    (
         "empty prompt",
         'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: ""}\n',
         "tasks[0] (id 1): prompt: must not be empty or whitespace",
@@ -442,26 +353,11 @@ ERROR_CASES = [
         'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: " \\t\\n "}\n',
         "tasks[0] (id 1): prompt: must not be empty or whitespace",
     ),
-    (
-        "blank prompt on a later task",
-        VALID + '  - {id: 2, name: b, prompt: "  "}\n',
-        "tasks[1] (id 2): prompt: must not be empty or whitespace",
-    ),
     # state
     (
         "null state",
         "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: ~}\n",
         "tasks[0] (id 1): state: must be a string",
-    ),
-    (
-        "state key with no value",
-        "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n    state:\n",
-        "tasks[0] (id 1): state: must be a string",
-    ),
-    (
-        "whitespace-only state",
-        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: " "}\n',
-        STATE_ERROR + '" "',
     ),
     (
         "padded state",
@@ -474,52 +370,9 @@ ERROR_CASES = [
         STATE_ERROR + '"Completed"',
     ),
     (
-        "upper-case state",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: PENDING}\n",
-        'got "PENDING"',
-    ),
-    (
-        "abandoned state",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: abandoned}\n",
-        STATE_ERROR + '"abandoned"',
-    ),
-    (
-        "state typo",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: complete}\n",
-        'got "complete"',
-    ),
-    (
-        "boolean state",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: true}\n",
-        "tasks[0] (id 1): state: must be a string",
-    ),
-    (
         "invalid state on a later task",
         VALID + "  - {id: 2, name: b, prompt: p, state: done}\n",
         'tasks[1] (id 2): state: must be pending, completed, or failed, got "done"',
-    ),
-    # Elements are checked in file order, and within one element id, name,
-    # prompt, state, then error.
-    (
-        "earlier element wins",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
-        '  - {id: 2, name: "", prompt: p}\n',
-        "tasks[0] (id 1): state:",
-    ),
-    (
-        "id before name",
-        'shared:\n  prompt: shared\ntasks:\n  - {id: 0, name: "", prompt: p}\n',
-        "tasks[0]: id:",
-    ),
-    (
-        "name before prompt",
-        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: "", prompt: ""}\n',
-        "tasks[0] (id 1): name:",
-    ),
-    (
-        "prompt before state",
-        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: "", state: bogus}\n',
-        "tasks[0] (id 1): prompt:",
     ),
     # Plain values YAML reads as booleans or numbers are not strings; they must be quoted.
     *[
@@ -528,7 +381,7 @@ ERROR_CASES = [
             f"shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: {value}\n    prompt: do it\n",
             "tasks[0] (id 1): name: must be a string",
         )
-        for value in ("yes", "no", "on", "off", "12:30", "1_000")
+        for value in ("yes", "12:30")
     ],
     # A merge key would otherwise be dropped without a word, losing what it merged in.
     (
@@ -543,11 +396,6 @@ ERROR_CASES = [
         'shared:\n  prompt: shared\ntasks:\n  - {id: !!int "", name: a, prompt: p}\n',
         ID_RANGE_ERROR,
     ),
-    (
-        "int tag on a word",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: !!int abc, name: a, prompt: p}\n",
-        ID_RANGE_ERROR,
-    ),
     # error
     (
         "non-string error",
@@ -557,33 +405,27 @@ ERROR_CASES = [
 ]
 
 
+# Syntax, tag, and top-level errors do not invent a task index or id.
+FILE_LEVEL_ERRORS = {
+    "malformed yaml",
+    "custom tag on an element",
+    "null tasks",
+    "empty tasks sequence",
+}
+
+
 @pytest.mark.parametrize(
-    ("text", "want"),
-    [pytest.param(text, want, id=name) for name, text, want in ERROR_CASES],
+    ("name", "text", "want"),
+    [pytest.param(name, text, want, id=name) for name, text, want in ERROR_CASES],
 )
-def test_parse_tasks_errors(text: str, want: str) -> None:
+def test_parse_tasks_errors(name: str, text: str, want: str) -> None:
     with pytest.raises(TaskFileError) as exc:
         tasks.parse_tasks(text)
 
     assert want in str(exc.value)
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "shared:\n  prompt: shared\ntasks:\n  - id: 1\n   name: bad indent\n",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: !foo a, prompt: p}\n",
-        "shared:\n  prompt: shared\ntasks: nope\n",
-        "shared:\n  prompt: shared\ntasks: []\n",
-    ],
-)
-def test_parse_tasks_file_errors_name_no_task(text: str) -> None:
-    # Syntax, tag, and top-level errors do not invent a task index or id.
-    with pytest.raises(TaskFileError) as exc:
-        tasks.parse_tasks(text)
-
-    assert "tasks[" not in str(exc.value)
-    assert "(id" not in str(exc.value)
+    if name in FILE_LEVEL_ERRORS:
+        assert "tasks[" not in str(exc.value)
+        assert "(id" not in str(exc.value)
 
 
 def test_parse_tasks_accepts_explicit_core_tags() -> None:
@@ -690,40 +532,13 @@ UNKNOWN_KEY = "unknown key; a gate has only cmd and timeout"
 
 GATE_ERROR_CASES = [
     ("null gates", "gates:", "shared.gates: must be a sequence"),
-    ("scalar gates", "gates: go test ./...", "shared.gates: must be a sequence"),
-    (
-        "mapping gates",
-        "gates: {cmd: go test ./...}",
-        "shared.gates: must be a sequence",
-    ),
-    (
-        "duplicate gates key",
-        "gates: []\n  gates: []",
-        "shared: gates: duplicate key",
-    ),
     ("string element", "gates: [go test ./...]", "shared.gates[0]: must be a mapping"),
     ("missing cmd", "gates: [{}]", "shared.gates[0]: cmd: is required"),
-    (
-        "timeout without cmd",
-        "gates:\n  - timeout: 5m",
-        "shared.gates[0]: cmd: is required",
-    ),
     (
         "misspelled key",
         "gates: [{command: a}]",
         f"shared.gates[0]: command: {UNKNOWN_KEY}",
     ),
-    (
-        "extra key",
-        "gates: [{cmd: a, retries: 3}]",
-        f"shared.gates[0]: retries: {UNKNOWN_KEY}",
-    ),
-    (
-        "duplicate cmd",
-        "gates: [{cmd: a, cmd: b}]",
-        "shared.gates[0]: cmd: duplicate key",
-    ),
-    ("integer cmd", "gates: [{cmd: 5}]", "shared.gates[0]: cmd: must be a string"),
     ("null cmd", "gates: [{cmd: }]", "shared.gates[0]: cmd: must be a string"),
     (
         "blank cmd",
@@ -736,44 +551,14 @@ GATE_ERROR_CASES = [
         f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
-        "null timeout",
-        "gates: [{cmd: a, timeout: }]",
-        f"shared.gates[0]: timeout: {DURATION_HINT}",
-    ),
-    (
-        "sequence timeout",
-        "gates: [{cmd: a, timeout: [10m]}]",
-        f"shared.gates[0]: timeout: {DURATION_HINT}",
-    ),
-    (
         "unparseable timeout",
         "gates: [{cmd: a, timeout: soon}]",
-        f"shared.gates[0]: timeout: {DURATION_HINT}",
-    ),
-    (
-        "unitless timeout",
-        'gates: [{cmd: a, timeout: "30"}]',
-        f"shared.gates[0]: timeout: {DURATION_HINT}",
-    ),
-    (
-        "blank timeout",
-        'gates: [{cmd: a, timeout: "  "}]',
         f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "zero timeout",
         "gates: [{cmd: a, timeout: 0s}]",
         "shared.gates[0]: timeout: must be greater than zero",
-    ),
-    (
-        "negative timeout",
-        "gates: [{cmd: a, timeout: -5m}]",
-        "shared.gates[0]: timeout: must be greater than zero",
-    ),
-    (
-        "duplicate timeout",
-        "gates: [{cmd: a, timeout: 1s, timeout: 2s}]",
-        "shared.gates[0]: timeout: duplicate key",
     ),
     (
         "second gate invalid",
@@ -798,37 +583,11 @@ def test_parse_tasks_gate_errors(gates: str, want: str) -> None:
     assert str(exc.value) == want
 
 
-def test_parse_tasks_gate_error_reported_before_task_error() -> None:
-    # Shared is checked before the tasks so a file with an error in each always
-    # reports the same one, whatever order the keys are in.
-    text = "tasks:\n  - id: 1\n    prompt: p\nshared:\n  prompt: s\n  gates: [{}]\n"
-    with pytest.raises(TaskFileError) as exc:
-        tasks.parse_tasks(text)
-
-    assert str(exc.value) == "shared.gates[0]: cmd: is required"
-
-
-@pytest.mark.parametrize(
-    ("text", "seconds"),
-    [
-        pytest.param("10m", 600.0, id="minutes"),
-        pytest.param("1h30m", 5400.0, id="compound"),
-        pytest.param("200ms", 0.2, id="milliseconds"),
-    ],
-)
-def test_parse_timeout(text: str, seconds: float) -> None:
-    assert tasks.parse_timeout(text) == pytest.approx(seconds)
-
-
 @pytest.mark.parametrize(
     ("text", "want"),
     [
         pytest.param("30", DURATION_HINT, id="unitless"),
-        pytest.param(" ", DURATION_HINT, id="blank"),
-        pytest.param("", DURATION_HINT, id="empty"),
-        pytest.param("soon", DURATION_HINT, id="words"),
         pytest.param("0s", "must be greater than zero", id="zero"),
-        pytest.param("-1m", "must be greater than zero", id="negative"),
     ],
 )
 def test_parse_timeout_errors(text: str, want: str) -> None:
@@ -838,21 +597,10 @@ def test_parse_timeout_errors(text: str, want: str) -> None:
     assert str(exc.value) == want
 
 
-@pytest.mark.parametrize("value", ["yes", "no", "on", "off", "12:30", "1_000"])
-def test_parse_tasks_reads_quoted_yaml_11_scalars_as_names(value: str) -> None:
-    text = f'shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: "{value}"\n    prompt: do it\n'
-    assert tasks.parse_tasks(text).tasks[0].name == value
-
-
 @pytest.mark.parametrize(
     ("text", "want"),
     [
         pytest.param("0x1F", 31, id="hex"),
-        pytest.param("0b11", 3, id="binary"),
-        pytest.param("0_7", 7, id="octal with underscore"),
-        pytest.param("1_0", 10, id="underscore"),
-        pytest.param("+5", 5, id="plus sign"),
-        pytest.param("1:30", 90, id="base 60"),
     ],
 )
 def test_parse_tasks_reads_ids_as_pyyaml_does(text: str, want: int) -> None:

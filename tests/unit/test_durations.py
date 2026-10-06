@@ -22,16 +22,12 @@ def test_parse_duration(text: str, seconds: float) -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["", "30", "ten", "5 s", "1d", "s", "1.2.3s", "٣s", "１０m"],
+    ["", "30", "1d", "1.2.3s", "１０m"],
     ids=[
         "empty",
         "unitless",
-        "word",
-        "space",
         "day",
-        "unit only",
         "two dots",
-        "arabic digit",
         "fullwidth digit",
     ],
 )

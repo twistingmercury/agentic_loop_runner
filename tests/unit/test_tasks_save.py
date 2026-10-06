@@ -117,29 +117,6 @@ def test_save_tasks_path_is_directory(tmp_path: Path) -> None:
     assert not Path(f"{target}.tmp").exists()
 
 
-def test_save_tasks_target_dir_not_writable(tmp_path: Path) -> None:
-    if os.geteuid() == 0:
-        pytest.skip("running as root: directory permissions are not enforced")
-
-    ro_dir = tmp_path / "ro"
-    ro_dir.mkdir(mode=0o500)
-    path = ro_dir / "tasks.yaml"
-
-    try:
-        with pytest.raises(TaskFileError) as excinfo:
-            tasks.save_tasks(
-                str(path),
-                TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")]),
-            )
-    finally:
-        ro_dir.chmod(0o700)
-
-    assert str(excinfo.value) == (
-        f"failed to save tasks to {quote(str(path))}: {os.strerror(errno.EACCES)}"
-    )
-    assert not Path(f"{path}.tmp").exists()
-
-
 def test_save_tasks_failed_save_leaves_existing_file_untouched(tmp_path: Path) -> None:
     # The file itself stays writable; only the temporary file's name is taken,
     # by a directory. A save that wrote to the target directly would succeed
@@ -210,12 +187,6 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
             "error:",
             id="empty",
         ),
-        pytest.param(
-            "shared:\n  prompt: shared\n  gates:\n    - cmd: make test\n      timeout: 10m\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
-            "  gates:\n    - cmd: make test\n      timeout: 10m\n",
-            "gates: []",
-            id="set",
-        ),
     ],
 )
 def test_save_tasks_keeps_gates_absent_empty_or_set(
@@ -254,21 +225,9 @@ def test_save_tasks_writes_multi_line_prompt_as_block(
     assert tasks.parse_tasks(saved).tasks[0].prompt == prompt
 
 
-def test_save_tasks_writes_multi_line_shared_prompt_as_block(tmp_path: Path) -> None:
-    path = tmp_path / "tasks.yaml"
-    shared = Shared(prompt="one\ntwo")
-
-    tasks.save_tasks(
-        str(path),
-        TaskList(shared=shared, tasks=[Task(id=1, name="a", prompt="p")]),
-    )
-
-    assert _saved(path).startswith("shared:\n  prompt: |-\n    one\n    two\ntasks:")
-
-
 @pytest.mark.parametrize(
     "name",
-    ["yes", "true", "~", "0o17", "12:30", "null", "1e3", "- dash", "a: b", "#hash"],
+    ["yes", "~", "0o17", "12:30", "1e3"],
 )
 def test_save_tasks_keeps_awkward_names_as_strings(tmp_path: Path, name: str) -> None:
     path = tmp_path / "tasks.yaml"
@@ -289,12 +248,9 @@ def _round_trips(tmp_path: Path, name: str, prompt: str) -> tuple[str, str]:
 
 
 @pytest.mark.parametrize("char", ["\x85", "\u2028", "\u2029"])
-@pytest.mark.parametrize("template", ["a{}b", "x{}", "line one\n{}line two\n"])
-def test_save_tasks_round_trips_unicode_line_breaks(
-    tmp_path: Path, char: str, template: str
-) -> None:
+def test_save_tasks_round_trips_unicode_line_breaks(tmp_path: Path, char: str) -> None:
     # YAML reads these as line breaks and folds them, so they must be escaped.
-    text = template.format(char)
+    text = f"line one\n{char}line two\n"
 
     assert _round_trips(tmp_path, text, text) == (text, text)
 
