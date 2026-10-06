@@ -1,8 +1,9 @@
 """The run log: a ledger line per event and a detail file per task."""
 
 import json
-from collections.abc import Iterator
+import os
 import stat
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -321,6 +322,98 @@ def test_record_many_activity_events_each_land_whole(
 
     lines = read_lines(path / "task-1.log")
     assert lines == ["14:02:11 " + line] * 1000
+
+
+# Claude's stream-json can carry a \\ud800 escape, which decodes to a lone
+# surrogate that UTF-8 cannot encode; gralph writes U+FFFD in its place.
+def test_record_lone_surrogate_in_activity_is_replaced(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    task = Task(id=1, name="First", prompt="")
+
+    record(log, TaskStarted(task), Activity(task, "x\ud800y"))
+
+    assert read_lines(path / "task-1.log") == ["14:02:11 x?y"]
+
+
+def test_record_lone_surrogate_in_the_ledger_is_replaced(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    task = Task(id=1, name="Bad\ud800name", prompt="")
+    failed = replace(task, state=FAILED, error="bad\udfffend")
+
+    record(log, TaskStarted(task), TaskFinished(failed, None, 0.0))
+
+    lines = ledger_lines(path)
+    assert '"name":"Bad?name"' in lines[1]
+    assert '"error":"bad?end"' in lines[2]
+
+
+def open_full_detail_log(tmp_path: Path) -> tuple[RunLog, Task]:
+    """A log whose first task's detail file is /dev/full, which accepts the open
+    and fails every write with ENOSPC, a real OSError from the kernel."""
+    path = tmp_path / "run"
+    log = RunLog.open(path, INFO, now=fixed_now)
+    (path / "task-1.log").symlink_to("/dev/full")
+    task = Task(id=1, name="First", prompt="")
+    record(log, TaskStarted(task))
+    return log, task
+
+
+def test_record_write_that_fails_is_a_run_log_error(tmp_path: Path) -> None:
+    log, task = open_full_detail_log(tmp_path)
+
+    with pytest.raises(RunLogError, match="task-1.log"):
+        log.record(Activity(task, "working"))
+
+    with pytest.raises(RunLogError, match="task-1.log"):
+        log.close()
+
+
+def test_record_task_finished_with_a_failing_detail_close_is_a_run_log_error(
+    tmp_path: Path,
+) -> None:
+    log, task = open_full_detail_log(tmp_path)
+    with pytest.raises(RunLogError):
+        log.record(Activity(task, "working"))
+
+    # The unwritten line is still buffered, so closing the file fails too.
+    with pytest.raises(RunLogError, match="task-1.log"):
+        log.record(TaskFinished(task, None, 0.0))
+
+    log.close()
+
+
+def open_fds() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+def test_close_with_a_failing_detail_close_still_closes_the_ledger(
+    tmp_path: Path,
+) -> None:
+    before = open_fds()
+    log, task = open_full_detail_log(tmp_path)
+    with pytest.raises(RunLogError):
+        log.record(Activity(task, "working"))
+
+    with pytest.raises(RunLogError, match="task-1.log"):
+        log.close()
+
+    assert open_fds() == before
+
+
+def test_record_task_started_after_close_opens_no_detail_file(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    log.close()
+
+    with pytest.raises(RunLogError):
+        log.record(TaskStarted(Task(id=1, name="First", prompt="")))
+
+    assert not (path / "task-1.log").exists()
 
 
 def test_record_after_close_is_an_error(opened: tuple[RunLog, Path]) -> None:

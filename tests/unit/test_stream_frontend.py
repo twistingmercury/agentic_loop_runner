@@ -286,6 +286,26 @@ async def test_gate_output_arrives_as_activity(tmp_path: Path) -> None:
     assert _kinds(events)[-2:] == [TaskFinished, RunDone]
 
 
+# printf leaves no newline, and the last line must still be reported.
+async def test_gate_output_without_a_trailing_newline_arrives_as_activity(
+    tmp_path: Path,
+) -> None:
+    events = await _run(_task_list(Gate(cmd="printf x")), tmp_path / "tasks.yaml")
+
+    assert "x" in _lines(events)
+
+
+async def test_session_that_writes_only_to_stderr_arrives_as_activity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "only warn\n")
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"completed","error":""}')
+
+    events = await _run(_task_list(), tmp_path / "tasks.yaml")
+
+    assert "only warn" in _lines(events)
+
+
 async def test_gate_failure_reports_a_failed_task(tmp_path: Path) -> None:
     events = await _run_failing(_task_list(Gate(cmd="exit 3")), tmp_path / "t.yaml")
 

@@ -24,7 +24,9 @@ def parse_stream_line(line: bytes) -> tuple[list[str], str, bool]:
     """
     try:
         event = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Deeply nested garbage overflows the decoder's stack; like any invalid
+        # JSON, it is only a line to drop.
         return [], "", False
 
     if not isinstance(event, dict):

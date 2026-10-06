@@ -168,3 +168,7 @@ def test_text_of_the_wrong_kind_is_dropped() -> None:
 
 def test_result_that_is_not_text_is_empty() -> None:
     assert parse_stream_line(b'{"type":"result","result":null}') == ([], "", True)
+
+
+def test_deeply_nested_garbage_is_dropped() -> None:
+    assert parse_stream_line(b"[" * 200000) == ([], "", False)

@@ -5,7 +5,6 @@ It only listens to the run's events; the loop knows nothing about it.
 
 import json
 import os
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -64,7 +63,19 @@ def _open_append(path: Path) -> TextIO:
     except OSError as exc:
         raise RunLogError(f"{path}: {exc.strerror}") from exc
 
-    return os.fdopen(fd, "a", encoding="utf-8", newline="\n")
+    # errors="replace" because Claude's text can hold a lone surrogate, which
+    # UTF-8 cannot encode; it is written as "?" rather than failing the run.
+    return os.fdopen(fd, "a", encoding="utf-8", errors="replace", newline="\n")
+
+
+def _close(file: TextIO | None, path: Path) -> None:
+    if file is None:
+        return
+
+    try:
+        file.close()
+    except OSError as exc:
+        raise RunLogError(f"{path}: {exc.strerror}") from exc
 
 
 def _rfc3339(stamp: datetime) -> str:
@@ -79,8 +90,6 @@ class RunLog:
     def __init__(self, path: Path, now: Callable[[], datetime]) -> None:
         self._path = path
         self._now = now
-        # Held so a record from one thread cannot interleave with another's.
-        self._lock = threading.Lock()
         self._ledger: TextIO | None = None
         self._detail: TextIO | None = None
         self._detail_path = path
@@ -132,17 +141,17 @@ class RunLog:
     def record(self, event: Event) -> None:
         """Write what event adds to the record. An error means the record is no
         longer complete; the caller stops the run."""
-        with self._lock:
-            self._dispatch(event)
+        self._dispatch(event)
 
     def close(self) -> None:
         """Close the record's files. Safe to call twice."""
-        with self._lock:
-            detail, ledger = self._detail, self._ledger
-            self._detail = self._ledger = None
-            for file in (detail, ledger):
-                if file is not None:
-                    file.close()
+        detail, ledger = self._detail, self._ledger
+        self._detail = self._ledger = None
+        # The ledger closes even when the detail file's close fails.
+        try:
+            _close(detail, self._detail_path)
+        finally:
+            _close(ledger, self._path / _LEDGER_NAME)
 
     def _dispatch(self, event: Event) -> None:
         match event:
@@ -179,6 +188,10 @@ class RunLog:
         self._write(self._ledger, self._path / _LEDGER_NAME, text)
 
     def _task_started(self, event: TaskStarted) -> None:
+        # Checked first so a closed log does not open a detail file it would leak.
+        if self._ledger is None:
+            raise RunLogError(f"{self._path / _LEDGER_NAME}: the run log is not open")
+
         self._detail_path = self._path / f"task-{event.task.id}.log"
         self._detail = _open_append(self._detail_path)
         self._failed = False
@@ -214,8 +227,7 @@ class RunLog:
         self._failed = event.task.state == FAILED
         self._step_finished("task_finished", event.task, event.seconds)
         detail, self._detail = self._detail, None
-        if detail is not None:
-            detail.close()
+        _close(detail, self._detail_path)
 
     def _run_done(self, event: RunDone) -> None:
         fields: dict[str, Any] = {"result": "completed"}
