@@ -1,4 +1,4 @@
-.PHONY: help test analyze build install
+.PHONY: help test unit e2e analyze build install uninstall
 
 .DEFAULT_GOAL := help
 
@@ -6,18 +6,14 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\n\033[1mAvailable targets:\033[0m\n"} /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 
-
-test: analyze ## Run pytest
-	uv sync
-	uv run ruff check
-	uv run pytest
-
+test: analyze ## Run analyze, then the unit tests (e2e runs in a container: make e2e)
+	uv run pytest tests/unit
 
 analyze: ## Runs formatting and linting
 	uv run ruff format
 	uv run ruff check --fix
 
-build: test ## Builds the wheel
+build: ## Builds the wheel, then runs the e2e tests in a container
 	build/build.sh
 
 install: ## Install the locally build wheel

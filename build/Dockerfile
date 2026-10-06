@@ -4,6 +4,10 @@ ARG BUILD_VER
 
 WORKDIR /workspace
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
@@ -11,7 +15,7 @@ COPY . .
 
 RUN uv run ruff format --check
 RUN uv run ruff check
-RUN uv run pytest
+RUN uv run pytest tests/unit
 RUN uv version ${BUILD_VER}
 RUN uv build
 
