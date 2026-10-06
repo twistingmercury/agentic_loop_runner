@@ -1,7 +1,7 @@
 ---
-version: 3
+version: 4
 date: 2026-10-06
-notes: "Fixed the path to gralph's own decision log, which a bulk rename had pointed at this repository's docs/design."
+notes: "Added ADR-011: the unit tests keep one case per branch, not one per ported gralph case."
 ---
 
 # alr — Architectural Decisions
@@ -39,6 +39,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | 008   | The shared prompt and gates live in the task file      | Accepted | 2026-10-06 |
 | 009   | The run folder's sandbox.json answers the permission choice | Accepted | 2026-10-06 |
 | 010   | Unit tests under `make test`, e2e tests in a container | Accepted | 2026-10-06 |
+| 011   | The unit tests keep one case per branch                | Accepted | 2026-10-06 |
 
 ## Inherited Decisions
 
@@ -200,7 +201,7 @@ Parse with PyYAML's node API (`yaml.compose`), validate with hand-written checks
 
 ### ADR-006: Port the tests first, with a fake claude on PATH
 
-**Status:** Accepted; its last sentence is amended by ADR-010
+**Status:** Accepted; its last sentence is amended by ADR-010, and its port-every-case approach by ADR-011
 
 **Context:**
 
@@ -374,5 +375,46 @@ This amends ADR-006's last sentence only: the tests are still ported first, the 
 
 - A little test code is duplicated between the suites: the fake `claude` exists twice
 - The e2e suite needs Docker and a built wheel, so it does not run under plain `make test`
+
+### ADR-011: The unit tests keep one case per branch
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-006 ported gralph's tests case by case. By the time the stream path was built, the unit suite held 608 tests: 274 test functions and 334 rows in parametrized tables. A review of the suite found about 180 of them redundant. It judged each one two ways: breaking the source on purpose and seeing whether a test noticed, and comparing branch coverage with and without the test. The redundant ones fell into four groups:
+
+- Table rows that push different bad values through one branch, so one row proves the rule as well as ten.
+- Tests of the fake `claude` on their own, which the tests that rely on it already prove.
+- Tests of constants and of helpers a refactor should be free to change.
+- About 40 tests that pinned exact error wording or the operating system's own message text, which ADR-007 does not require and which differs between Linux and macOS.
+
+They cost upkeep, and the count made the suite look more thorough than it was.
+
+**Decision:**
+
+The unit suite keeps one case per distinct branch or user-visible rule, not one per ported gralph case.
+
+- A test or row earns its place if removing it loses a branch (checked with branch coverage) or lets a deliberate bug survive. It is not enough that it reads as a duplicate: the review found three tests it wrongly called duplicates, and branch coverage caught each.
+- A test asserts the exception type and the field, flag, task, or path the message must name. It does not assert the full sentence, hints, or operating system text.
+- The fake `claude` is tested through the code that uses it. A test of the fake itself stays only for behavior no other test exercises.
+- A test written for a real bug stays, with a name or comment that says which bug. Tests that look like duplicates but guard such a bug (the process tests for a descendant that holds a pipe open) are judged by re-breaking the fix, not by reading.
+- A prune is checked by comparing branch coverage of the whole suite before and after, and by a set of deliberate bugs. Reading alone is not enough.
+
+This amends ADR-006: gralph's tests still guide the port and define what a user sees, but they are not copied row for row. It does not change ADR-010: the e2e suite stays black-box and separate.
+
+**Consequences:**
+
+*Positive:*
+
+- A smaller, faster suite that is cheaper to change and does not break on rewording a message
+- A test count that says more about what is covered
+- A way to check any future prune that does not depend on judgment
+
+*Negative:*
+
+- Less direct traceability from a `alr` test to the gralph test it came from
+- Branch coverage does not prove two inputs expose the same bug: an input that reaches an existing branch can still reveal a different fault (a byte order mark in a settings file is one), so such a case needs its own row
+- A few small checks, such as the leading whitespace of the first line of a gate command, are no longer pinned
 
 **Next:** [System Architecture](03_system_architecture.md)
