@@ -2,7 +2,7 @@ import pytest
 
 from alr import tasks
 from alr.errors import TaskFileError
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
+from alr.tasks import COMPLETED, PENDING, Gate, Shared, Task, TaskList
 
 _WITH_SHARED = "shared:{}\ntasks:\n  - {{id: 1, name: a, prompt: p}}\n"
 VALID = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n"
