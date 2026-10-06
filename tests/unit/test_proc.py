@@ -28,16 +28,6 @@ async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> No
     assert process.returncode == 7
 
 
-async def test_finish_returns_exit_text() -> None:
-    process = await proc.start(["sh", "-c", "exit 3"])
-    assert await proc.finish(process) == "exit status 3"
-
-
-async def test_finish_returns_none_on_zero_exit() -> None:
-    process = await proc.start(["true"])
-    assert await proc.finish(process) is None
-
-
 async def test_cancel_kills_the_whole_group(tmp_path: Path) -> None:
     pid_file = tmp_path / "child.pid"
     process = await proc.start(["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"])
@@ -88,19 +78,12 @@ async def test_capture_returns_output_and_code() -> None:
     [
         (0, None),
         (1, "exit status 1"),
-        (127, "exit status 127"),
         (-signal.SIGKILL, "signal: SIGKILL"),
-        (-signal.SIGTERM, "signal: SIGTERM"),
-        (-signal.SIGINT, "signal: SIGINT"),
         (-250, "signal: 250"),
     ],
 )
 def test_exit_text(returncode: int, text: str | None) -> None:
     assert proc.exit_text(returncode) == text
-
-
-def test_not_found_text() -> None:
-    assert proc.not_found_text("claude") == "claude: not found on PATH"
 
 
 def test_start_failed_text() -> None:

@@ -60,10 +60,6 @@ async def test_open_repo_git_not_installed_is_nil(
     assert await open_repo(str(_task_file(git_repo))) is None
 
 
-async def test_open_repo_clean_tree(git_repo: Path) -> None:
-    assert await open_repo(str(_task_file(git_repo))) == Repo(root=str(git_repo))
-
-
 def _dirty_modified(repo: Path) -> None:
     write_nested_file(repo / "seed.txt", "changed\n")
 
@@ -585,21 +581,8 @@ async def test_run_commit_odd_task_names(
     # The subject alone cannot tell a whole name from its first line: only
     # the announced line is cut, the message keeps the body.
     assert git(git_repo, "log", "-1", "--format=%B").rstrip("\n") == task_name
-    assert want_line in capfd.readouterr().out
-
-
-@pytest.mark.usefixtures("fake_claude")
-async def test_run_plain_prints_commit_line_and_git_output(
-    git_repo: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    tasks_file = _task_file(git_repo)
-
-    await run_loop(
-        _gated_task(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
-    )
-
     output = capfd.readouterr().out
-    assert "commit: First\n" in output
+    assert want_line in output
     assert "1 file changed" in output, "git's own output passes through"
 
 

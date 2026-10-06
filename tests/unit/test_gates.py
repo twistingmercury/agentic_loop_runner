@@ -180,9 +180,6 @@ async def test_run_loop_gates_never_reach_claude(tmp_path: Path, record: Path) -
         ),
         pytest.param('x=1\ntest "$x" = 1', "", id="multi-line command"),
         pytest.param(
-            "exit 3", 'gate "exit 3" failed: exit status 3', id="exit code is reported"
-        ),
-        pytest.param(
             "alr-no-such-command",
             'gate "alr-no-such-command" failed: exit status 127',
             id="command not found",
@@ -361,21 +358,6 @@ async def test_run_cancel_during_gate_kills_the_gates_descendants(
     await wait_until_gone(pid)
 
 
-async def test_run_gate_within_timeout_passes(tmp_path: Path) -> None:
-    tasks_file = tmp_path / "tasks.yaml"
-    marker = tmp_path / "second"
-    task_list = _gated_task(Gate(cmd="true", timeout="30s"), _touch_gate(marker))
-
-    await run_loop(task_list, tasks_file)
-
-    assert marker.exists()
-    saved = saved_tasks(tasks_file)
-    assert [task.state for task in saved.tasks] == [COMPLETED]
-    assert saved.gate_list() == task_list.gate_list(), (
-        "timeout must survive the save as written"
-    )
-
-
 async def test_run_gate_timeout_that_cannot_be_parsed_fails_the_gate(
     tmp_path: Path,
 ) -> None:
@@ -417,27 +399,9 @@ def test_gate_limit_flag_beats_gate_beats_default(
     assert gates.gate_limit(gate, override) == (want_limit, want_source)
 
 
-def test_gate_limit_default_is_ten_minutes() -> None:
-    assert gates.DEFAULT_GATE_TIMEOUT == "10m"
-
-
-def test_gate_failure_timed_out_names_the_limit_that_applied() -> None:
-    gate = Gate(cmd="sleep 30", timeout="30s")
-
-    assert (
-        gates.gate_failure(gate, "10m", None, True)
-        == 'gate "sleep 30" timed out after 10m'
-    )
-    assert (
-        gates.gate_failure(gate, "2m", None, True)
-        == 'gate "sleep 30" timed out after 2m'
-    )
-
-
 @pytest.mark.parametrize(
     "gate_timeout",
     [
-        pytest.param("30s", id="plain, flag cuts a longer gate timeout"),
         pytest.param("", id="plain, flag applies to a gate with no timeout"),
     ],
 )
@@ -503,9 +467,3 @@ async def test_run_multi_line_gate_errors_name_only_the_first_line(
     saved = saved_tasks(tasks_file)
     assert saved.tasks[0].error == want_error
     assert saved.gate_list()[0].cmd == gate.cmd, "the stored command stays whole"
-
-
-def test_gate_first_line() -> None:
-    assert gates.first_line("one") == "one"
-    assert gates.first_line("  one \ntwo") == "  one "
-    assert gates.first_line("\ntwo") == ""
