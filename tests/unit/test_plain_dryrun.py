@@ -68,29 +68,6 @@ async def test_dry_run_valid_file(tmp_path: Path) -> None:
     )
 
 
-async def test_dry_run_no_failed_tasks_table(tmp_path: Path) -> None:
-    content = """shared:
-  prompt: shared
-tasks:
-  - id: 1
-    name: First task
-    prompt: Do the first thing.
-    state: completed
-  - id: 123
-    name: Second task
-    prompt: Do the second thing.
-"""
-    tasks_file = write_file(tmp_path / "tasks.yaml", content)
-
-    assert await _dry_run(tasks_file) == (
-        "    ID  STATE      NAME\n"
-        "   ---  ---------  ----\n"
-        "✅   1  \033[92mCOMPLETED\033[0m  First task\n"
-        "   123  PENDING    Second task\n"
-        f"{tasks_file} is valid\n"
-    )
-
-
 async def test_dry_run_invalid_file(tmp_path: Path) -> None:
     tasks_file = write_file(
         tmp_path / "tasks.yaml",

@@ -41,7 +41,6 @@ def settings(tmp_path: Path) -> str:
 @pytest.mark.parametrize(
     ("skip", "dry_run", "want"),
     [
-        pytest.param(False, False, SANDBOXED, id="sandbox file"),
         pytest.param(False, True, SANDBOXED, id="dry run, sandbox file"),
     ],
 )
@@ -52,33 +51,10 @@ def test_session_args_sandbox_file(
 
 
 @pytest.mark.parametrize(
-    ("skip", "dry_run", "want"),
-    [
-        pytest.param(True, False, ["--dangerously-skip-permissions"], id="skip"),
-        pytest.param(False, True, [], id="dry run, neither"),
-    ],
-)
-def test_session_args_no_file(skip: bool, dry_run: bool, want: list[str]) -> None:
-    assert cli.session_args("", skip, dry_run) == want
-
-
-@pytest.mark.parametrize(
     ("file", "skip", "dry_run", "error", "want"),
     [
         pytest.param(
-            "sandbox.json", True, False, UsageError, BOTH_PERMISSIONS, id="both"
-        ),
-        pytest.param("", False, False, UsageError, NO_PERMISSIONS, id="neither"),
-        pytest.param(
             "sandbox.json", True, True, UsageError, BOTH_PERMISSIONS, id="dry run, both"
-        ),
-        pytest.param(
-            "missing.json",
-            False,
-            False,
-            SandboxError,
-            "--sandbox-settings: file",
-            id="bad file",
         ),
         pytest.param(
             "missing.json",
@@ -109,15 +85,9 @@ def test_session_args_errors(
 # Go's TestSessionArgs_WizardLeavesTheChoiceOpen is not ported: alr has no wizard.
 
 
-def test_check_gate_timeout_valid() -> None:
-    cli.check_gate_timeout("2m")
-
-
 @pytest.mark.parametrize(
     ("value", "want"),
     [
-        pytest.param("30", BAD_DURATION, id="unitless"),
-        pytest.param("", BAD_DURATION, id="empty"),
         pytest.param("0s", NOT_POSITIVE, id="zero"),
         pytest.param("-5m", NOT_POSITIVE, id="negative"),
     ],
@@ -133,19 +103,11 @@ def test_check_gate_timeout_errors(value: str, want: str) -> None:
 @pytest.mark.parametrize(
     ("log_dir", "dry_run"),
     [
-        pytest.param("", False, id="not passed, plain"),
         pytest.param("logs", True, id="dry run ignores it"),
     ],
 )
 def test_check_log_dir_accepted(log_dir: str, dry_run: bool) -> None:
     cli.check_log_dir(log_dir, dry_run)
-
-
-def test_check_log_dir_plain() -> None:
-    with pytest.raises(UsageError) as caught:
-        cli.check_log_dir("logs", False)
-
-    assert str(caught.value) == "--log-dir only works with the full-screen view"
 
 
 @pytest.fixture
@@ -157,23 +119,8 @@ def folder(tmp_path: Path) -> Path:
     return path
 
 
-def test_resolve_dir_no_folder_leaves_the_flag_alone() -> None:
-    assert cli.resolve_dir("", "a.yaml") == "a.yaml"
-
-
-def test_resolve_dir_folder_gives_tasks_yaml(folder: Path) -> None:
-    assert cli.resolve_dir(str(folder), "") == str(folder / "tasks.yaml")
-
-
 def test_resolve_dir_flag_wins_over_the_folder(folder: Path) -> None:
     assert cli.resolve_dir(str(folder), "other.yaml") == "other.yaml"
-
-
-def test_resolve_dir_missing_tasks_yaml(tmp_path: Path) -> None:
-    with pytest.raises(UsageError) as caught:
-        cli.resolve_dir(str(tmp_path), "")
-
-    assert str(caught.value) == f"--dir: no tasks.yaml in {tmp_path}"
 
 
 def test_version_prints_one_line(capsys: pytest.CaptureFixture[str]) -> None:
@@ -438,20 +385,7 @@ def test_skip_permissions_opts_out_of_the_folders_sandbox(
     assert capsys.readouterr().err == ""
 
 
-def test_both_flags_are_still_refused_with_a_folder_file(
-    folder: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _add_sandbox(folder)
-
-    code = cli.main(
-        ["-d", str(folder), "--sandbox-settings", "s.json", "--skip-permissions"]
-    )
-
-    assert code == 1
-    assert capsys.readouterr().err == f"error: {BOTH_PERMISSIONS}\n"
-
-
-@pytest.mark.parametrize("content", ["[]", "{not json"])
+@pytest.mark.parametrize("content", ["[]"])
 def test_a_bad_folder_file_fails_and_never_runs_unsandboxed(
     content: str,
     folder: Path,

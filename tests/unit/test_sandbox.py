@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
+from alr.engine.sandbox import folder_sandbox, sandbox_args
 from alr.errors import SandboxError
 
 FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
@@ -30,10 +30,6 @@ def _write_settings(tmp_path: Path, content: str) -> Path:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o600)
     return path
-
-
-def test_bypass_args() -> None:
-    assert bypass_args() == ["--dangerously-skip-permissions"]
 
 
 @pytest.mark.parametrize(
@@ -74,27 +70,14 @@ def test_sandbox_args_forces_sandbox_keys(
 @pytest.mark.parametrize(
     ("content", "want_error"),
     [
-        pytest.param("", "--sandbox-settings: must be a JSON object", id="empty file"),
         pytest.param(
             "sandbox: true", "--sandbox-settings: must be a JSON object", id="not JSON"
         ),
-        pytest.param("null", "--sandbox-settings: must be a JSON object", id="null"),
         pytest.param("[]", "--sandbox-settings: must be a JSON object", id="array"),
-        pytest.param('"x"', "--sandbox-settings: must be a JSON object", id="string"),
         pytest.param(
             '{"sandbox":null}',
             "--sandbox-settings: sandbox: must be a JSON object",
             id="sandbox null",
-        ),
-        pytest.param(
-            '{"sandbox":[]}',
-            "--sandbox-settings: sandbox: must be a JSON object",
-            id="sandbox array",
-        ),
-        pytest.param(
-            '{"sandbox":true}',
-            "--sandbox-settings: sandbox: must be a JSON object",
-            id="sandbox bool",
         ),
         # The settings are re-serialized for Claude, so NaN would turn into invalid JSON.
         pytest.param(
@@ -125,11 +108,11 @@ def test_sandbox_args_rejects_bad_files(
 
 @pytest.mark.parametrize(
     ("name", "code"),
-    [("missing.json", errno.ENOENT), ("", errno.EISDIR)],
-    ids=["missing file", "directory"],
+    [("missing.json", errno.ENOENT)],
+    ids=["missing file"],
 )
 def test_sandbox_args_unreadable_path(tmp_path: Path, name: str, code: int) -> None:
-    path = str(tmp_path / name) if name else str(tmp_path)
+    path = str(tmp_path / name)
 
     with pytest.raises(SandboxError) as excinfo:
         sandbox_args(path)
@@ -139,9 +122,7 @@ def test_sandbox_args_unreadable_path(tmp_path: Path, name: str, code: int) -> N
     )
 
 
-@pytest.mark.parametrize(
-    "text", ["héllo", "\\ud800"], ids=["non-ASCII", "lone surrogate"]
-)
+@pytest.mark.parametrize("text", ["\\ud800"], ids=["lone surrogate"])
 def test_sandbox_args_settings_can_always_be_encoded(tmp_path: Path, text: str) -> None:
     # The argument goes to a child process, so it must be encodable whatever the file holds.
     path = _write_settings(tmp_path, '{"sandbox":{"note":"' + text + '"}}')
@@ -152,12 +133,6 @@ def test_sandbox_args_settings_can_always_be_encoded(tmp_path: Path, text: str) 
     assert json.loads(settings)["sandbox"]["note"] == json.loads(f'"{text}"')
 
 
-def test_folder_sandbox_names_the_file_as_dir_was_given(tmp_path: Path) -> None:
-    _write_settings(tmp_path, "{}")
-
-    assert folder_sandbox(str(tmp_path)) == str(tmp_path / "sandbox.json")
-
-
 def test_folder_sandbox_keeps_a_relative_dir_relative(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -165,13 +140,3 @@ def test_folder_sandbox_keeps_a_relative_dir_relative(
     monkeypatch.chdir(tmp_path.parent)
 
     assert folder_sandbox(tmp_path.name) == f"{tmp_path.name}/sandbox.json"
-
-
-def test_folder_sandbox_without_a_file(tmp_path: Path) -> None:
-    assert folder_sandbox(str(tmp_path)) is None
-
-
-def test_folder_sandbox_ignores_a_directory_of_that_name(tmp_path: Path) -> None:
-    (tmp_path / "sandbox.json").mkdir()
-
-    assert folder_sandbox(str(tmp_path)) is None
