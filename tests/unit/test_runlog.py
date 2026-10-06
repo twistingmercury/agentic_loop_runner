@@ -1,0 +1,338 @@
+"""The run log: a ledger line per event and a detail file per task."""
+
+import json
+from collections.abc import Iterator
+import stat
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from alr.errors import RunLogError
+from alr.stream.events import (
+    Activity,
+    Committed,
+    Event,
+    GateFinished,
+    RunDone,
+    SessionFinished,
+    TaskFinished,
+    TaskStarted,
+)
+from alr.stream.runlog import Info, RunLog, run_dir
+from alr.tasks import COMPLETED, FAILED, Gate, Task
+
+STAMP = '"time":"2026-10-01T14:02:11-04:00"'
+
+# A zone that is not UTC, so the tests show the times written are the clock's
+# own local time.
+EDT = timezone(timedelta(hours=-4), "EDT")
+
+INFO = Info(
+    version="v0.10.0",
+    tasks_file="run/tasks.yaml",
+    permissions="sandbox",
+    sandbox_settings="run/sandbox.json",
+    commit=True,
+)
+
+
+def fixed_now() -> datetime:
+    return datetime(2026, 10, 1, 14, 2, 11, tzinfo=EDT)
+
+
+@pytest.fixture
+def opened(tmp_path: Path) -> Iterator[tuple[RunLog, Path]]:
+    path = tmp_path / "logs" / "20261001T140211"
+    log = RunLog.open(path, INFO, now=fixed_now)
+    yield log, path
+    log.close()
+
+
+def record(log: RunLog, *events: Event) -> None:
+    for event in events:
+        log.record(event)
+
+
+def read_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").removesuffix("\n").split("\n")
+
+
+def ledger_lines(path: Path) -> list[str]:
+    return read_lines(path / "run.jsonl")
+
+
+def mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_run_dir_is_named_by_local_start_time() -> None:
+    assert run_dir(Path("logs"), fixed_now()) == Path("logs") / "20261001T140211"
+
+
+def test_open_creates_private_folder_and_run_started(
+    opened: tuple[RunLog, Path],
+) -> None:
+    _, path = opened
+
+    assert mode(path.parent) == 0o700
+    assert mode(path) == 0o700
+    assert mode(path / "run.jsonl") == 0o600
+    want = (
+        "{" + STAMP + ',"event":"run_started","version":"v0.10.0",'
+        '"tasks_file":"run/tasks.yaml","permissions":"sandbox",'
+        '"sandbox_settings":"run/sandbox.json","commit":true}'
+    )
+    lines = ledger_lines(path)
+    assert lines == [want]
+    assert "prompt_file" not in lines[0]
+
+
+def test_open_leaves_out_what_was_not_passed(tmp_path: Path) -> None:
+    path = tmp_path / "run"
+    info = Info(
+        version="dev",
+        tasks_file="t.yaml",
+        permissions="skip",
+        gate_timeout="90s",
+    )
+    RunLog.open(path, info, now=fixed_now).close()
+
+    want = (
+        "{" + STAMP + ',"event":"run_started","version":"dev",'
+        '"tasks_file":"t.yaml","permissions":"skip","gate_timeout":"90s",'
+        '"commit":false}'
+    )
+    assert ledger_lines(path) == [want]
+
+
+def test_time_with_a_zero_offset_is_written_as_z(tmp_path: Path) -> None:
+    path = tmp_path / "run"
+
+    def utc_now() -> datetime:
+        return datetime(2026, 10, 1, 18, 2, 11, tzinfo=timezone.utc)
+
+    RunLog.open(path, INFO, now=utc_now).close()
+
+    assert ledger_lines(path)[0].startswith('{"time":"2026-10-01T18:02:11Z",')
+
+
+# Two runs started in the same second get the same folder name; the second
+# must not write into the first one's record.
+def test_open_existing_run_folder_is_an_error(opened: tuple[RunLog, Path]) -> None:
+    _, path = opened
+
+    with pytest.raises(RunLogError, match="File exists"):
+        RunLog.open(path, INFO, now=fixed_now)
+
+    assert len(ledger_lines(path)) == 1
+
+
+def test_open_log_dir_under_a_file_is_an_error(tmp_path: Path) -> None:
+    file = tmp_path / "file"
+    file.write_bytes(b"")
+
+    with pytest.raises(RunLogError, match="file"):
+        RunLog.open(file / "logs" / "run", INFO, now=fixed_now)
+
+
+def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
+    log, path = opened
+    task = Task(id=1, name="First", prompt="p1")
+    done = replace(task, state=COMPLETED)
+
+    record(
+        log,
+        TaskStarted(task),
+        Activity(task, "working"),
+        SessionFinished(done, 90.0),
+        Activity(task, "→ gate go test ./..."),
+        GateFinished(task, Gate(cmd="go test ./..."), "10m", None, False, 41.2),
+        Activity(task, "→ commit First"),
+        Committed(task, "3f2a9c1"),
+        TaskFinished(done, None, 132.0),
+        RunDone(None, 133.0),
+    )
+
+    want = [
+        "{" + STAMP + ',"event":"task_started","task":1,"name":"First"}',
+        "{" + STAMP + ',"event":"session_finished","task":1,'
+        '"state":"completed","duration":"1m30s"}',
+        "{" + STAMP + ',"event":"gate_finished","task":1,"cmd":"go test ./...",'
+        '"result":"passed","timeout":"10m","duration":"41.2s"}',
+        "{" + STAMP + ',"event":"committed","task":1,"hash":"3f2a9c1"}',
+        "{" + STAMP + ',"event":"task_finished","task":1,'
+        '"state":"completed","duration":"2m12s"}',
+        "{" + STAMP + ',"event":"run_finished","result":"completed",'
+        '"duration":"2m13s"}',
+    ]
+    assert ledger_lines(path)[1:] == want
+
+    detail = path / "task-1.log"
+    assert mode(detail) == 0o600
+    assert read_lines(detail) == [
+        "14:02:11 working",
+        "14:02:11 → gate go test ./...",
+        "14:02:11 → commit First",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("error", "timed_out", "want"),
+    [
+        (None, False, "passed"),
+        ("exit status 3", False, "failed"),
+        (None, True, "timed_out"),
+    ],
+)
+def test_record_gate_results(
+    opened: tuple[RunLog, Path], error: str | None, timed_out: bool, want: str
+) -> None:
+    log, path = opened
+    task = Task(id=7, name="Seventh", prompt="")
+
+    record(log, GateFinished(task, Gate(cmd="check"), "90s", error, timed_out, 0.0))
+
+    assert ledger_lines(path)[1] == (
+        "{" + STAMP + ',"event":"gate_finished","task":7,"cmd":"check",'
+        f'"result":"{want}","timeout":"90s","duration":"0s"}}'
+    )
+
+
+# Shell syntax and quotes must survive as people wrote them, and only a
+# multi-line command's first line is kept.
+def test_record_keeps_shell_syntax_readable(opened: tuple[RunLog, Path]) -> None:
+    log, path = opened
+    task = Task(id=1, name='Say "hi" & <go> é', prompt="")
+    gate = Gate(cmd='test -z "$(gofmt -l .)" && echo ok > out.txt\necho second line')
+
+    record(log, TaskStarted(task), GateFinished(task, gate, "10m", None, False, 0.0))
+
+    lines = ledger_lines(path)
+    assert '"name":"Say \\"hi\\" & <go> é"' in lines[1]
+    assert '"cmd":"test -z \\"$(gofmt -l .)\\" && echo ok > out.txt"' in lines[2]
+    for line in lines:
+        json.loads(line)
+
+
+def test_record_failed_task_ends_the_run_as_failed(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    task = Task(id=2, name="Second", prompt="")
+    failed = replace(task, state=FAILED, error='gate "exit 3" failed: exit status 3')
+    run_error = 'task 2: Second failed: gate "exit 3" failed: exit status 3'
+
+    record(
+        log,
+        TaskStarted(task),
+        TaskFinished(failed, run_error, 1.0),
+        RunDone(run_error, 1.0),
+    )
+
+    lines = ledger_lines(path)
+    assert lines[2] == (
+        "{" + STAMP + ',"event":"task_finished","task":2,"state":"failed",'
+        '"error":"gate \\"exit 3\\" failed: exit status 3","duration":"1s"}'
+    )
+    assert lines[3] == (
+        "{" + STAMP + ',"event":"run_finished","result":"failed",'
+        '"error":"task 2: Second failed: gate \\"exit 3\\" failed: exit status 3",'
+        '"duration":"1s"}'
+    )
+
+
+# A stopped run has no outcome for the task that was running, which matches
+# the task file: that task stays as it was.
+def test_record_stopped_run_writes_no_task_finished(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    task = Task(id=1, name="First", prompt="")
+
+    record(
+        log,
+        TaskStarted(task),
+        Activity(task, "working"),
+        RunDone("task 1: First failed: signal: killed", 2.0),
+    )
+
+    lines = ledger_lines(path)
+    assert len(lines) == 3
+    assert lines[2] == (
+        "{" + STAMP + ',"event":"run_finished","result":"stopped",'
+        '"error":"task 1: First failed: signal: killed","duration":"2s"}'
+    )
+    assert read_lines(path / "task-1.log") == ["14:02:11 working"]
+
+
+# A failed task earlier in the run must not make a later stop read as failed.
+def test_record_stop_after_a_completed_task_is_stopped(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    first = Task(id=1, name="First", prompt="")
+    second = Task(id=2, name="Second", prompt="")
+
+    record(
+        log,
+        TaskStarted(first),
+        TaskFinished(replace(first, state=COMPLETED), None, 0.0),
+        TaskStarted(second),
+        RunDone("stopped", 0.0),
+    )
+
+    assert '"result":"stopped"' in ledger_lines(path)[-1]
+    assert (path / "task-2.log").exists()
+
+
+def test_record_each_task_gets_its_own_detail_file(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    first = Task(id=1, name="First", prompt="")
+    second = Task(id=2, name="Second", prompt="")
+
+    record(
+        log,
+        TaskStarted(first),
+        Activity(first, "one"),
+        TaskFinished(first, None, 0.0),
+        TaskStarted(second),
+        Activity(second, "two"),
+        TaskFinished(second, None, 0.0),
+    )
+
+    assert read_lines(path / "task-1.log") == ["14:02:11 one"]
+    assert read_lines(path / "task-2.log") == ["14:02:11 two"]
+
+
+def test_record_many_activity_events_each_land_whole(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    task = Task(id=1, name="First", prompt="")
+    line = "x" * 300
+    record(log, TaskStarted(task))
+
+    for _ in range(1000):
+        log.record(Activity(task, line))
+
+    lines = read_lines(path / "task-1.log")
+    assert lines == ["14:02:11 " + line] * 1000
+
+
+def test_record_after_close_is_an_error(opened: tuple[RunLog, Path]) -> None:
+    log, _ = opened
+    log.close()
+
+    with pytest.raises(RunLogError):
+        log.record(RunDone(None, 0.0))
+
+
+def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:
+    log, _ = opened
+    log.close()
+
+    log.close()
