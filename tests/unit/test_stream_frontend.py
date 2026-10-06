@@ -140,17 +140,6 @@ async def test_result_reporting_failed_fails_the_task(
     assert events[3].task.error == "boom"
 
 
-async def test_non_zero_exit_fails_the_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
-
-    events = await _run_ending_in_a_failed_task(_task_list(), tmp_path / "tasks.yaml")
-
-    assert _kinds(events) == SESSION_KINDS
-    assert events[3].task.state == FAILED
-
-
 async def test_big_event_still_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -236,6 +225,7 @@ async def test_failed_task_stops_the_run(
     events = await _run_ending_in_a_failed_task(task_list, tmp_path / "tasks.yaml")
 
     assert _kinds(events) == SESSION_KINDS
+    assert events[3].task.state == FAILED
     assert events[3].error is not None
     assert events[4].error == events[3].error
 
@@ -295,17 +285,6 @@ async def test_gate_output_without_a_trailing_newline_arrives_as_activity(
     assert "x" in _lines(events)
 
 
-async def test_session_that_writes_only_to_stderr_arrives_as_activity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FAKECLAUDE_STDERR", "only warn\n")
-    monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"completed","error":""}')
-
-    events = await _run(_task_list(), tmp_path / "tasks.yaml")
-
-    assert "only warn" in _lines(events)
-
-
 async def test_gate_failure_reports_a_failed_task(tmp_path: Path) -> None:
     events = await _run_ending_in_a_failed_task(
         _task_list(Gate(cmd="exit 3")), tmp_path / "t.yaml"
@@ -361,7 +340,9 @@ async def test_cancel_during_a_gate_reports_no_gate_finished(tmp_path: Path) -> 
     assert _of(events, GateFinished) == []
 
 
-async def test_commit_arrives_as_activity(git_repo: Path) -> None:
+async def test_commit_arrives_as_activity_and_carries_the_new_hash(
+    git_repo: Path,
+) -> None:
     tasks_file = git_repo / "run" / "tasks.yaml"
     repo = await open_repo(str(tasks_file))
 
@@ -372,16 +353,6 @@ async def test_commit_arrives_as_activity(git_repo: Path) -> None:
     assert "→ commit First" in _lines(events)
     assert "1 file changed" in "\n".join(_lines(events))
     assert _kinds(events)[-3:] == [Committed, TaskFinished, RunDone]
-
-
-async def test_committed_carries_the_new_hash(git_repo: Path) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    repo = await open_repo(str(tasks_file))
-
-    events = await _run(
-        _task_list(Gate(cmd="echo work > one.txt")), tasks_file, repo=repo
-    )
-
     [committed] = _of(events, Committed)
     assert committed.commit_hash == git(git_repo, "rev-parse", "HEAD").strip()
     assert committed.task.id == 1

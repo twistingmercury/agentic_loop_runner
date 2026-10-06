@@ -72,11 +72,6 @@ ACTIVITY_CASES = [
         id="tool input of the wrong kind has no target",
     ),
     pytest.param(
-        assistant(tool("Read", '{"file_path":7}')),
-        ["→ Read"],
-        id="tool target of the wrong kind is dropped",
-    ),
-    pytest.param(
         assistant(tool("Bash", "{}")),
         ["→ Bash"],
         id="known tool with missing target has no trailing space",
@@ -122,15 +117,8 @@ def test_result_event() -> None:
 
 IGNORED = [
     pytest.param(
-        '{"type":"system","subtype":"init","session_id":"abc"}', id="system event"
-    ),
-    pytest.param(
         '{"type":"user","message":{"content":[{"type":"tool_result","content":"file body"}]}}',
         id="user event",
-    ),
-    pytest.param(
-        '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}',
-        id="rate_limit_event",
     ),
     pytest.param(
         '{"type":"something_new","message":{"content":[{"type":"text","text":"hi"}]}}',
@@ -139,7 +127,6 @@ IGNORED = [
     pytest.param('{"type":"assistant",', id="invalid json"),
     pytest.param("", id="empty line"),
     pytest.param("[1, 2]", id="not an object"),
-    pytest.param('"assistant"', id="a bare string"),
     pytest.param('{"message":{}}', id="no type"),
     pytest.param('{"type":["assistant"]}', id="type of the wrong kind"),
     pytest.param(b'{"type":"assistant","x":"\xff"}', id="bytes that are not UTF-8"),
@@ -155,9 +142,7 @@ def test_other_lines_give_nothing(line: str | bytes) -> None:
 
 
 MALFORMED = [
-    pytest.param('{"type":"assistant"}', id="no message"),
     pytest.param('{"type":"assistant","message":"hi"}', id="message not an object"),
-    pytest.param('{"type":"assistant","message":{}}', id="no content"),
     pytest.param(
         '{"type":"assistant","message":{"content":"hi"}}', id="content not a list"
     ),

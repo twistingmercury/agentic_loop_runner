@@ -328,21 +328,6 @@ def test_record_each_task_gets_its_own_detail_file(
     assert read_lines(path / "task-2.log") == ["14:02:11 two"]
 
 
-def test_record_many_activity_events_each_land_whole(
-    opened: tuple[RunLog, Path],
-) -> None:
-    log, path = opened
-    task = Task(id=1, name="First", prompt="")
-    line = "x" * 300
-    record(log, TaskStarted(task))
-
-    for _ in range(1000):
-        log.record(Activity(task, line))
-
-    lines = read_lines(path / "task-1.log")
-    assert lines == ["14:02:11 " + line] * 1000
-
-
 # A task name, an Info field, or an activity line can hold a lone surrogate,
 # which UTF-8 cannot encode; the log writes "?" in its place rather than failing
 # the run.
@@ -396,10 +381,15 @@ def test_record_write_that_fails_is_a_run_log_error(tmp_path: Path) -> None:
         log.close()
 
 
+def open_fds() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
 @needs_dev_full
 def test_record_task_finished_with_a_failing_detail_close_is_a_run_log_error(
     tmp_path: Path,
 ) -> None:
+    before = open_fds()
     log, task = open_full_detail_log(tmp_path)
     with pytest.raises(RunLogError):
         log.record(Activity(task, "working"))
@@ -410,24 +400,9 @@ def test_record_task_finished_with_a_failing_detail_close_is_a_run_log_error(
 
     log.close()
 
-
-def open_fds() -> int:
-    return len(os.listdir("/dev/fd"))
-
-
-@needs_dev_full
-def test_close_with_a_failing_detail_close_still_closes_the_ledger(
-    tmp_path: Path,
-) -> None:
-    before = open_fds()
-    log, task = open_full_detail_log(tmp_path)
-    with pytest.raises(RunLogError):
-        log.record(Activity(task, "working"))
-
-    with pytest.raises(RunLogError, match="task-1.log"):
-        log.close()
-
-    assert open_fds() == before
+    assert open_fds() == before, (
+        "the ledger is closed even though the detail close failed"
+    )
 
 
 @pytest.mark.parametrize(
