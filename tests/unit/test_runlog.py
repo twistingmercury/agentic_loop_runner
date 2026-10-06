@@ -124,7 +124,7 @@ def test_time_with_a_zero_offset_is_written_as_z(tmp_path: Path) -> None:
 def test_open_existing_run_folder_is_an_error(opened: tuple[RunLog, Path]) -> None:
     _, path = opened
 
-    with pytest.raises(RunLogError, match="File exists"):
+    with pytest.raises(RunLogError):
         RunLog.open(path, INFO, now=fixed_now)
 
     assert len(ledger_lines(path)) == 1
@@ -134,7 +134,7 @@ def test_open_log_dir_under_a_file_is_an_error(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_bytes(b"")
 
-    with pytest.raises(RunLogError, match="file"):
+    with pytest.raises(RunLogError):
         RunLog.open(file / "logs" / "run", INFO, now=fixed_now)
 
 

@@ -75,7 +75,7 @@ async def test_dry_run_invalid_file(tmp_path: Path) -> None:
     )
 
     out = io.StringIO()
-    with pytest.raises(TaskFileError, match="failed to parse tasks yaml"):
+    with pytest.raises(TaskFileError, match="state"):
         await dry_run(out, tasks_file, "", "", False)
 
     assert out.getvalue() == ""

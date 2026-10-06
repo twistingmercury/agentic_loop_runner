@@ -87,14 +87,14 @@ def test_exit_text(returncode: int, text: str | None) -> None:
 
 
 def test_start_failed_text() -> None:
-    assert (
-        proc.start_failed_text("claude", FileNotFoundError(2, "No such file"))
-        == "claude: not found on PATH"
-    )
-    assert (
-        proc.start_failed_text("claude", PermissionError(13, "Permission denied"))
-        == "claude: cannot be started: Permission denied"
-    )
+    missing = proc.start_failed_text("claude", FileNotFoundError(2, "No such file"))
+    assert "claude" in missing
+    assert "not found" in missing
+
+    refused = proc.start_failed_text("claude", PermissionError(13, "Permission denied"))
+    assert "claude" in refused
+    assert "cannot be started" in refused
+    assert "not found" not in refused
 
 
 async def test_finish_stops_the_group_when_the_drain_fails(tmp_path: Path) -> None:

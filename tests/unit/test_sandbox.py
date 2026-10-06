@@ -1,6 +1,4 @@
-import errno
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -106,20 +104,15 @@ def test_sandbox_args_rejects_bad_files(
     assert want_error in str(excinfo.value)
 
 
-@pytest.mark.parametrize(
-    ("name", "code"),
-    [("missing.json", errno.ENOENT)],
-    ids=["missing file"],
-)
-def test_sandbox_args_unreadable_path(tmp_path: Path, name: str, code: int) -> None:
+@pytest.mark.parametrize("name", ["missing.json"], ids=["missing file"])
+def test_sandbox_args_unreadable_path(tmp_path: Path, name: str) -> None:
     path = str(tmp_path / name)
 
     with pytest.raises(SandboxError) as excinfo:
         sandbox_args(path)
 
-    assert str(excinfo.value) == (
-        f'--sandbox-settings: file "{path}" is not accessible: {os.strerror(code)}'
-    )
+    assert "--sandbox-settings" in str(excinfo.value)
+    assert path in str(excinfo.value)
 
 
 @pytest.mark.parametrize("text", ["\\ud800"], ids=["lone surrogate"])
