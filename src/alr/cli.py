@@ -37,14 +37,12 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return 0
 
     try:
-        tasks_file, prompt_file = resolve_dir(
-            args.dir, args.tasks, args.prompt, args.dry_run
-        )
+        tasks_file = resolve_dir(args.dir, args.tasks)
         # An explicitly empty value counts as passed, and is bad.
         if args.gate_timeout is not None:
             check_gate_timeout(args.gate_timeout)
 
-        missing = _missing_flags(tasks_file, prompt_file, args.dry_run)
+        missing = _missing_flags(tasks_file)
         if missing:
             _report_missing(parser, missing)
             return 1
@@ -81,19 +79,13 @@ def _parser() -> argparse.ArgumentParser:
         "-d",
         "--dir",
         default="",
-        help="Run folder holding tasks.yaml and prompt.md; --tasks and --prompt override either file",
+        help="Run folder holding tasks.yaml; --tasks overrides its file",
     )
     parser.add_argument(
         "-t",
         "--tasks",
         default="",
         help="Path to the tasks.yaml task list that drives the loop; required unless --dir gives it",
-    )
-    parser.add_argument(
-        "-p",
-        "--prompt",
-        default="",
-        help="Path to the prompt.md shared prompt passed to Claude with every task; required unless --dry-run or --dir gives it",
     )
     parser.add_argument(
         "--dry-run",
@@ -134,31 +126,17 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_dir(
-    dir: str, tasks_path: str, prompt_path: str, dry_run: bool
-) -> tuple[str, str]:
-    """Turn a run folder into the task file and prompt file paths.
+def resolve_dir(dir: str, tasks_path: str) -> str:
+    """Turn a run folder into the task file path.
 
-    The names are fixed, so a folder needs no other flag; a path passed by
-    flag always wins. A dry run never reads the prompt, so it does not require
-    one.
+    The name is fixed, so a folder needs no other flag; --tasks always wins.
     """
-    if not dir:
-        return tasks_path, prompt_path
+    if not dir or tasks_path:
+        return tasks_path
 
-    if not tasks_path:
-        tasks_path = _require_file(dir, "tasks.yaml")
-
-    if not prompt_path and not dry_run:
-        prompt_path = _require_file(dir, "prompt.md")
-
-    return tasks_path, prompt_path
-
-
-def _require_file(dir: str, name: str) -> str:
-    path = Path(dir) / name
+    path = Path(dir) / "tasks.yaml"
     if not path.exists():
-        raise UsageError(f"--dir: no {name} in {dir}")
+        raise UsageError(f"--dir: no tasks.yaml in {dir}")
 
     return str(path)
 
@@ -177,7 +155,7 @@ def check_log_dir(log_dir: str, dry_run: bool) -> None:
     The record is built from events only the full-screen view's path produces,
     and a run that was asked for a record must not quietly leave none. An
     empty value counts as not passed. A dry run records nothing and ignores
-    the flag, as it ignores --prompt.
+    the flag.
     """
     if not log_dir or dry_run:
         return
@@ -211,15 +189,8 @@ def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
     )
 
 
-def _missing_flags(tasks_file: str, prompt_file: str, dry_run: bool) -> list[str]:
-    missing = []
-    if not prompt_file and not dry_run:
-        missing.append("--prompt")
-
-    if not tasks_file:
-        missing.append("--tasks")
-
-    return missing
+def _missing_flags(tasks_file: str) -> list[str]:
+    return [] if tasks_file else ["--tasks"]
 
 
 def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None:

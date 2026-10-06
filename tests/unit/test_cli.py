@@ -149,64 +149,31 @@ def test_check_log_dir_plain() -> None:
 
 
 @pytest.fixture
-def full(tmp_path: Path) -> Path:
-    """A run folder holding both files."""
-    folder = tmp_path / "full"
-    folder.mkdir()
-    (folder / "tasks.yaml").write_text("x", encoding="utf-8")
-    (folder / "prompt.md").write_text("x", encoding="utf-8")
-    return folder
-
-
-@pytest.fixture
-def no_prompt(tmp_path: Path) -> Path:
+def folder(tmp_path: Path) -> Path:
     """A run folder holding only the task file."""
-    folder = tmp_path / "no_prompt"
-    folder.mkdir()
-    (folder / "tasks.yaml").write_text("x", encoding="utf-8")
-    return folder
+    path = tmp_path / "run"
+    path.mkdir()
+    (path / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+    return path
 
 
-def test_resolve_dir_no_folder_leaves_the_flags_alone() -> None:
-    assert cli.resolve_dir("", "a.yaml", "b.md", False) == ("a.yaml", "b.md")
+def test_resolve_dir_no_folder_leaves_the_flag_alone() -> None:
+    assert cli.resolve_dir("", "a.yaml") == "a.yaml"
 
 
-def test_resolve_dir_folder_fills_both(full: Path) -> None:
-    want = (str(full / "tasks.yaml"), str(full / "prompt.md"))
-
-    assert cli.resolve_dir(str(full), "", "", False) == want
+def test_resolve_dir_folder_gives_tasks_yaml(folder: Path) -> None:
+    assert cli.resolve_dir(str(folder), "") == str(folder / "tasks.yaml")
 
 
-def test_resolve_dir_flag_wins_over_the_folder(full: Path) -> None:
-    want = ("other.yaml", str(full / "prompt.md"))
-
-    assert cli.resolve_dir(str(full), "other.yaml", "", False) == want
+def test_resolve_dir_flag_wins_over_the_folder(folder: Path) -> None:
+    assert cli.resolve_dir(str(folder), "other.yaml") == "other.yaml"
 
 
 def test_resolve_dir_missing_tasks_yaml(tmp_path: Path) -> None:
     with pytest.raises(UsageError) as caught:
-        cli.resolve_dir(str(tmp_path), "", "", False)
+        cli.resolve_dir(str(tmp_path), "")
 
     assert str(caught.value) == f"--dir: no tasks.yaml in {tmp_path}"
-
-
-def test_resolve_dir_missing_prompt_md(no_prompt: Path) -> None:
-    with pytest.raises(UsageError) as caught:
-        cli.resolve_dir(str(no_prompt), "", "", False)
-
-    assert str(caught.value) == f"--dir: no prompt.md in {no_prompt}"
-
-
-def test_resolve_dir_dry_run_needs_no_prompt_md(no_prompt: Path) -> None:
-    want = (str(no_prompt / "tasks.yaml"), "")
-
-    assert cli.resolve_dir(str(no_prompt), "", "", True) == want
-
-
-def test_resolve_dir_a_flag_fills_the_missing_file(no_prompt: Path) -> None:
-    want = (str(no_prompt / "tasks.yaml"), "p.md")
-
-    assert cli.resolve_dir(str(no_prompt), "", "p.md", False) == want
 
 
 def test_version_prints_one_line(capsys: pytest.CaptureFixture[str]) -> None:
@@ -223,25 +190,34 @@ def test_missing_required_flags_are_each_named(
     assert cli.main([]) == 1
 
     err = capsys.readouterr().err
-    assert "error: required flag --prompt not set" in err
-    assert "error: required flag --tasks not set" in err
+    assert err.startswith("error: required flag --tasks not set\n")
+    assert err.count("required flag") == 1
 
 
-def test_dry_run_needs_no_prompt(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("flag", ["-p", "--prompt"])
+def test_prompt_flag_is_an_unknown_argument(
+    flag: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    tasks_file = tmp_path / "tasks.yaml"
-    tasks_file.write_text(ONE_TASK_YAML, encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([flag, "x", "-t", "t.yaml", "--dry-run"])
 
-    assert cli.main(["-t", str(tasks_file), "--dry-run"]) == 0
-    assert f"{tasks_file} is valid" in capsys.readouterr().out
+    assert exit_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments" in err
+    assert "required flag" not in err
 
 
-def test_short_d_means_dir(full: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    (full / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+@pytest.mark.parametrize("flag", ["-d", "--dir"])
+def test_dir_with_only_tasks_yaml_dry_runs(
+    flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main([flag, str(folder), "--dry-run", "--no-tui"]) == 0
+    assert f"{folder / 'tasks.yaml'} is valid" in capsys.readouterr().out
 
-    assert cli.main(["-d", str(full), "--dry-run", "--no-tui"]) == 0
-    assert f"{full / 'tasks.yaml'} is valid" in capsys.readouterr().out
+
+@pytest.mark.usefixtures("fake_claude")
+def test_dir_with_only_tasks_yaml_runs(folder: Path) -> None:
+    assert cli.main(["-d", str(folder), "--skip-permissions"]) == 0
 
 
 def test_both_permission_flags_are_refused(capsys: pytest.CaptureFixture[str]) -> None:
@@ -249,8 +225,6 @@ def test_both_permission_flags_are_refused(capsys: pytest.CaptureFixture[str]) -
         [
             "-t",
             "t.yaml",
-            "-p",
-            "p.md",
             "--sandbox-settings",
             "s.json",
             "--skip-permissions",
@@ -262,14 +236,12 @@ def test_both_permission_flags_are_refused(capsys: pytest.CaptureFixture[str]) -
 
 
 def test_a_real_run_needs_a_permission_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["-t", "t.yaml", "-p", "p.md"]) == 1
+    assert cli.main(["-t", "t.yaml"]) == 1
     assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
 
 
 def test_log_dir_is_refused_on_a_real_run(capsys: pytest.CaptureFixture[str]) -> None:
-    code = cli.main(
-        ["-t", "t.yaml", "-p", "p.md", "--skip-permissions", "--log-dir", "logs"]
-    )
+    code = cli.main(["-t", "t.yaml", "--skip-permissions", "--log-dir", "logs"])
 
     assert code == 1
     assert (
@@ -331,7 +303,7 @@ def test_a_stop_with_no_task_running_is_one_error_line(
 def test_sigint_during_the_startup_checks_is_one_error_line(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def interrupted(*_: object) -> tuple[str, str]:
+    def interrupted(*_: object) -> str:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli, "resolve_dir", interrupted)
@@ -348,12 +320,10 @@ def test_a_signal_leaves_no_traceback_and_no_change(
     ready = tmp_path / "ready"
     tasks_file = tmp_path / "tasks.yaml"
     tasks_file.write_text(ONE_TASK_YAML, encoding="utf-8")
-    prompt = tmp_path / "prompt.md"
-    prompt.write_text("shared", encoding="utf-8")
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = start_alr("-t", str(tasks_file), "-p", str(prompt), "--skip-permissions")
+    process = start_alr("-t", str(tasks_file), "--skip-permissions")
     try:
         claude_pid = int(wait_for_file(ready))
         process.send_signal(stop)
@@ -382,16 +352,12 @@ def test_a_second_signal_does_not_leave_git_running(
         "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
     )
     tasks_file.write_text(tasks_yaml, encoding="utf-8")
-    prompt = git_repo / "run" / "prompt.md"
-    prompt.write_text("shared", encoding="utf-8")
     hook = git_repo / ".git" / "hooks" / "pre-commit"
     # exec, so the PID in the ready file is the process that ignores SIGTERM.
     hook.write_text(f"#!/bin/sh\ntrap '' TERM\necho $$ > '{ready}'\nexec sleep 60\n")
     hook.chmod(0o700)
 
-    process = start_alr(
-        "-t", str(tasks_file), "-p", str(prompt), "--skip-permissions", "--commit"
-    )
+    process = start_alr("-t", str(tasks_file), "--skip-permissions", "--commit")
     hook_pid = 0
     try:
         hook_pid = int(wait_for_file(ready))
