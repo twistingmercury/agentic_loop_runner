@@ -2,13 +2,14 @@ import pytest
 
 from alr import tasks
 from alr.errors import TaskFileError
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
+from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
 
-VALID = "tasks:\n  - {id: 1, name: a, prompt: p}\n"
+_WITH_SHARED = "shared:{}\ntasks:\n  - {{id: 1, name: a, prompt: p}}\n"
+VALID = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n"
 
 TASK_LEVEL_GATES_ERROR = (
-    "tasks[0] (id 3): gates: gates are set once for the whole file now, "
-    "as a top-level gates: list; see the HOWTO"
+    "tasks[0] (id 3): gates: gates are set once for the whole file, "
+    "as shared.gates; see the HOWTO"
 )
 DURATION_HINT = "must be a duration string such as 90s or 10m"
 
@@ -43,7 +44,7 @@ def test_task_string(task: Task, want: str) -> None:
 
 
 def test_parse_tasks_valid() -> None:
-    text = """tasks:
+    text = """shared:\n  prompt: shared\ntasks:
   - id: 1
     name: First task
     prompt: |
@@ -62,6 +63,7 @@ def test_parse_tasks_valid() -> None:
     got = tasks.parse_tasks(text)
 
     want = TaskList(
+        shared=Shared(prompt="shared"),
         tasks=[
             Task(
                 id=1,
@@ -78,13 +80,13 @@ def test_parse_tasks_valid() -> None:
                 prompt="Do the second thing.",
                 state=COMPLETED,
             ),
-        ]
+        ],
     )
     assert got == want, "block-scalar prompts must keep their newlines verbatim"
 
 
 def test_parse_tasks_preserves_file_order() -> None:
-    text = """tasks:
+    text = """shared:\n  prompt: shared\ntasks:
   - {id: 30, name: c, prompt: p, state: pending}
   - {id: 10, name: a, prompt: p, state: completed}
   - {id: 20, name: b, prompt: p, state: failed}
@@ -97,7 +99,7 @@ def test_parse_tasks_preserves_file_order() -> None:
 
 
 def test_parse_tasks_ignores_unknown_fields() -> None:
-    text = """tasks:
+    text = """shared:\n  prompt: shared\ntasks:
   - id: 1
     name: Only task
     agent: go software engineer
@@ -109,13 +111,14 @@ def test_parse_tasks_ignores_unknown_fields() -> None:
     got = tasks.parse_tasks(text)
 
     assert got == TaskList(
-        tasks=[Task(id=1, name="Only task", prompt="Do it.", state=PENDING)]
+        shared=Shared(prompt="shared"),
+        tasks=[Task(id=1, name="Only task", prompt="Do it.", state=PENDING)],
     )
 
 
 def test_parse_tasks_max_id() -> None:
     got = tasks.parse_tasks(
-        "tasks:\n  - {id: 32767, name: a, prompt: p, state: pending}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 32767, name: a, prompt: p, state: pending}\n"
     )
     assert got.tasks[0].id == 32767
 
@@ -131,7 +134,9 @@ def test_state_constants() -> None:
 @pytest.mark.parametrize("state", [PENDING, COMPLETED, FAILED])
 def test_parse_tasks_accepts_every_valid_state(state: str) -> None:
     got = tasks.parse_tasks(
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: " + state + "}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: "
+        + state
+        + "}\n"
     )
     assert got.tasks[0].state == state
 
@@ -139,9 +144,12 @@ def test_parse_tasks_accepts_every_valid_state(state: str) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        pytest.param("tasks:\n  - {id: 1, name: a, prompt: p}\n", id="state omitted"),
         pytest.param(
-            'tasks:\n  - {id: 1, name: a, prompt: p, state: ""}\n',
+            "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n",
+            id="state omitted",
+        ),
+        pytest.param(
+            'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: ""}\n',
             id="state empty string",
         ),
     ],
@@ -152,10 +160,19 @@ def test_parse_tasks_empty_state_defaults_to_pending(text: str) -> None:
     assert got.tasks[0].state == PENDING
 
 
+def test_parse_tasks_trims_the_shared_prompt() -> None:
+    # The shared prompt is sent to Claude as the prompt file was, trimmed.
+    got = tasks.parse_tasks(
+        "shared:\n  prompt: |\n\n    Be careful.\n\n"
+        "tasks:\n  - {id: 1, name: a, prompt: p}\n"
+    )
+    assert got.shared.prompt == "Be careful."
+
+
 def test_parse_tasks_does_not_alter_name_or_prompt() -> None:
     # Trimming is for validation only; the stored values stay as written.
     got = tasks.parse_tasks(
-        'tasks:\n  - {id: 1, name: " Build ", prompt: "  do it  ", state: pending}\n'
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: " Build ", prompt: "  do it  ", state: pending}\n'
     )
     assert got.tasks[0].name == " Build "
     assert got.tasks[0].prompt == "  do it  "
@@ -168,26 +185,93 @@ ERROR_CASES = [
     # File-level errors never name a task index or id.
     (
         "malformed yaml",
-        "tasks:\n  - id: 1\n   name: bad indent\n",
+        "shared:\n  prompt: shared\ntasks:\n  - id: 1\n   name: bad indent\n",
         "failed to parse yaml tasks",
     ),
-    ("empty input", "", "tasks: is required"),
-    ("comment-only input", "# nothing\n", "tasks: is required"),
+    ("empty input", "", "shared: is required"),
+    ("comment-only input", "# nothing\n", "shared: is required"),
+    ("root is a sequence", "- {id: 1, name: a, prompt: p}\n", "shared: is required"),
+    ("missing tasks key", "shared:\n  prompt: shared\n", "tasks: is required"),
+    # The top level holds only shared and tasks.
     (
-        "missing tasks key",
-        "items:\n  - {id: 1, name: a, prompt: p}\n",
-        "tasks: is required",
+        "missing shared key",
+        "tasks:\n  - {id: 1, name: a, prompt: p}\n",
+        "shared: is required",
     ),
-    ("root is a sequence", "- {id: 1, name: a, prompt: p}\n", "tasks: is required"),
-    ("null tasks", "tasks:\n", "tasks: must be a sequence"),
-    ("tilde tasks", "tasks: ~\n", "tasks: must be a sequence"),
-    ("scalar tasks", "tasks: nope\n", "tasks: must be a sequence"),
     (
-        "mapping tasks",
-        "tasks: {id: 1, name: a, prompt: p}\n",
+        "duplicate shared key",
+        VALID + "shared:\n  prompt: again\n",
+        "shared: duplicate key",
+    ),
+    (
+        "top-level gates",
+        VALID + "gates: []\n",
+        "gates: gates are set under shared now, as shared.gates",
+    ),
+    (
+        "unknown top-level key",
+        VALID + "items: []\n",
+        "items: unknown key; a task file has only shared and tasks",
+    ),
+    # shared
+    ("null shared", _WITH_SHARED.format(""), "shared: must be a mapping"),
+    ("sequence shared", _WITH_SHARED.format(" [a]"), "shared: must be a mapping"),
+    (
+        "unknown shared key",
+        _WITH_SHARED.format(" {prompt: p, tone: dry}"),
+        "shared.tone: unknown key; shared has only prompt and gates",
+    ),
+    (
+        "missing shared prompt",
+        _WITH_SHARED.format(" {gates: []}"),
+        "shared.prompt: is required",
+    ),
+    (
+        "null shared prompt",
+        _WITH_SHARED.format(" {prompt: ~}"),
+        "shared.prompt: must be a string",
+    ),
+    (
+        "mapping shared prompt",
+        _WITH_SHARED.format(" {prompt: {x: y}}"),
+        "shared.prompt: must be a string",
+    ),
+    (
+        "empty shared prompt",
+        _WITH_SHARED.format(' {prompt: ""}'),
+        "shared.prompt: must not be empty or whitespace",
+    ),
+    (
+        "whitespace-only shared prompt",
+        _WITH_SHARED.format(' {prompt: " \\t\\n "}'),
+        "shared.prompt: must not be empty or whitespace",
+    ),
+    (
+        "shared error reported before task error",
+        "tasks:\n  - {id: 1, prompt: p}\nshared: {prompt: ' '}\n",
+        "shared.prompt: must not be empty or whitespace",
+    ),
+    ("null tasks", "shared:\n  prompt: shared\ntasks:\n", "tasks: must be a sequence"),
+    (
+        "tilde tasks",
+        "shared:\n  prompt: shared\ntasks: ~\n",
         "tasks: must be a sequence",
     ),
-    ("empty tasks sequence", "tasks: []\n", "tasks: must contain at least one task"),
+    (
+        "scalar tasks",
+        "shared:\n  prompt: shared\ntasks: nope\n",
+        "tasks: must be a sequence",
+    ),
+    (
+        "mapping tasks",
+        "shared:\n  prompt: shared\ntasks: {id: 1, name: a, prompt: p}\n",
+        "tasks: must be a sequence",
+    ),
+    (
+        "empty tasks sequence",
+        "shared:\n  prompt: shared\ntasks: []\n",
+        "tasks: must contain at least one task",
+    ),
     (
         "duplicate tasks key",
         VALID + "tasks:\n  - {id: 2, name: b, prompt: p}\n",
@@ -196,23 +280,23 @@ ERROR_CASES = [
     # Tags outside the core set are rejected anywhere in the document.
     (
         "python object tag",
-        "tasks:\n  - {id: 1, name: !!python/object:os.system a, prompt: p}\n",
-        "line 2: tag !!python/object:os.system is not allowed",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: !!python/object:os.system a, prompt: p}\n",
+        "line 4: tag !!python/object:os.system is not allowed",
     ),
     (
         "custom tag on an element",
         VALID + "  - !foo {id: 2, name: b, prompt: p}\n",
-        "line 3: tag !foo is not allowed",
+        "line 5: tag !foo is not allowed",
     ),
     (
         "custom tag on an unknown key",
-        "tasks:\n  - {id: 1, name: a, prompt: p, extra: !foo x}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, extra: !foo x}\n",
         "tag !foo is not allowed",
     ),
     ("custom tag outside tasks", VALID + "meta: !foo x\n", "tag !foo is not allowed"),
     (
         "explicit binary tag",
-        "tasks:\n  - {id: 1, name: !!binary YQ==, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: !!binary YQ==, prompt: p}\n",
         "tag !!binary is not allowed",
     ),
     # Every element must be a mapping, even among valid tasks.
@@ -225,40 +309,48 @@ ERROR_CASES = [
     ("scalar element", VALID + "  - just a string\n", "tasks[1]: must be a mapping"),
     (
         "invalid first element before a valid one",
-        "tasks:\n  - ~\n  - {id: 1, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - ~\n  - {id: 1, name: a, prompt: p}\n",
         "tasks[0]: must be a mapping",
     ),
     # id
-    ("missing id", "tasks:\n  - {name: a, prompt: p}\n", "tasks[0]: id: is required"),
-    ("null id", "tasks:\n  - {id: ~, name: a, prompt: p}\n", ID_RANGE_ERROR),
+    (
+        "missing id",
+        "shared:\n  prompt: shared\ntasks:\n  - {name: a, prompt: p}\n",
+        "tasks[0]: id: is required",
+    ),
+    (
+        "null id",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: ~, name: a, prompt: p}\n",
+        ID_RANGE_ERROR,
+    ),
     (
         "float id",
-        "tasks:\n  - {id: 1.5, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1.5, name: a, prompt: p}\n",
         "tasks[0]: id: must be a positive integer",
     ),
     (
         "quoted id",
-        'tasks:\n  - {id: "1", name: a, prompt: p}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: "1", name: a, prompt: p}\n',
         "tasks[0]: id: must be a positive integer",
     ),
     (
         "word id",
-        "tasks:\n  - {id: one, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: one, name: a, prompt: p}\n",
         "tasks[0]: id: must be a positive integer",
     ),
     (
         "zero id",
-        "tasks:\n  - {id: 0, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 0, name: a, prompt: p}\n",
         "tasks[0]: id: must be a positive integer",
     ),
     (
         "negative id",
-        "tasks:\n  - {id: -3, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: -3, name: a, prompt: p}\n",
         "tasks[0]: id: must be a positive integer",
     ),
     (
         "id overflows int16",
-        "tasks:\n  - {id: 32768, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 32768, name: a, prompt: p}\n",
         ID_RANGE_ERROR,
     ),
     (
@@ -268,43 +360,43 @@ ERROR_CASES = [
     ),
     (
         "aliased task repeats its id",
-        "tasks:\n  - &t {id: 1, name: a, prompt: p}\n  - *t\n",
+        "shared:\n  prompt: shared\ntasks:\n  - &t {id: 1, name: a, prompt: p}\n  - *t\n",
         "tasks[1] (id 1): id: duplicates tasks[0]",
     ),
     (
         "duplicate id key within a task",
-        "tasks:\n  - {id: 1, id: 2, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, id: 2, name: a, prompt: p}\n",
         "tasks[0]: id: duplicate key",
     ),
     # name
     (
         "missing name",
-        "tasks:\n  - {id: 1, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, prompt: p}\n",
         "tasks[0] (id 1): name: is required",
     ),
     (
         "null name",
-        "tasks:\n  - {id: 1, name: ~, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: ~, prompt: p}\n",
         "tasks[0] (id 1): name: must be a string",
     ),
     (
         "integer name",
-        "tasks:\n  - {id: 1, name: 42, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: 42, prompt: p}\n",
         "tasks[0] (id 1): name: must be a string",
     ),
     (
         "sequence name",
-        "tasks:\n  - {id: 1, name: [a], prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: [a], prompt: p}\n",
         "tasks[0] (id 1): name: must be a string",
     ),
     (
         "empty name",
-        'tasks:\n  - {id: 1, name: "", prompt: p}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: "", prompt: p}\n',
         "tasks[0] (id 1): name: must not be empty or whitespace",
     ),
     (
         "whitespace-only name",
-        'tasks:\n  - {id: 1, name: " \\t ", prompt: p}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: " \\t ", prompt: p}\n',
         "tasks[0] (id 1): name: must not be empty or whitespace",
     ),
     (
@@ -314,40 +406,40 @@ ERROR_CASES = [
     ),
     (
         "duplicate name differing only by case",
-        "tasks:\n  - {id: 1, name: Build, prompt: p}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: Build, prompt: p}\n"
         "  - {id: 2, name: bUILD, prompt: p}\n",
         "tasks[1] (id 2): name: duplicates the name of tasks[0]",
     ),
     (
         "duplicate name differing only by surrounding whitespace",
-        "tasks:\n  - {id: 1, name: Build, prompt: p}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: Build, prompt: p}\n"
         '  - {id: 2, name: "  build\\t", prompt: p}\n',
         "tasks[1] (id 2): name: duplicates the name of tasks[0]",
     ),
     # prompt
     (
         "missing prompt",
-        "tasks:\n  - {id: 1, name: a}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a}\n",
         "tasks[0] (id 1): prompt: is required",
     ),
     (
         "null prompt",
-        "tasks:\n  - {id: 1, name: a, prompt: ~}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: ~}\n",
         "tasks[0] (id 1): prompt: must be a string",
     ),
     (
         "mapping prompt",
-        "tasks:\n  - {id: 1, name: a, prompt: {x: y}}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: {x: y}}\n",
         "tasks[0] (id 1): prompt: must be a string",
     ),
     (
         "empty prompt",
-        'tasks:\n  - {id: 1, name: a, prompt: ""}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: ""}\n',
         "tasks[0] (id 1): prompt: must not be empty or whitespace",
     ),
     (
         "whitespace-only prompt",
-        'tasks:\n  - {id: 1, name: a, prompt: " \\t\\n "}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: " \\t\\n "}\n',
         "tasks[0] (id 1): prompt: must not be empty or whitespace",
     ),
     (
@@ -358,47 +450,47 @@ ERROR_CASES = [
     # state
     (
         "null state",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: ~}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: ~}\n",
         "tasks[0] (id 1): state: must be a string",
     ),
     (
         "state key with no value",
-        "tasks:\n  - id: 1\n    name: a\n    prompt: p\n    state:\n",
+        "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n    state:\n",
         "tasks[0] (id 1): state: must be a string",
     ),
     (
         "whitespace-only state",
-        'tasks:\n  - {id: 1, name: a, prompt: p, state: " "}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: " "}\n',
         STATE_ERROR + '" "',
     ),
     (
         "padded state",
-        'tasks:\n  - {id: 1, name: a, prompt: p, state: " pending "}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: " pending "}\n',
         'state: must be pending, completed, or failed, got " pending "',
     ),
     (
         "capitalized state",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: Completed}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: Completed}\n",
         STATE_ERROR + '"Completed"',
     ),
     (
         "upper-case state",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: PENDING}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: PENDING}\n",
         'got "PENDING"',
     ),
     (
         "abandoned state",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: abandoned}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: abandoned}\n",
         STATE_ERROR + '"abandoned"',
     ),
     (
         "state typo",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: complete}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: complete}\n",
         'got "complete"',
     ),
     (
         "boolean state",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: true}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: true}\n",
         "tasks[0] (id 1): state: must be a string",
     ),
     (
@@ -410,30 +502,30 @@ ERROR_CASES = [
     # prompt, state, then error.
     (
         "earlier element wins",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
         '  - {id: 2, name: "", prompt: p}\n',
         "tasks[0] (id 1): state:",
     ),
     (
         "id before name",
-        'tasks:\n  - {id: 0, name: "", prompt: p}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 0, name: "", prompt: p}\n',
         "tasks[0]: id:",
     ),
     (
         "name before prompt",
-        'tasks:\n  - {id: 1, name: "", prompt: ""}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: "", prompt: ""}\n',
         "tasks[0] (id 1): name:",
     ),
     (
         "prompt before state",
-        'tasks:\n  - {id: 1, name: a, prompt: "", state: bogus}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: "", state: bogus}\n',
         "tasks[0] (id 1): prompt:",
     ),
     # Plain values YAML reads as booleans or numbers are not strings; they must be quoted.
     *[
         (
             f"unquoted {value} as a name",
-            f"tasks:\n  - id: 1\n    name: {value}\n    prompt: do it\n",
+            f"shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: {value}\n    prompt: do it\n",
             "tasks[0] (id 1): name: must be a string",
         )
         for value in ("yes", "no", "on", "off", "12:30", "1_000")
@@ -441,25 +533,25 @@ ERROR_CASES = [
     # A merge key would otherwise be dropped without a word, losing what it merged in.
     (
         "merge key",
-        "tasks:\n  - &base {id: 1, name: a, prompt: p}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - &base {id: 1, name: a, prompt: p}\n"
         "  - {<<: *base, id: 2, name: b}\n",
         "tag !!merge is not allowed",
     ),
     # An explicit int tag can sit on text that is not a number at all.
     (
         "int tag on empty text",
-        'tasks:\n  - {id: !!int "", name: a, prompt: p}\n',
+        'shared:\n  prompt: shared\ntasks:\n  - {id: !!int "", name: a, prompt: p}\n',
         ID_RANGE_ERROR,
     ),
     (
         "int tag on a word",
-        "tasks:\n  - {id: !!int abc, name: a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: !!int abc, name: a, prompt: p}\n",
         ID_RANGE_ERROR,
     ),
     # error
     (
         "non-string error",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: [x]}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: [x]}\n",
         "tasks[0] (id 1): error: must be a string",
     ),
 ]
@@ -479,10 +571,10 @@ def test_parse_tasks_errors(text: str, want: str) -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "tasks:\n  - id: 1\n   name: bad indent\n",
-        "tasks:\n  - {id: 1, name: !foo a, prompt: p}\n",
-        "tasks: nope\n",
-        "tasks: []\n",
+        "shared:\n  prompt: shared\ntasks:\n  - id: 1\n   name: bad indent\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: !foo a, prompt: p}\n",
+        "shared:\n  prompt: shared\ntasks: nope\n",
+        "shared:\n  prompt: shared\ntasks: []\n",
     ],
 )
 def test_parse_tasks_file_errors_name_no_task(text: str) -> None:
@@ -495,22 +587,26 @@ def test_parse_tasks_file_errors_name_no_task(text: str) -> None:
 
 
 def test_parse_tasks_accepts_explicit_core_tags() -> None:
-    got = tasks.parse_tasks("tasks:\n  - {id: !!int 1, name: !!str 42, prompt: p}\n")
+    got = tasks.parse_tasks(
+        "shared:\n  prompt: shared\ntasks:\n  - {id: !!int 1, name: !!str 42, prompt: p}\n"
+    )
     assert got.tasks[0].name == "42"
 
 
 def test_parse_tasks_reads_error_field() -> None:
     got = tasks.parse_tasks(
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: boom}\n"
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: failed, error: boom}\n"
     )
     assert got.tasks[0].error == "boom"
 
 
 def test_parse_tasks_reads_gates() -> None:
-    text = """gates:
-  - cmd: go test ./...
-  - cmd: |
-      test -z "$(gofmt -l .)"
+    text = """shared:
+  prompt: shared
+  gates:
+    - cmd: go test ./...
+    - cmd: |
+        test -z "$(gofmt -l .)"
 tasks:
   - id: 1
     name: First
@@ -528,12 +624,14 @@ tasks:
 
 
 def test_parse_tasks_reads_gate_timeout() -> None:
-    text = """gates:
-  - cmd: go test ./...
-    timeout: 10m
-  - cmd: echo hi
-  - cmd: sleep 1
-    timeout: 1h30m
+    text = """shared:
+  prompt: shared
+  gates:
+    - cmd: go test ./...
+      timeout: 10m
+    - cmd: echo hi
+    - cmd: sleep 1
+      timeout: 1h30m
 tasks:
   - id: 1
     name: Gated
@@ -552,16 +650,16 @@ tasks:
 
 def test_parse_tasks_gates_absent_versus_empty() -> None:
     absent = tasks.parse_tasks(
-        "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+        "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
     )
-    assert absent.gates is None, "no gates key means not decided"
+    assert absent.shared.gates is None, "no gates key means not decided"
     assert absent.gate_list() == []
 
     empty = tasks.parse_tasks(
-        "gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+        "shared:\n  prompt: shared\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
     )
-    assert empty.gates is not None, "gates: [] means decided: none"
-    assert empty.gates == []
+    assert empty.shared.gates is not None, "gates: [] means decided: none"
+    assert empty.shared.gates == []
     assert empty.gate_list() == []
 
 
@@ -569,12 +667,12 @@ def test_parse_tasks_gates_absent_versus_empty() -> None:
     "text",
     [
         pytest.param(
-            "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n"
+            "shared:\n  prompt: shared\ntasks:\n  - id: 3\n    name: First\n    prompt: do it\n"
             "    gates:\n      - cmd: make test\n",
             id="list",
         ),
         pytest.param(
-            "tasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates: []\n",
+            "shared:\n  prompt: shared\ntasks:\n  - id: 3\n    name: First\n    prompt: do it\n    gates: []\n",
             id="empty",
         ),
     ],
@@ -591,72 +689,96 @@ def test_parse_tasks_task_level_gates_are_an_error(text: str) -> None:
 UNKNOWN_KEY = "unknown key; a gate has only cmd and timeout"
 
 GATE_ERROR_CASES = [
-    ("null gates", "gates:", "gates: must be a sequence"),
-    ("scalar gates", "gates: go test ./...", "gates: must be a sequence"),
-    ("mapping gates", "gates: {cmd: go test ./...}", "gates: must be a sequence"),
-    ("duplicate gates key", "gates: []\ngates: []", "gates: duplicate key"),
-    ("string element", "gates: [go test ./...]", "gates[0]: must be a mapping"),
-    ("missing cmd", "gates: [{}]", "gates[0]: cmd: is required"),
-    ("timeout without cmd", "gates:\n  - timeout: 5m", "gates[0]: cmd: is required"),
-    ("misspelled key", "gates: [{command: a}]", f"gates[0]: command: {UNKNOWN_KEY}"),
-    ("extra key", "gates: [{cmd: a, retries: 3}]", f"gates[0]: retries: {UNKNOWN_KEY}"),
-    ("duplicate cmd", "gates: [{cmd: a, cmd: b}]", "gates[0]: cmd: duplicate key"),
-    ("integer cmd", "gates: [{cmd: 5}]", "gates[0]: cmd: must be a string"),
-    ("null cmd", "gates: [{cmd: }]", "gates[0]: cmd: must be a string"),
+    ("null gates", "gates:", "shared.gates: must be a sequence"),
+    ("scalar gates", "gates: go test ./...", "shared.gates: must be a sequence"),
+    (
+        "mapping gates",
+        "gates: {cmd: go test ./...}",
+        "shared.gates: must be a sequence",
+    ),
+    (
+        "duplicate gates key",
+        "gates: []\n  gates: []",
+        "shared: gates: duplicate key",
+    ),
+    ("string element", "gates: [go test ./...]", "shared.gates[0]: must be a mapping"),
+    ("missing cmd", "gates: [{}]", "shared.gates[0]: cmd: is required"),
+    (
+        "timeout without cmd",
+        "gates:\n  - timeout: 5m",
+        "shared.gates[0]: cmd: is required",
+    ),
+    (
+        "misspelled key",
+        "gates: [{command: a}]",
+        f"shared.gates[0]: command: {UNKNOWN_KEY}",
+    ),
+    (
+        "extra key",
+        "gates: [{cmd: a, retries: 3}]",
+        f"shared.gates[0]: retries: {UNKNOWN_KEY}",
+    ),
+    (
+        "duplicate cmd",
+        "gates: [{cmd: a, cmd: b}]",
+        "shared.gates[0]: cmd: duplicate key",
+    ),
+    ("integer cmd", "gates: [{cmd: 5}]", "shared.gates[0]: cmd: must be a string"),
+    ("null cmd", "gates: [{cmd: }]", "shared.gates[0]: cmd: must be a string"),
     (
         "blank cmd",
         'gates: [{cmd: "  "}]',
-        "gates[0]: cmd: must not be empty or whitespace",
+        "shared.gates[0]: cmd: must not be empty or whitespace",
     ),
     (
         "integer timeout",
         "gates: [{cmd: a, timeout: 30}]",
-        f"gates[0]: timeout: {DURATION_HINT}",
+        f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "null timeout",
         "gates: [{cmd: a, timeout: }]",
-        f"gates[0]: timeout: {DURATION_HINT}",
+        f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "sequence timeout",
         "gates: [{cmd: a, timeout: [10m]}]",
-        f"gates[0]: timeout: {DURATION_HINT}",
+        f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "unparseable timeout",
         "gates: [{cmd: a, timeout: soon}]",
-        f"gates[0]: timeout: {DURATION_HINT}",
+        f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "unitless timeout",
         'gates: [{cmd: a, timeout: "30"}]',
-        f"gates[0]: timeout: {DURATION_HINT}",
+        f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "blank timeout",
         'gates: [{cmd: a, timeout: "  "}]',
-        f"gates[0]: timeout: {DURATION_HINT}",
+        f"shared.gates[0]: timeout: {DURATION_HINT}",
     ),
     (
         "zero timeout",
         "gates: [{cmd: a, timeout: 0s}]",
-        "gates[0]: timeout: must be greater than zero",
+        "shared.gates[0]: timeout: must be greater than zero",
     ),
     (
         "negative timeout",
         "gates: [{cmd: a, timeout: -5m}]",
-        "gates[0]: timeout: must be greater than zero",
+        "shared.gates[0]: timeout: must be greater than zero",
     ),
     (
         "duplicate timeout",
         "gates: [{cmd: a, timeout: 1s, timeout: 2s}]",
-        "gates[0]: timeout: duplicate key",
+        "shared.gates[0]: timeout: duplicate key",
     ),
     (
         "second gate invalid",
         "gates: [{cmd: a}, {cmd: ''}]",
-        "gates[1]: cmd: must not be empty or whitespace",
+        "shared.gates[1]: cmd: must not be empty or whitespace",
     ),
 ]
 
@@ -666,7 +788,10 @@ GATE_ERROR_CASES = [
     [pytest.param(gates, want, id=name) for name, gates, want in GATE_ERROR_CASES],
 )
 def test_parse_tasks_gate_errors(gates: str, want: str) -> None:
-    text = gates + "\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
+    text = (
+        f"shared:\n  prompt: shared\n  {gates}\n"
+        "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
+    )
     with pytest.raises(TaskFileError) as exc:
         tasks.parse_tasks(text)
 
@@ -674,13 +799,13 @@ def test_parse_tasks_gate_errors(gates: str, want: str) -> None:
 
 
 def test_parse_tasks_gate_error_reported_before_task_error() -> None:
-    # Gates are checked before the tasks so a file with an error in each always
+    # Shared is checked before the tasks so a file with an error in each always
     # reports the same one, whatever order the keys are in.
-    text = "tasks:\n  - id: 1\n    prompt: p\ngates: [{}]\n"
+    text = "tasks:\n  - id: 1\n    prompt: p\nshared:\n  prompt: s\n  gates: [{}]\n"
     with pytest.raises(TaskFileError) as exc:
         tasks.parse_tasks(text)
 
-    assert str(exc.value) == "gates[0]: cmd: is required"
+    assert str(exc.value) == "shared.gates[0]: cmd: is required"
 
 
 @pytest.mark.parametrize(
@@ -715,7 +840,7 @@ def test_parse_timeout_errors(text: str, want: str) -> None:
 
 @pytest.mark.parametrize("value", ["yes", "no", "on", "off", "12:30", "1_000"])
 def test_parse_tasks_reads_quoted_yaml_11_scalars_as_names(value: str) -> None:
-    text = f'tasks:\n  - id: 1\n    name: "{value}"\n    prompt: do it\n'
+    text = f'shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: "{value}"\n    prompt: do it\n'
     assert tasks.parse_tasks(text).tasks[0].name == value
 
 
@@ -731,7 +856,11 @@ def test_parse_tasks_reads_quoted_yaml_11_scalars_as_names(value: str) -> None:
     ],
 )
 def test_parse_tasks_reads_ids_as_pyyaml_does(text: str, want: int) -> None:
-    got = tasks.parse_tasks("tasks:\n  - {id: " + text + ", name: a, prompt: p}\n")
+    got = tasks.parse_tasks(
+        "shared:\n  prompt: shared\ntasks:\n  - {id: "
+        + text
+        + ", name: a, prompt: p}\n"
+    )
     assert got.tasks[0].id == want
 
 
@@ -739,19 +868,24 @@ def test_parse_tasks_reads_ids_as_pyyaml_does(text: str, want: int) -> None:
     ("text", "where"),
     [
         pytest.param(
-            'tasks:\n  - {id: 1, name: "a\\ud800", prompt: p}\n',
+            'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: "a\\ud800", prompt: p}\n',
             "tasks[0] (id 1): name",
             id="name",
         ),
         pytest.param(
-            'tasks:\n  - {id: 1, name: a, prompt: "\\udfff"}\n',
+            'shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: "\\udfff"}\n',
             "tasks[0] (id 1): prompt",
             id="prompt",
         ),
         pytest.param(
-            'gates: [{cmd: "echo \\ud800"}]\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
-            "gates[0]: cmd",
+            'shared: {prompt: s, gates: [{cmd: "echo \\ud800"}]}\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
+            "shared.gates[0]: cmd",
             id="gate cmd",
+        ),
+        pytest.param(
+            'shared: {prompt: "\\ud800"}\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
+            "shared.prompt",
+            id="shared prompt",
         ),
     ],
 )

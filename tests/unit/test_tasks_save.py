@@ -7,8 +7,9 @@ import pytest
 
 from alr import tasks
 from alr.errors import TaskFileError, quote
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
+from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
 
+SHARED = Shared(prompt="shared")
 PROMPT = 'Line one: with "quotes" and a colon\n\n  indented line\nhéllo — done\n'
 
 
@@ -21,6 +22,7 @@ def _saved(path: Path) -> str:
     [
         pytest.param(
             TaskList(
+                shared=SHARED,
                 tasks=[
                     Task(
                         id=1,
@@ -29,13 +31,14 @@ def _saved(path: Path) -> str:
                         state=FAILED,
                         error="exit status 1",
                     )
-                ]
+                ],
             ),
             None,
             id="error text",
         ),
         pytest.param(
             TaskList(
+                shared=SHARED,
                 tasks=[
                     Task(
                         id=3,
@@ -45,23 +48,40 @@ def _saved(path: Path) -> str:
                     ),
                     Task(id=1, name="First", prompt="Do the first thing."),
                     Task(id=2, name="Second", prompt="Do the second.", state=COMPLETED),
-                ]
+                ],
             ),
             None,
             id="ids, multi-line prompts, states, and file order",
         ),
         pytest.param(
-            TaskList(tasks=[Task(id=1, name="Only", prompt="p", state=COMPLETED)]),
+            TaskList(
+                shared=SHARED,
+                tasks=[Task(id=1, name="Only", prompt="p", state=COMPLETED)],
+            ),
             "stale contents",
             id="over an existing file",
         ),
         pytest.param(
             TaskList(
-                gates=[Gate(cmd="go test ./..."), Gate(cmd='echo one\necho "two"\n')],
+                shared=Shared(
+                    prompt="shared",
+                    gates=[
+                        Gate(cmd="go test ./..."),
+                        Gate(cmd='echo one\necho "two"\n'),
+                    ],
+                ),
                 tasks=[Task(id=1, name="First", prompt="p")],
             ),
             None,
             id="gates",
+        ),
+        pytest.param(
+            TaskList(
+                shared=Shared(prompt='Line one.\n\nLine two: with "quotes"'),
+                tasks=[Task(id=1, name="First", prompt="p")],
+            ),
+            None,
+            id="multi-line shared prompt",
         ),
     ],
 )
@@ -84,7 +104,8 @@ def test_save_tasks_path_is_directory(tmp_path: Path) -> None:
 
     with pytest.raises(TaskFileError) as excinfo:
         tasks.save_tasks(
-            str(target), TaskList(tasks=[Task(id=1, name="a", prompt="p")])
+            str(target),
+            TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")]),
         )
 
     cause = excinfo.value.__cause__
@@ -107,7 +128,8 @@ def test_save_tasks_target_dir_not_writable(tmp_path: Path) -> None:
     try:
         with pytest.raises(TaskFileError) as excinfo:
             tasks.save_tasks(
-                str(path), TaskList(tasks=[Task(id=1, name="a", prompt="p")])
+                str(path),
+                TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")]),
             )
     finally:
         ro_dir.chmod(0o700)
@@ -125,13 +147,14 @@ def test_save_tasks_failed_save_leaves_existing_file_untouched(tmp_path: Path) -
     # sibling file first. A read-only directory would not do: the release
     # build runs the tests as root, which ignores directory permissions.
     path = tmp_path / "tasks.yaml"
-    original = TaskList(tasks=[Task(id=1, name="Original", prompt="p")])
+    original = TaskList(shared=SHARED, tasks=[Task(id=1, name="Original", prompt="p")])
     tasks.save_tasks(str(path), original)
     before = path.read_bytes()
     Path(f"{path}.tmp").mkdir(mode=0o700)
 
     changed = TaskList(
-        tasks=[Task(id=1, name="Changed", prompt="p", state=FAILED, error="boom")]
+        shared=SHARED,
+        tasks=[Task(id=1, name="Changed", prompt="p", state=FAILED, error="boom")],
     )
     with pytest.raises(TaskFileError) as excinfo:
         tasks.save_tasks(str(path), changed)
@@ -148,7 +171,10 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
     # indentation.
     path = tmp_path / "tasks.yaml"
     task_list = TaskList(
-        gates=[Gate(cmd="go test ./...", timeout="90s"), Gate(cmd="echo one")],
+        shared=Shared(
+            prompt="Be careful.",
+            gates=[Gate(cmd="go test ./...", timeout="90s"), Gate(cmd="echo one")],
+        ),
         tasks=[
             Task(id=1, name="First", prompt="p", state=PENDING),
             Task(id=2, name="Second", prompt="q", state=FAILED, error="boom"),
@@ -159,8 +185,11 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
 
     saved = _saved(path)
     assert tasks.parse_tasks(saved) == task_list
-    assert saved.startswith("gates:\n  - cmd: go test ./...\n    timeout: 90s\n")
-    assert "\n  - cmd: echo one\ntasks:\n  - id: 1\n    name: First\n" in saved
+    assert saved.startswith(
+        "shared:\n  prompt: Be careful.\n  gates:\n"
+        "    - cmd: go test ./...\n      timeout: 90s\n"
+    )
+    assert "\n    - cmd: echo one\ntasks:\n  - id: 1\n    name: First\n" in saved
     assert saved.endswith(
         "\n  - id: 2\n    name: Second\n    prompt: q\n    state: failed\n    error: boom\n"
     )
@@ -170,20 +199,20 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
     ("text", "present", "absent"),
     [
         pytest.param(
-            "tasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+            "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
             "tasks:",
             "gates",
             id="absent",
         ),
         pytest.param(
-            "gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
-            "gates: []\n",
+            "shared:\n  prompt: shared\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+            "  gates: []\n",
             "error:",
             id="empty",
         ),
         pytest.param(
-            "gates:\n  - cmd: make test\n    timeout: 10m\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
-            "gates:\n  - cmd: make test\n    timeout: 10m\n",
+            "shared:\n  prompt: shared\n  gates:\n    - cmd: make test\n      timeout: 10m\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+            "  gates:\n    - cmd: make test\n      timeout: 10m\n",
             "gates: []",
             id="set",
         ),
@@ -215,12 +244,26 @@ def test_save_tasks_writes_multi_line_prompt_as_block(
     tmp_path: Path, prompt: str
 ) -> None:
     path = tmp_path / "tasks.yaml"
-    tasks.save_tasks(str(path), TaskList(tasks=[Task(id=1, name="a", prompt=prompt)]))
+    tasks.save_tasks(
+        str(path), TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt=prompt)])
+    )
 
     saved = _saved(path)
     assert "prompt: |" in saved
     assert "\\n" not in saved
     assert tasks.parse_tasks(saved).tasks[0].prompt == prompt
+
+
+def test_save_tasks_writes_multi_line_shared_prompt_as_block(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.yaml"
+    shared = Shared(prompt="one\ntwo")
+
+    tasks.save_tasks(
+        str(path),
+        TaskList(shared=shared, tasks=[Task(id=1, name="a", prompt="p")]),
+    )
+
+    assert _saved(path).startswith("shared:\n  prompt: |-\n    one\n    two\ntasks:")
 
 
 @pytest.mark.parametrize(
@@ -229,14 +272,18 @@ def test_save_tasks_writes_multi_line_prompt_as_block(
 )
 def test_save_tasks_keeps_awkward_names_as_strings(tmp_path: Path, name: str) -> None:
     path = tmp_path / "tasks.yaml"
-    tasks.save_tasks(str(path), TaskList(tasks=[Task(id=1, name=name, prompt="p")]))
+    tasks.save_tasks(
+        str(path), TaskList(shared=SHARED, tasks=[Task(id=1, name=name, prompt="p")])
+    )
 
     assert tasks.parse_tasks(_saved(path)).tasks[0].name == name
 
 
 def _round_trips(tmp_path: Path, name: str, prompt: str) -> tuple[str, str]:
     path = tmp_path / "tasks.yaml"
-    tasks.save_tasks(str(path), TaskList(tasks=[Task(id=1, name=name, prompt=prompt)]))
+    tasks.save_tasks(
+        str(path), TaskList(shared=SHARED, tasks=[Task(id=1, name=name, prompt=prompt)])
+    )
     got = tasks.parse_tasks(_saved(path)).tasks[0]
     return got.name, got.prompt
 

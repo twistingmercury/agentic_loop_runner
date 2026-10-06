@@ -16,7 +16,9 @@ from alr.errors import (
 )
 from alr.plain.start import start
 
-VALID_TASKS_YAML = """tasks:
+VALID_TASKS_YAML = """shared:
+  prompt: shared
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -24,7 +26,9 @@ VALID_TASKS_YAML = """tasks:
     name: Second task
     prompt: Do the second thing.
 """
-ONE_TASK_YAML = "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
+ONE_TASK_YAML = (
+    "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1}\n"
+)
 
 
 def _calls(record: Path) -> int:
@@ -89,7 +93,7 @@ async def test_start_invalid_tasks_yaml(tmp_path: Path) -> None:
     prompt_file = write_file(tmp_path / "prompt.md", "Do the task.\n")
     tasks_file = write_file(
         tmp_path / "tasks.yaml",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
     )
 
     with pytest.raises(TaskFileError, match="failed to parse tasks yaml"):
@@ -138,7 +142,9 @@ async def test_start_success(record: Path, tmp_path: Path) -> None:
 async def test_start_refuses_when_any_task_failed(
     record: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    content = """tasks:
+    content = """shared:
+  prompt: shared
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -193,7 +199,7 @@ async def test_start_commit_flag_commits_the_task(
     prompt_file = write_file(outside / "prompt.md", "prompt\n")
     tasks_file = write_file(
         outside / "tasks.yaml",
-        "gates:\n  - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
     await _start(prompt_file, tasks_file, commit=True)

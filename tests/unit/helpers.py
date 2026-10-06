@@ -22,8 +22,9 @@ from alr.engine.commit import Repo
 from alr.engine.sandbox import bypass_args
 from alr.errors import RunCancelledError
 from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import TaskList
+from alr.tasks import Shared, TaskList
 
+SHARED = Shared(prompt="shared")
 ALR = Path(sys.executable).parent / "alr"
 
 

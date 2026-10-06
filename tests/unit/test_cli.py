@@ -14,7 +14,9 @@ from alr import cli
 from alr.engine import proc
 from alr.errors import AlrError, SandboxError, UsageError
 
-ONE_TASK_YAML = "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
+ONE_TASK_YAML = (
+    "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
+)
 SANDBOXED = [
     "--permission-mode",
     "acceptEdits",
@@ -376,7 +378,7 @@ def test_a_second_signal_does_not_leave_git_running(
     ready = tmp_path / "ready"
     tasks_file = git_repo / "run" / "tasks.yaml"
     tasks_yaml = (
-        "gates:\n  - cmd: echo work > one.txt\n"
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
         "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
     )
     tasks_file.write_text(tasks_yaml, encoding="utf-8")

@@ -66,23 +66,31 @@ class Task:
 
 
 @dataclass
-class TaskList:
-    """A whole task file.
+class Shared:
+    """What every task in the file shares: the prompt and the gates.
 
     `gates` is None when the file has no gates key (not decided yet) and a
     list, possibly empty, when it has one (decided), so a save can keep the
     difference.
     """
 
-    tasks: list[Task]
+    prompt: str
     gates: list[Gate] | None = None
+
+
+@dataclass
+class TaskList:
+    """A whole task file."""
+
+    shared: Shared
+    tasks: list[Task]
 
     def gate_list(self) -> list[Gate]:
         """The file's gates, empty when the key is absent."""
-        if self.gates is None:
+        if self.shared.gates is None:
             return []
 
-        return self.gates
+        return self.shared.gates
 
 
 def parse_tasks(text: str) -> TaskList:
@@ -99,12 +107,11 @@ def parse_tasks(text: str) -> TaskList:
     if doc is not None:
         _check_tags(doc, set())
 
-    seq, gates_node = _root_nodes(doc)
+    shared_node, seq = _root_nodes(doc)
 
-    # Gates are checked before the tasks so a file with an error in each
-    # reports the same one whatever order its keys are in. `gates: []` stays an
-    # empty list, not None, so a save writes the key back.
-    gates = None if gates_node is None else _check_gates(gates_node)
+    # The shared block is checked before the tasks so a file with an error in
+    # each reports the same one whatever order its keys are in.
+    shared = _check_shared(shared_node)
     tasks: list[Task] = []
     ids: dict[int, int] = {}
     names: dict[str, int] = {}
@@ -113,7 +120,7 @@ def parse_tasks(text: str) -> TaskList:
         _check_duplicate(ids, names, i, task)
         tasks.append(task)
 
-    return TaskList(tasks=tasks, gates=gates)
+    return TaskList(shared=shared, tasks=tasks)
 
 
 def _where(i: int, task_id: int) -> str:
@@ -141,25 +148,24 @@ def _check_duplicate(
     names[name] = i
 
 
-def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.SequenceNode, yaml.Node | None]:
-    """Return the non-empty sequence under the single tasks key and the gates node.
+def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.Node, yaml.SequenceNode]:
+    """Return the shared node and the non-empty sequence under the tasks key.
 
-    The gates node is None when the file has no gates key. Other root keys may
-    repeat.
+    Any other root key is an error: a typo or a top-level gates list left over
+    from an older file must not be dropped, or a run would have no checks.
     """
     if not isinstance(doc, yaml.MappingNode):
-        raise TaskFileError("tasks: is required")
+        raise TaskFileError("shared: is required")
 
     roots: dict[str, yaml.Node] = {}
     for key_node, value in doc.value:
         key = _key_text(key_node)
-        if key not in ("tasks", "gates"):
-            continue
-
-        if key in roots:
-            raise TaskFileError(f"{key}: duplicate key")
-
+        _check_root_key(key, roots)
         roots[key] = value
+
+    shared = roots.get("shared")
+    if shared is None:
+        raise TaskFileError("shared: is required")
 
     seq = roots.get("tasks")
     if seq is None:
@@ -171,7 +177,42 @@ def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.SequenceNode, yaml.Node | N
     if not seq.value:
         raise TaskFileError("tasks: must contain at least one task")
 
-    return seq, roots.get("gates")
+    return shared, seq
+
+
+def _check_root_key(key: str, seen: dict[str, yaml.Node]) -> None:
+    if key == "gates":
+        raise TaskFileError(
+            "gates: gates are set under shared now, as shared.gates; see the HOWTO"
+        )
+
+    if key not in ("shared", "tasks"):
+        raise TaskFileError(
+            f"{key}: unknown key; a task file has only shared and tasks"
+        )
+
+    if key in seen:
+        raise TaskFileError(f"{key}: duplicate key")
+
+
+def _check_shared(node: yaml.Node) -> Shared:
+    """Check the shared mapping and build it, with the prompt trimmed."""
+    if not isinstance(node, yaml.MappingNode):
+        raise TaskFileError("shared: must be a mapping")
+
+    fields = _fields("shared", node)
+    for key in fields:
+        if key not in ("prompt", "gates"):
+            raise TaskFileError(
+                f"shared.{key}: unknown key; shared has only prompt and gates"
+            )
+
+    prompt = _text_node("shared.prompt", fields.get("prompt"), required=True)
+
+    # `gates: []` stays an empty list, not None, so a save writes the key back.
+    gates_node = fields.get("gates")
+    gates = None if gates_node is None else _check_gates(gates_node)
+    return Shared(prompt=prompt.strip(), gates=gates)
 
 
 def _parse_task(i: int, el: yaml.Node) -> Task:
@@ -200,8 +241,8 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     # old file running every task with no checks at all.
     if "gates" in fields:
         raise TaskFileError(
-            f"{where}: gates: gates are set once for the whole file now, "
-            "as a top-level gates: list; see the HOWTO"
+            f"{where}: gates: gates are set once for the whole file, "
+            "as shared.gates; see the HOWTO"
         )
 
     return Task(
@@ -261,21 +302,25 @@ def _text(
     where: str, fields: dict[str, yaml.Node], name: str, *, required: bool = False
 ) -> str:
     """Read a string field; "" when the key is absent and not required."""
-    node = fields.get(name)
+    return _text_node(f"{where}: {name}", fields.get(name), required=required)
+
+
+def _text_node(label: str, node: yaml.Node | None, *, required: bool = False) -> str:
+    """Read a string node, naming it by label in errors; "" when it is absent and not required."""
     if node is None and required:
-        raise TaskFileError(f"{where}: {name}: is required")
+        raise TaskFileError(f"{label}: is required")
 
     if node is None:
         return ""
 
     if not _is_string(node):
-        raise TaskFileError(f"{where}: {name}: must be a string")
+        raise TaskFileError(f"{label}: must be a string")
 
     if required and node.value.strip() == "":
-        raise TaskFileError(f"{where}: {name}: must not be empty or whitespace")
+        raise TaskFileError(f"{label}: must not be empty or whitespace")
 
     if _LONE_SURROGATE.search(node.value):
-        raise TaskFileError(f"{where}: {name}: must not contain a lone surrogate")
+        raise TaskFileError(f"{label}: must not contain a lone surrogate")
 
     return node.value
 
@@ -291,9 +336,9 @@ def _check_gates(node: yaml.Node) -> list[Gate]:
     would drop the rest, and the next save would then erase it.
     """
     if not isinstance(node, yaml.SequenceNode):
-        raise TaskFileError("gates: must be a sequence")
+        raise TaskFileError("shared.gates: must be a sequence")
 
-    return [_check_gate(f"gates[{j}]", el) for j, el in enumerate(node.value)]
+    return [_check_gate(f"shared.gates[{j}]", el) for j, el in enumerate(node.value)]
 
 
 def _check_gate(where: str, el: yaml.Node) -> Gate:
@@ -449,13 +494,15 @@ _TaskDumper.add_representer(str, _represent_str)
 
 
 def _document(task_list: TaskList) -> dict[str, object]:
-    """Lay the task list out as it is written: gates above tasks, empty optional keys left out."""
-    doc: dict[str, object] = {}
-    if task_list.gates is not None:
-        doc["gates"] = [_gate_entry(gate) for gate in task_list.gates]
+    """Lay the task list out as it is written: shared above tasks, empty optional keys left out."""
+    shared: dict[str, object] = {"prompt": task_list.shared.prompt}
+    if task_list.shared.gates is not None:
+        shared["gates"] = [_gate_entry(gate) for gate in task_list.shared.gates]
 
-    doc["tasks"] = [_task_entry(task) for task in task_list.tasks]
-    return doc
+    return {
+        "shared": shared,
+        "tasks": [_task_entry(task) for task in task_list.tasks],
+    }
 
 
 def _gate_entry(gate: Gate) -> dict[str, str]:

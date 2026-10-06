@@ -14,7 +14,7 @@ from helpers import cancel_run, run_loop, saved_tasks, wait_for_text, wait_until
 
 from alr.engine import gates
 from alr.errors import RunError
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
+from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -29,7 +29,8 @@ def _touch_gate(path: Path) -> Gate:
 
 def _gated_task(*task_gates: Gate) -> TaskList:
     return TaskList(
-        tasks=[Task(id=1, name="First", prompt="p1")], gates=list(task_gates)
+        shared=Shared(prompt="shared", gates=list(task_gates)),
+        tasks=[Task(id=1, name="First", prompt="p1")],
     )
 
 
@@ -86,7 +87,7 @@ async def test_run_loop_file_gates_run_after_every_completed_task(
 ) -> None:
     count = tmp_path / "gate-runs"
     task_list = TaskList(
-        gates=[Gate(cmd=f"echo ran >> '{count}'")],
+        shared=Shared(prompt="shared", gates=[Gate(cmd=f"echo ran >> '{count}'")]),
         tasks=[
             Task(id=1, name="First", prompt="p1"),
             Task(id=2, name="Done", prompt="p2", state=COMPLETED),
@@ -107,7 +108,9 @@ async def test_run_loop_gate_failure_fails_task_and_stops_run(
     tasks_file = tmp_path / "tasks.yaml"
     never = tmp_path / "never"
     task_list = TaskList(
-        gates=[Gate(cmd='test "a" = "b"'), _touch_gate(never)],
+        shared=Shared(
+            prompt="shared", gates=[Gate(cmd='test "a" = "b"'), _touch_gate(never)]
+        ),
         tasks=[
             Task(id=1, name="First", prompt="p1"),
             Task(id=2, name="Second", prompt="p2"),
@@ -271,7 +274,7 @@ async def test_run_cancel_during_gate_leaves_file_untouched(
 ) -> None:
     ready = tmp_path / "ready"
     tasks_file = tmp_path / "tasks.yaml"
-    tasks_yaml = "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+    tasks_yaml = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
     tasks_file.write_text(tasks_yaml, encoding="utf-8")
     task_list = _gated_task(
         Gate(cmd=f"echo ready > '{ready}'; sleep 60", timeout=timeout)

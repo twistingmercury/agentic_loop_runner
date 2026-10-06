@@ -10,7 +10,9 @@ from helpers import write_file
 from alr.errors import RepoError, TaskFileError
 from alr.plain.dryrun import dry_run
 
-VALID_TASKS_YAML = """tasks:
+VALID_TASKS_YAML = """shared:
+  prompt: shared
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -18,14 +20,18 @@ VALID_TASKS_YAML = """tasks:
     name: Second task
     prompt: Do the second thing.
 """
-ONE_TASK_YAML = "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
-GATES_YAML = """gates:
-  - cmd: go test ./...
-    timeout: 30s
-  - cmd: |
-      echo one
-      echo two
-  - cmd: make lint
+ONE_TASK_YAML = (
+    "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1}\n"
+)
+GATES_YAML = """shared:
+  prompt: shared
+  gates:
+    - cmd: go test ./...
+      timeout: 30s
+    - cmd: |
+        echo one
+        echo two
+    - cmd: make lint
 tasks:
   - id: 1
     name: First
@@ -63,7 +69,9 @@ async def test_dry_run_valid_file(tmp_path: Path) -> None:
 
 
 async def test_dry_run_no_failed_tasks_table(tmp_path: Path) -> None:
-    content = """tasks:
+    content = """shared:
+  prompt: shared
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -86,7 +94,7 @@ async def test_dry_run_no_failed_tasks_table(tmp_path: Path) -> None:
 async def test_dry_run_invalid_file(tmp_path: Path) -> None:
     tasks_file = write_file(
         tmp_path / "tasks.yaml",
-        "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
     )
 
     out = io.StringIO()
@@ -97,7 +105,9 @@ async def test_dry_run_invalid_file(tmp_path: Path) -> None:
 
 
 async def test_dry_run_flags_failed_tasks(tmp_path: Path) -> None:
-    content = """tasks:
+    content = """shared:
+  prompt: shared
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -161,7 +171,8 @@ async def test_dry_run_lists_effective_gate_timeouts(
 
 async def test_dry_run_no_gates_prints_no_gate_lines(tmp_path: Path) -> None:
     tasks_file = write_file(
-        tmp_path / "tasks.yaml", "tasks:\n  - {id: 1, name: First, prompt: p}\n"
+        tmp_path / "tasks.yaml",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p}\n",
     )
 
     got = await _dry_run(tasks_file, gate_timeout="2m")

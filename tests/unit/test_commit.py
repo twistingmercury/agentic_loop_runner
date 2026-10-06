@@ -19,7 +19,7 @@ from alr import tasks
 from alr.engine import proc
 from alr.engine.commit import Repo, check_log_dir, open_repo
 from alr.errors import RepoError, RunCancelledError, RunError
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Task, TaskList
+from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
 
 RUN_DIR = "20261001T140211"
 
@@ -305,13 +305,14 @@ def _work_gate(name: str) -> Gate:
 
 def _gated_task(*task_gates: Gate) -> TaskList:
     return TaskList(
-        tasks=[Task(id=1, name="First", prompt="p1")], gates=list(task_gates)
+        shared=Shared(prompt="shared", gates=list(task_gates)),
+        tasks=[Task(id=1, name="First", prompt="p1")],
     )
 
 
 def _two_tasks(*task_gates: Gate) -> TaskList:
     return TaskList(
-        gates=list(task_gates),
+        shared=Shared(prompt="shared", gates=list(task_gates)),
         tasks=[
             Task(id=1, name="First", prompt="p1"),
             Task(id=2, name="Second", prompt="p2"),
@@ -574,7 +575,8 @@ async def test_run_commit_odd_task_names(
 ) -> None:
     tasks_file = _task_file(git_repo)
     task_list = TaskList(
-        gates=[_work_gate("one.txt")], tasks=[Task(id=1, name=task_name, prompt="p")]
+        shared=Shared(prompt="shared", gates=[_work_gate("one.txt")]),
+        tasks=[Task(id=1, name=task_name, prompt="p")],
     )
 
     await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
@@ -627,7 +629,7 @@ async def _cancel_during_commit(
 async def test_run_cancel_during_commit_leaves_file_untouched(
     git_repo: Path, tmp_path: Path
 ) -> None:
-    tasks_yaml = "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+    tasks_yaml = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
     tasks_file = write_nested_file(_task_file(git_repo), tasks_yaml)
 
     _, error = await _cancel_during_commit(
@@ -652,7 +654,7 @@ async def test_run_cancel_during_commit_kills_a_hook_that_ignores_sigterm(
 ) -> None:
     tasks_file = write_nested_file(
         _task_file(git_repo),
-        "tasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
     )
 
     took, error = await _cancel_during_commit(

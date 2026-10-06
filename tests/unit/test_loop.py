@@ -5,7 +5,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from helpers import cancel_run, fake_claude_records, run_loop, saved_tasks, write_file
+from helpers import (
+    SHARED,
+    cancel_run,
+    fake_claude_records,
+    run_loop,
+    saved_tasks,
+    write_file,
+)
 
 from alr import tasks
 from alr.engine import loop
@@ -18,7 +25,9 @@ from alr.errors import (
 )
 from alr.tasks import COMPLETED, FAILED, PENDING, Task, TaskList
 
-VALID_TASKS_YAML = """tasks:
+VALID_TASKS_YAML = """shared:
+  prompt: shared
+tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -26,9 +35,11 @@ VALID_TASKS_YAML = """tasks:
     name: Second task
     prompt: Do the second thing.
 """
-BOGUS_STATE_YAML = "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
+BOGUS_STATE_YAML = (
+    "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n"
+)
 TWO_PENDING_YAML = (
-    "tasks:\n"
+    "shared:\n  prompt: shared\ntasks:\n"
     "  - {id: 1, name: First, prompt: p1, state: pending}\n"
     "  - {id: 2, name: Second, prompt: p2, state: pending}\n"
 )
@@ -107,7 +118,9 @@ def test_load_tasks_invalid_yaml(tmp_path: Path) -> None:
 
 def test_load_tasks_rejects_a_file_that_is_not_utf8(tmp_path: Path) -> None:
     # A Latin-1 e-acute; reading it leniently would let the next save replace it.
-    content = b"tasks:\n  - {id: 1, name: Caf\xe9, prompt: p}\n"
+    content = (
+        b"shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: Caf\xe9, prompt: p}\n"
+    )
     path = tmp_path / "tasks.yaml"
     path.write_bytes(content)
 
@@ -131,7 +144,7 @@ def test_load_tasks_failed_task_returns_list_and_err_failed_tasks(
 ) -> None:
     path = write_file(
         tmp_path / "tasks.yaml",
-        "tasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n",
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n",
     )
 
     with pytest.raises(FailedTasksError) as caught:
@@ -156,11 +169,12 @@ async def test_run_loop_happy_path_invokes_in_order_with_exact_stdin(
     tasks_file = tmp_path / "tasks.yaml"
     prompt = "Follow the runbook."
     task_list = TaskList(
+        shared=SHARED,
         tasks=[
             Task(id=1, name="First", prompt="Do the first thing."),
             Task(id=2, name="Second", prompt="Do the second thing."),
             Task(id=3, name="Third", prompt="Do the third thing."),
-        ]
+        ],
     )
 
     await run_loop(task_list, tasks_file, prompt=prompt)
@@ -179,10 +193,11 @@ async def test_run_loop_non_zero_exit_stops_at_first_task(
     tasks_file = tmp_path / "tasks.yaml"
     monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
     task_list = TaskList(
+        shared=SHARED,
         tasks=[
             Task(id=1, name="First", prompt="p1"),
             Task(id=2, name="Second", prompt="p2"),
-        ]
+        ],
     )
 
     with pytest.raises(RunError) as caught:
@@ -201,7 +216,7 @@ async def test_run_loop_claude_missing_from_path(
     # An empty directory: no claude anywhere on PATH.
     monkeypatch.setenv("PATH", str(tmp_path))
     tasks_file = tmp_path / "tasks.yaml"
-    task_list = TaskList(tasks=[Task(id=1, name="Only", prompt="p")])
+    task_list = TaskList(shared=SHARED, tasks=[Task(id=1, name="Only", prompt="p")])
 
     with pytest.raises(RunError) as caught:
         await run_loop(task_list, tasks_file)
@@ -221,7 +236,7 @@ async def test_run_loop_claude_that_cannot_be_executed(
     (bin_dir / "claude").chmod(0o644)
     monkeypatch.setenv("PATH", str(bin_dir))
     tasks_file = tmp_path / "tasks.yaml"
-    task_list = TaskList(tasks=[Task(id=1, name="Only", prompt="p")])
+    task_list = TaskList(shared=SHARED, tasks=[Task(id=1, name="Only", prompt="p")])
 
     with pytest.raises(RunError) as caught:
         await run_loop(task_list, tasks_file)
@@ -236,7 +251,7 @@ async def test_run_loop_claude_that_cannot_be_executed(
 async def test_run_loop_context_already_cancelled(record: Path, tmp_path: Path) -> None:
     # Deliberately never created.
     tasks_file = tmp_path / "tasks.yaml"
-    task_list = TaskList(tasks=[Task(id=1, name="Only", prompt="p")])
+    task_list = TaskList(shared=SHARED, tasks=[Task(id=1, name="Only", prompt="p")])
 
     run = asyncio.ensure_future(run_loop(task_list, tasks_file))
     # A coroutine that has not started cannot turn the cancel into its own error.
@@ -251,10 +266,11 @@ async def test_run_loop_prints_prompt_to_stdout(
     record: Path, tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     task_list = TaskList(
+        shared=SHARED,
         tasks=[
             Task(id=1, name="First", prompt="Do the first thing."),
             Task(id=2, name="Second", prompt="Do the second thing."),
-        ]
+        ],
     )
 
     await run_loop(task_list, tmp_path / "tasks.yaml", prompt="Follow the runbook.")
@@ -265,7 +281,7 @@ async def test_run_loop_prints_prompt_to_stdout(
 
 
 async def test_run_loop_empty_task_list(record: Path, tmp_path: Path) -> None:
-    await run_loop(TaskList(tasks=[]), tmp_path / "tasks.yaml")
+    await run_loop(TaskList(shared=SHARED, tasks=[]), tmp_path / "tasks.yaml")
 
     assert fake_claude_records(record) == []
 
@@ -275,10 +291,11 @@ async def test_run_loop_skips_completed_tasks(
 ) -> None:
     tasks_file = tmp_path / "tasks.yaml"
     task_list = TaskList(
+        shared=SHARED,
         tasks=[
             Task(id=1, name="First", prompt="p1", state=COMPLETED),
             Task(id=2, name="Second", prompt="p2", state=PENDING),
-        ]
+        ],
     )
 
     await run_loop(task_list, tasks_file)
@@ -304,7 +321,9 @@ async def test_run_task_plain_argv_is_print_then_session_args(
         "--settings",
         '{"sandbox":{"enabled":true}}',
     ]
-    task_list = TaskList(tasks=[Task(id=1, name="First", prompt="Do the first thing.")])
+    task_list = TaskList(
+        shared=SHARED, tasks=[Task(id=1, name="First", prompt="Do the first thing.")]
+    )
 
     await run_loop(task_list, tmp_path / "tasks.yaml", session_args=session_args)
 
@@ -384,7 +403,7 @@ async def test_run_loop_result_line_outcomes(
     if output is not None:
         monkeypatch.setenv("FAKECLAUDE_OUTPUT", output)
 
-    task_list = TaskList(tasks=[Task(id=1, name="Only", prompt="p")])
+    task_list = TaskList(shared=SHARED, tasks=[Task(id=1, name="Only", prompt="p")])
 
     if want_state == COMPLETED:
         await run_loop(task_list, tasks_file)
@@ -406,7 +425,9 @@ async def test_run_loop_non_zero_exit_uses_json_error_not_exit_status(
     tasks_file = tmp_path / "tasks.yaml"
     monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "5")
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"boom"}\n')
-    task_list = TaskList(tasks=[Task(id=1, name="First task", prompt="p")])
+    task_list = TaskList(
+        shared=SHARED, tasks=[Task(id=1, name="First task", prompt="p")]
+    )
 
     with pytest.raises(RunError) as caught:
         await run_loop(task_list, tasks_file)
@@ -421,9 +442,10 @@ async def test_run_loop_clears_stale_error_when_task_completes(
 ) -> None:
     tasks_file = tmp_path / "tasks.yaml"
     task_list = TaskList(
+        shared=SHARED,
         tasks=[
             Task(id=1, name="Only", prompt="p", state=PENDING, error="exit status 1")
-        ]
+        ],
     )
 
     await run_loop(task_list, tasks_file)
@@ -443,10 +465,11 @@ async def test_run_loop_result_line_failure_stops_later_tasks(
         "FAKECLAUDE_OUTPUT", '{"state":"failed","error":"tests failed"}\n'
     )
     task_list = TaskList(
+        shared=SHARED,
         tasks=[
             Task(id=1, name="First", prompt="p1"),
             Task(id=2, name="Second", prompt="p2"),
-        ]
+        ],
     )
 
     with pytest.raises(RunError, match="tests failed"):
@@ -554,7 +577,7 @@ async def test_plain_session_survives_output_that_is_not_utf8(
         '#!/bin/sh\ncat >/dev/null\nprintf \'\\377\\376 binary\\n{"state":"completed","error":""}\\n\'\n'
     )
     tasks_file = tmp_path / "tasks.yaml"
-    task_list = TaskList(tasks=[Task(id=1, name="a", prompt="p")])
+    task_list = TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")])
     tasks.save_tasks(str(tasks_file), task_list)
 
     await run_loop(task_list, tasks_file, prompt="shared", session_args=[])
