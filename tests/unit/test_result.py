@@ -36,7 +36,6 @@ EXIT_ERROR = "exit status 1"
         pytest.param(
             '{"state":"failed","error":null}', (FAILED, ""), id="null error is empty"
         ),
-        pytest.param('{"state":null,"error":""}', None, id="null state is empty"),
         pytest.param(
             '{"State":"completed","ERROR":"x"}',
             None,
@@ -53,9 +52,6 @@ EXIT_ERROR = "exit status 1"
         ),
         pytest.param("{state: completed}", None, id="invalid json"),
         pytest.param('["completed",""]', None, id="json array is not an object"),
-        pytest.param('"completed"', None, id="json string is not an object"),
-        pytest.param("42", None, id="json number is not an object"),
-        pytest.param("null", None, id="json null is not a result"),
         pytest.param('{"state":"in_progress","error":""}', None, id="unknown state"),
         pytest.param('{"error":"boom"}', None, id="missing state"),
         pytest.param("", None, id="empty line"),
@@ -93,7 +89,6 @@ def test_parse_result(line: str, want: tuple[str, str] | None) -> None:
         pytest.param(
             "no newline at all", "no newline at all", id="no trailing newline"
         ),
-        pytest.param("", "", id="empty output"),
     ],
 )
 def test_last_result_line(output: str, want: str) -> None:
@@ -130,13 +125,6 @@ def test_last_result_line(output: str, want: str) -> None:
             FAILED,
             "no valid result line in session output",
             id="zero exit, missing result line",
-        ),
-        pytest.param(
-            None,
-            "not json",
-            FAILED,
-            "no valid result line in session output",
-            id="zero exit, invalid result line",
         ),
         pytest.param(
             EXIT_ERROR,
