@@ -1,10 +1,12 @@
+---
+version: 2
+date: 2026-10-06
+notes: "Follows gralph v0.12.0. Adds ADR-008 (shared prompt and gates in the task file), ADR-009 (the run folder's `sandbox.json`), and ADR-010 (unit tests and container e2e tests); the inherited table and ADR-001 and ADR-006 follow. Moved to docs/design with frontmatter versioning."
+---
+
 # alr — Architectural Decisions
 
-> **Version**: v01
-> **Date**: 2026-10-04
-> **Notes**: Initial version. Decisions for porting gralph's engine to Python.
-
-[Back to Overview](00_overview_v01.md) | [Back to Project README](../../README.md)
+[Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
 ## Table of Contents
 
@@ -34,33 +36,38 @@ Each architectural decision is recorded as an ADR with the following structure:
 | 005   | PyYAML nodes and hand-written validation, no pydantic  | Accepted | 2026-10-04 |
 | 006   | Port the tests first, with a fake claude on PATH       | Accepted | 2026-10-04 |
 | 007   | Compatible in use, Python-native inside                | Accepted | 2026-10-04 |
+| 008   | The shared prompt and gates live in the task file      | Accepted | 2026-10-06 |
+| 009   | The run folder's sandbox.json answers the permission choice | Accepted | 2026-10-06 |
+| 010   | Unit tests under `make test`, e2e tests in a container | Accepted | 2026-10-06 |
 
 ## Inherited Decisions
 
-These gralph decisions apply to `alr` unchanged. Their full text is in gralph's `docs/architecture/02_architectural_decisions.md` at commit `170dc6f`.
+These gralph decisions apply to `alr` unchanged. Their full text is in gralph's `docs/design/02_architectural_decisions.md` at v0.12.0. Where a later gralph ADR amends one of them, the last column says which `alr` ADR carries the change.
 
-| gralph ADR | Title                                                          |
-| ---------- | -------------------------------------------------------------- |
-| ADR-001    | Claude Code only, no agent abstraction                         |
-| ADR-002    | YAML task file + shared prompt, strict parsing                 |
-| ADR-003    | One fresh session per task, no retry                           |
-| ADR-004    | The runner owns task state, atomic writes                      |
-| ADR-005    | Outcome from JSON result line, not exit code                   |
-| ADR-006    | Failed task blocks run until manual reset                      |
-| ADR-007    | Unix only, process group lifecycle management                  |
-| ADR-013    | The runner runs the gates after a completed session            |
-| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request  |
-| ADR-015    | The runner commits a completed task on request                 |
-| ADR-016    | The runner logs a run on request                               |
-| ADR-019    | One gate list per task file                                    |
+| gralph ADR | Title                                                          | Amended by                |
+| ---------- | -------------------------------------------------------------- | ------------------------- |
+| ADR-001    | Claude Code only, no agent abstraction                         |                           |
+| ADR-002    | YAML task file + shared prompt, strict parsing                 | ADR-008: one file         |
+| ADR-003    | One fresh session per task, no retry                           |                           |
+| ADR-004    | The runner owns task state, atomic writes                      |                           |
+| ADR-005    | Outcome from JSON result line, not exit code                   |                           |
+| ADR-006    | Failed task blocks run until manual reset                      |                           |
+| ADR-007    | Unix only, process group lifecycle management                  |                           |
+| ADR-013    | The runner runs the gates after a completed session            |                           |
+| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request  | ADR-009: found in the run folder |
+| ADR-015    | The runner commits a completed task on request                 |                           |
+| ADR-016    | The runner logs a run on request                               | ADR-008: no `prompt_file` |
+| ADR-019    | One gate list per task file                                    | ADR-008: `shared.gates`   |
+| ADR-020    | The shared prompt and gates live in the task file              | ADR-008 is `alr`'s version |
+| ADR-021    | The run folder's sandbox.json answers the permission choice    | ADR-009 is `alr`'s version |
 
-gralph's ADR-008 (Docker-first CI) is already met by this repository's own build. ADR-009 to ADR-012, ADR-017, and ADR-018 cover the skill, the TUI, releases, and the wizard, and are left to later designs.
+gralph's ADR-008 (Docker-first CI) is already met by this repository's own build. ADR-009 to ADR-012, ADR-017, and ADR-018 cover the skill, the TUI, releases, and the wizard, and are left to later designs. gralph's ADR-022 (no check of the installed skill) supersedes its ADR-010 and needs nothing here: `alr` has no skill check, and the next design's `--install-skill` will not add one. gralph's ADR-018 is partly ported already: `-d` finds `tasks.yaml` (and, by ADR-009, `sandbox.json`); the wizard is left to the next design.
 
 ## Decisions
 
 ### ADR-001: Port gralph to Python, drop-in compatible
 
-**Status:** Accepted; what "drop-in compatible" covers is narrowed by ADR-007
+**Status:** Accepted; what "drop-in compatible" covers is narrowed by ADR-007, and its reference version moves to gralph v0.12.0 under ADR-008 and ADR-009
 
 **Context:**
 
@@ -193,7 +200,7 @@ Parse with PyYAML's node API (`yaml.compose`), validate with hand-written checks
 
 ### ADR-006: Port the tests first, with a fake claude on PATH
 
-**Status:** Accepted
+**Status:** Accepted; its last sentence is amended by ADR-010
 
 **Context:**
 
@@ -255,4 +262,117 @@ The saver keeps two behaviors because they serve `alr`'s own users: multi-line t
 - A gralph task file with an unquoted name such as `yes` or `12:30` needs quotes added before `alr` accepts it
 - Error text can drift from gralph's, so the Go tests are a guide to behavior and no longer an exact oracle for messages
 
-**Next:** [System Architecture](03_system_architecture_v01.md)
+### ADR-008: The shared prompt and gates live in the task file
+
+**Status:** Accepted
+
+**Context:**
+
+The first version of these documents read the shared prompt from a second file, `prompt.md`, passed with `-p`, and kept the gates as a top-level key of the task file. gralph v0.11.0 (its ADR-020) merged them: one `tasks.yaml` holds a required `shared` block with the `prompt` and the optional `gates`, and `-p/--prompt` is gone. The two files always travelled together, the skill wrote both in one pass, and every consumer had to find, load, and report two paths. `alr` follows gralph here because ADR-001 makes gralph the reference. It also settles the "single-file input" step that the overview's roadmap listed for later.
+
+**Decision:**
+
+The task file has two top-level keys, `shared` and `tasks`, and nothing else.
+
+```yaml
+shared:
+  prompt: |
+    You are working on the widget service...
+  gates:
+    - cmd: uv run pytest
+      timeout: 10m
+tasks:
+  - id: 1
+    name: Add the widget repository
+    prompt: |
+      Objective: ...
+```
+
+- **`shared.prompt` is required.** A missing `shared` block, or a prompt that is missing, not a string, empty, or only whitespace, fails parsing. The text is trimmed on load.
+- **`shared.gates` is optional, with ADR-019's rules unchanged.** Absent means not decided, `[]` means no gates, and a save keeps whichever the file had. Error names read `shared.gates[<j>]`.
+- **Unknown keys are errors.** A top-level `gates` key is an error that says gates live under `shared.gates`, as is a task-level `gates`. Any other top-level key, and any `shared` key other than `prompt` and `gates`, is rejected too. Quietly ignoring an old top-level `gates` list would leave a run with no checks.
+- **`-p/--prompt` is removed** with no compatibility path. Passing it is the unknown-flag error.
+- **`-d <folder>` means `<folder>/tasks.yaml`.** The "no prompt.md" error goes. `-t` stays as the override for a folder holding two task files. A dry run needs nothing the real run does not, so the prompt carve-out goes.
+- **The run log drops `prompt_file`** from `run_started`. `tasks_file` stays.
+- **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, the task text, then a newline. Gates and `error` are never sent.
+- **A save keeps `shared`.** `shared` is written above `tasks`, with the prompt intact.
+- **`PromptError` goes** with the file it described. A bad `shared.prompt` is a `TaskFileError`.
+
+Keeping `-p` as an override was rejected: it keeps the two-file code path this removes, and the project is too young to need a compatibility path.
+
+**Consequences:**
+
+*Positive:*
+
+- One file is the whole run: prompt, gates, and tasks
+- One path to name, load, and report; the `-p` flag and the prompt half of the run log go away
+- Room for more shared settings under `shared` without new flags
+
+*Negative:*
+
+- A breaking change for any `tasks.yaml` and `prompt.md` pair from before: they must be merged by hand, and a top-level `gates` moved under `shared`
+- The shared prompt is YAML now: indentation matters, and it loses Markdown editor support
+- A save rewrites the file and does not keep comments or the prompt's own formatting (ADR-005's saver rules)
+
+### ADR-009: The run folder's sandbox.json answers the permission choice
+
+**Status:** Accepted
+
+**Context:**
+
+gralph v0.12.0 (its ADR-021) lets a run folder carry its own sandbox settings, found by a fixed name as `tasks.yaml` is. Without it, a run has to repeat `--sandbox-settings <folder>/sandbox.json` even though the file sits beside the task file. `alr` already has `-d`, so the lookup costs little. The same safety rule as ADR-014 applies: a run never ends up unsandboxed by accident.
+
+**Decision:**
+
+A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`.
+
+- **When it applies.** `-d <folder>` was given, `<folder>/sandbox.json` is a regular file, and neither `--sandbox-settings` nor `--skip-permissions` was passed. A directory of that name is ignored. The path is `<folder>/sandbox.json` as `-d` was given, not made absolute. Only `-d` looks; `-t` alone never does, and `-d` with `-t` still uses the folder's file.
+- **Precedence.** An explicit `--sandbox-settings` wins. An explicit `--skip-permissions` also wins, with no error: it is how a run opts out of a folder's sandbox. The "both flags" error is for the two explicit flags only.
+- **It never leads to an unsandboxed run.** It only supplies the sandboxed choice. With no file, nothing changes: a real run still exits 1 with the neither-flag error. A found file that is unreadable or not a JSON object fails through the existing validation, exit 1, and never falls back to going without a sandbox.
+- **Plain output.** Nothing new is printed. `--dry-run -d <folder>` names and validates the file on its existing `sandbox settings:` line.
+- **Startup order.** The file is resolved with the task file, in the `--dir` step, so every later check sees the final value.
+
+**Consequences:**
+
+*Positive:*
+
+- `alr -d .local/feat --commit` is a whole command for a folder that holds its task file and sandbox settings
+- A command that names the folder reproduces the run
+
+*Negative:*
+
+- A settings file in a run folder is applied without being named on the command line, so it is as trusted as the folder's `tasks.yaml`, which is already code the run executes
+- The only way to run a folder that holds a `sandbox.json` unsandboxed is `--skip-permissions`
+
+### ADR-010: Unit tests under `make test`, e2e tests in a container
+
+**Status:** Accepted
+
+**Context:**
+
+ADR-006 put every test under `make test` and inside the Docker build, with the e2e tests running the installed `alr` command. In practice the e2e tests shared helpers and fixtures with the unit tests, so they could pass against code a user never installs, and they ran against the working tree rather than the built wheel.
+
+**Decision:**
+
+Split the suites so they share nothing.
+
+- `tests/unit/` has its own conftest, helpers, and fake `claude`. `make test` runs the ruff format and lint steps, then `pytest tests/unit`. The Docker build runs the unit tests only.
+- `tests/e2e/` has its own conftest, helpers, requirements, `pytest.ini`, and fake `claude`. It finds `alr` on `PATH` and runs the real command as a subprocess. It never imports from `src/`.
+- The e2e suite runs in a container (`tests/e2e/Dockerfile`, started by `tests/docker-compose.yaml`) against the wheel installed from `dist/`. `make e2e` runs it against the wheel already in `dist/`, and `make build` builds the wheel and then runs it. `build/build.sh` drives both.
+
+This amends ADR-006's last sentence only: the tests are still ported first, the fake `claude` is still driven by `FAKECLAUDE_*` variables, and no test needs a real Claude or the network.
+
+**Consequences:**
+
+*Positive:*
+
+- The e2e tests check what a user installs, not the working tree
+- A helper fixed for one suite cannot quietly make the other pass
+- `make test` is fast, with no Docker needed
+
+*Negative:*
+
+- A little test code is duplicated between the suites: the fake `claude` exists twice
+- The e2e suite needs Docker and a built wheel, so it does not run under plain `make test`
+
+**Next:** [System Architecture](03_system_architecture.md)

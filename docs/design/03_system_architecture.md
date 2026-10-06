@@ -1,10 +1,12 @@
+---
+version: 2
+date: 2026-10-06
+notes: "Follows gralph v0.12.0: the `shared` block replaces the prompt file (ADR-008), the run folder's `sandbox.json` (ADR-009), and the unit and container e2e test layout (ADR-010). Moved to docs/design with frontmatter versioning."
+---
+
 # alr — System Architecture
 
-> **Version**: v01
-> **Date**: 2026-10-04
-> **Notes**: Initial version. Architecture for the Python port of gralph's engine.
-
-[Back to Overview](00_overview_v01.md) | [Back to Project README](../../README.md)
+[Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
 ## Table of Contents
 
@@ -52,17 +54,17 @@ In this design `alr.cli` always picks the plain front end. The stream front end 
 ```
 src/alr/
   main.py          entry point: runs cli, sets the exit code
-  cli.py           flags, startup checks in gralph's order, routing
+  cli.py           flags, startup checks in gralph's order, routing, the run folder lookup
   errors.py        AlrError and its subclasses
   durations.py     parse and format durations such as 90s and 1m30.5s
-  tasks.py         task file: parse, validate, atomic save, timeout parsing
+  tasks.py         task file: the shared block and tasks, parse, validate, atomic save, timeout parsing
   engine/
     frontend.py    the FrontEnd interface
-    loop.py        load prompt and tasks, the run loop, save after each task
+    loop.py        load the task file, the run loop, save after each task
     result.py      last-line JSON result and the outcome rule
     gates.py       gate order, effective timeout, first failure fails the task
     commit.py      repository checks, add -A, the commit rule
-    sandbox.py     session flags from sandbox settings or skip-permissions
+    sandbox.py     the run folder's sandbox.json, session flags from sandbox settings or skip-permissions
     proc.py        process groups, kill on cancel, git's gentle stop
   plain/
     frontend.py    echo the prompt, tee Claude's stdout, pass output through,
@@ -76,9 +78,10 @@ src/alr/
     events.py      the event types
     runlog.py      the --log-dir writer: run.jsonl and task-<id>.log
 tests/
-  unit/            one test file per module
-  e2e/             black-box tests that run the alr command
-  fakeclaude/      the scriptable stand-in for claude
+  unit/            one test file per module, with its own conftest, helpers, and fakeclaude/
+  e2e/             black-box tests that run the installed alr command in a container, with
+                   their own conftest, helpers, requirements, Dockerfile, and fake claude
+  docker-compose.yaml  starts the e2e container
 ```
 
 How gralph's packages map onto this:
@@ -100,8 +103,8 @@ How gralph's packages map onto this:
 
 **Responsibilities:**
 
-- Parse the flags listed in [Requirements](01_requirements_v01.md#command-line) with `argparse`, prefix abbreviation off
-- Run the startup checks in gralph's order: resolve `--dir`, check `--gate-timeout`, pick the front end, check plain mode's required flags, check `--log-dir`, build the session flags
+- Parse the flags listed in [Requirements](01_requirements.md#command-line) with `argparse`, prefix abbreviation off
+- Run the startup checks in gralph's order: resolve `--dir` (the task file and the folder's `sandbox.json`), check `--gate-timeout`, pick the front end, check plain mode's required flags, check `--log-dir`, build the session flags
 - Route to the dry run or the real run with the plain front end
 - Install the SIGINT and SIGTERM handlers that cancel the run
 - Catch `AlrError` in one place: print `error: <message>` to stderr and exit 1
@@ -120,12 +123,14 @@ How gralph's packages map onto this:
 **Responsibilities:**
 
 - Compose the file into YAML nodes with PyYAML's standard safe loader and reject any tag outside the core set, including `<<` merge keys, before reading values
-- Validate the optional top-level `gates` list and every task with gralph's field rules and errors shaped as (`tasks[<index>] (id <id>): <field>: <problem>`, `gates[<j>]: <field>: <problem>`)
-- Keep the difference between an absent `gates` key (not decided) and `gates: []` (decided: none)
+- Validate the `shared` block (a required `prompt`, optional `gates`) and every task with gralph's field rules and errors shaped as (`tasks[<index>] (id <id>): <field>: <problem>`, `shared.prompt: <problem>`, `shared.gates[<j>]: <field>: <problem>`)
+- Reject a top-level `gates` key, any other unknown top-level key, and any `shared` key other than `prompt` and `gates`; the `gates` message says where gates live now
+- Keep the difference between an absent `shared.gates` key (not decided) and `shared.gates: []` (decided: none)
+- Trim `shared.prompt` on load
 - Normalize an empty `state` to `pending`; never alter `name` or `prompt`
 - Produce the task text sent to Claude: `<id>: <name>`, a blank line, then the prompt, trimmed
 - Parse durations (`90s`, `10m`, `1h30m`) for gate timeouts and `--gate-timeout`
-- Save atomically: write a temp file, then rename over the original; 2-space indent, `gates` above `tasks`
+- Save atomically: write a temp file, then rename over the original; 2-space indent, `shared` above `tasks`
 
 **Key Characteristics:**
 
@@ -135,22 +140,24 @@ How gralph's packages map onto this:
 | Validation model | Strict: one invalid element rejects the file   |
 | Comments         | Not preserved on save                          |
 | Unknown task key | Ignored and dropped on save, except `gates`    |
+| Unknown root key | An error, so a typo or a leftover cannot hide  |
 
 ### Engine (alr.engine)
 
 **Responsibilities:**
 
-- Load the prompt (must exist and be non-empty after trimming) and the task file
+- Load the task file; the shared prompt is `shared.prompt`, already trimmed and known to be non-empty
 - Refuse to run when any task is `failed`
 - Walk pending tasks in file order; skip `completed` tasks
-- Build the stdin text: the prompt, a blank line, the task text, a newline
+- Build the stdin text: `shared.prompt`, a blank line, the task text, a newline
 - Build the Claude argv: `claude --print`, then the front end's extra flags, then the session flags
 - Ask the front end to run the session, then apply the outcome rule: `completed` only on a zero exit and a last non-blank, non-fence line that is JSON with `"state": "completed"`
-- After a completed session, run the file's gates in order, each as `sh -c <cmd>` with no stdin and a time limit (`--gate-timeout`, else the gate's `timeout`, else 10 minutes); stop at the first failure
+- After a completed session, run the file's `shared.gates` in order, each as `sh -c <cmd>` with no stdin and a time limit (`--gate-timeout`, else the gate's `timeout`, else 10 minutes); stop at the first failure
 - With `--commit`, after the gates pass: `git add -A`, then `git commit -m <task name>` when anything is staged
 - Save the task file after every task; stop the run at the first failed task
 - Measure the duration of each session, gate, task, and the run
 - On cancellation, kill the running process group and change nothing; git gets SIGTERM, up to 2 seconds, then SIGKILL
+- Find the run folder's settings file: `<folder>/sandbox.json` when it is a regular file, so `--dir` can supply `--sandbox-settings` (ADR-009)
 - Build the session flags: for `--sandbox-settings`, merge the file with the three forced sandbox keys and return `--permission-mode acceptEdits --settings <merged JSON>`; for `--skip-permissions`, return `--dangerously-skip-permissions`
 - Check the repository for `--commit`: clean work tree, task file ignored or outside the repository
 
@@ -171,7 +178,7 @@ How gralph's packages map onto this:
 - Before each gate, print `gate: <cmd>`; let the gate's output pass straight through
 - Once something is staged, print `commit: <first line of name>`; let git's output pass straight through
 - Print the failed-task notice and task table when the file already holds a failed task
-- Dry run: print the task table, each gate with its effective limit and where the limit came from, the sandbox settings path, and the commit notice; never start Claude or write a file
+- Dry run: print the task table, each `shared.gates` entry with its effective limit and where the limit came from, the sandbox settings path (from a flag or the run folder), and the commit notice; never start Claude or write a file
 
 **Key Characteristics:**
 
@@ -234,11 +241,11 @@ sequenceDiagram
     participant Claude as claude
     participant FS as Filesystem
 
-    User->>CLI: alr -p prompt.md -t tasks.yaml --sandbox-settings sandbox.json
+    User->>CLI: alr -t tasks.yaml --sandbox-settings sandbox.json
     CLI->>Engine: build session flags
-    CLI->>Engine: run(prompt path, tasks path, options, plain front end)
-    Engine->>FS: read prompt.md and tasks.yaml
-    Engine->>Tasks: parse and validate
+    CLI->>Engine: run(tasks path, options, plain front end)
+    Engine->>FS: read tasks.yaml
+    Engine->>Tasks: parse and validate (shared, tasks)
     loop each pending task, in file order
         Engine->>Plain: run session (argv, stdin text)
         Plain->>Claude: start in its own process group
@@ -262,12 +269,12 @@ sequenceDiagram
 
 ### Startup Order
 
-1. Resolve `--dir`: fill an unset `--tasks` with `<folder>/tasks.yaml` and, unless `--dry-run`, an unset `--prompt` with `<folder>/prompt.md`
+1. Resolve `--dir`: fill an unset `--tasks` with `<folder>/tasks.yaml`, then fill an unset `--sandbox-settings` with `<folder>/sandbox.json` when that is a regular file and `--skip-permissions` was not passed. A folder with no `tasks.yaml` and no `--tasks` exits 1
 2. Check `--gate-timeout` if passed
 3. Pick the front end (always plain in this design)
-4. Check plain mode's required flags
+4. Check plain mode's required flag, `--tasks`
 5. Check `--log-dir`: on a real run, exit 1 with `--log-dir only works with the full-screen view`; ignored on `--dry-run`
-6. Build the session flags: exactly one of `--sandbox-settings` or `--skip-permissions` on a real run; a dry run needs neither but still checks a settings file it is given
+6. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or `--skip-permissions` on a real run; a dry run needs neither but still checks a settings file it is given
 7. Dry run or real run
 
 ### Stopping
@@ -285,8 +292,7 @@ Two kinds of failure are kept apart.
 | Error                 | Raised when                                                              |
 | --------------------- | ------------------------------------------------------------------------ |
 | `UsageError`          | A flag is missing, conflicts with another, or has a bad value            |
-| `TaskFileError`       | The task file cannot be read, parsed, validated, or saved                |
-| `PromptError`         | The prompt file is missing, unreadable, or empty                         |
+| `TaskFileError`       | The task file cannot be read, parsed, validated (including `shared.prompt`), or saved |
 | `FailedTasksError`    | The task file already holds a failed task                                |
 | `SandboxError`        | The sandbox settings file is missing, unreadable, or not a JSON object   |
 | `RepoError`           | `--commit` finds a dirty work tree, a tracked task file, or a broken git |
@@ -300,17 +306,17 @@ A failed task is saved as an outcome first. The engine then raises `RunError` so
 
 ## Testing
 
-Tests are ported from gralph before the code they cover is written.
+Tests are ported from gralph before the code they cover is written. There are two suites that share nothing (ADR-010).
 
 | Layer            | Covers                                                                                                                                              | Ported from                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Unit             | Task validation tables, the result rule, stream-json parsing, the sandbox merge, gate limits, commit rules against real git, run log output         | `task_test.go`, `internal/looper/*_test.go`, `runlog_test.go`     |
-| Fake `claude`    | A Python script placed first on `PATH`, driven by the same `FAKECLAUDE_*` variables: records argv and stdin, sets output and exit code, can block   | `testdata/fakeclaude/main.go`                                     |
-| End to end       | Runs the real `alr` command as a subprocess: the loop, results, gates, commit, `--dir`, dry-run, `--no-tui`, `--log-dir`, sandbox, SIGINT, SIGTERM  | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check  |
+| Fake `claude`    | A Python script placed first on `PATH`, driven by the same `FAKECLAUDE_*` variables: records argv and stdin, sets output and exit code, can block; one copy per suite | `testdata/fakeclaude/main.go`                         |
+| End to end       | Runs the installed `alr` command as a subprocess, in a container: the loop, results, gates, commit, `--dir`, dry-run, `--no-tui`, `--log-dir`, sandbox, SIGINT, SIGTERM  | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check  |
 | Golden           | The exact stdin text sent to Claude                                                                                                                 | gralph's golden assertions                                        |
 | Import boundary  | `engine` imports neither front end; the front ends do not import each other                                                                         | New                                                               |
 
-`make test` runs the ruff format check, ruff lint, and pytest. The Docker build and CI run the same steps. No real Claude and no network are needed.
+`make test` runs ruff format and lint, then the unit tests (`pytest tests/unit`). The Docker build runs the unit tests only. The e2e suite runs in a container against the wheel in `dist/`: `make e2e` runs it against the wheel already built, and `make build` builds the wheel first. The e2e suite finds `alr` on `PATH` and never imports from `src/`. No real Claude and no network are needed.
 
 ## Component Interactions
 
@@ -335,7 +341,6 @@ The trust and process boundaries are gralph's, unchanged.
 graph LR
     subgraph TrustZone["Trust Zone: the alr user"]
         ALR["alr process"]
-        PromptFile["prompt.md"]
         TaskFile["tasks.yaml"]
         SettingsFile["sandbox settings file"]
         Git["git repository (with hooks)"]
@@ -343,7 +348,6 @@ graph LR
     subgraph External["Untrusted External"]
         Claude["claude --print"]
     end
-    ALR -->|reads| PromptFile
     ALR -->|reads and writes| TaskFile
     ALR -->|reads once| SettingsFile
     ALR -->|runs| Claude
@@ -355,8 +359,8 @@ graph LR
 
 | Boundary                    | What Crosses                    | Rules                                                                                                                             |
 | --------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| alr reads the filesystem    | Prompt and task files           | Treated as code the user chose to run; not sanitized                                                                              |
-| alr reads the filesystem    | Sandbox settings file           | Read once, never written; must be a JSON object; three sandbox keys forced, the rest passed through                               |
+| alr reads the filesystem    | Task file                       | Treated as code the user chose to run (its prompts go to Claude, its `shared.gates` to `sh -c`); not sanitized                    |
+| alr reads the filesystem    | Sandbox settings file           | Read once, never written; must be a JSON object; three sandbox keys forced, the rest passed through. May come from the `--dir` folder's `sandbox.json`, which is as trusted as that folder's `tasks.yaml`                               |
 | alr writes the filesystem   | Task state                      | Atomic: temp file, then rename                                                                                                    |
 | alr writes the filesystem   | Run log                         | Only with `--log-dir`, only on the stream path; a new folder per run                                                              |
 | alr starts Claude           | Combined prompt on stdin        | Fixed argv: `--print`, the front end's flags, the session flags                                                                   |

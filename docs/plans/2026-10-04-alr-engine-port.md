@@ -8,9 +8,11 @@
 
 **Tech Stack:** Python 3.12+, `asyncio`, `argparse`, PyYAML, pytest, pytest-asyncio, ruff, uv.
 
-**Spec:** `docs/architecture/00_overview_v01.md`, `01_requirements_v01.md`, `02_architectural_decisions_v01.md`, `03_system_architecture_v01.md`
+**Spec:** `docs/design/00_overview.md`, `01_requirements.md`, `02_architectural_decisions.md`, `03_system_architecture.md`. Each file carries its version in its frontmatter.
 
-**Reference source:** `/home/jeremy/dev/gralph` at commit `170dc6f` (read-only). Paths below that start with `gralph:` are relative to that folder.
+**Follows gralph v0.12.0 (2026-10-06):** the spec now matches v0.12.0, not `170dc6f`. The shared prompt lives in the task file (`shared.prompt`, ADR-008), `-p/--prompt` and `prompt.md` are gone, `-d` also finds `sandbox.json` (ADR-009), and the unit and e2e suites are split (ADR-010). The text of Tasks 1-9, 12, and 13 below is historical where it still names the prompt file or `-p`; the `.local/sync/` loop brings the code and tests in line.
+
+**Reference source:** `/home/jeremy/dev/gralph` at tag `v0.12.0` (read-only; `170dc6f` for the history below). Paths below that start with `gralph:` are relative to that folder.
 
 ## Global Constraints
 
@@ -25,7 +27,7 @@
 - Code shape: return early, no deep nesting, a blank line after every `if` block, one job per function, comments say why.
 - No inline lint or security suppressions (`# noqa`, `# nosec`).
 - Never modify anything under `/home/jeremy/dev/gralph`.
-- Gate for every task: `make test` passes (ruff format, ruff lint, pytest).
+- Gate for every task: `make test` passes (ruff format, ruff lint, unit tests). The e2e suite runs in a container with `make build` (ADR-010).
 - End every commit message with the trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Never push.
 
 ## Porting Rules
@@ -1127,7 +1129,7 @@ Add `from alr.gocompat import exit_error` to the imports. Then add:
 
 - [ ] **Step 6: Write `src/alr/engine/frontend.py`**
 
-Write the `SessionResult` dataclass and the `FrontEnd` protocol exactly as listed in Shared Interfaces, each method with a one-line docstring taken from the "Engine asks the front end to" column of the table in `docs/architecture/03_system_architecture_v01.md`. `task_skipped` is the one call not in that table: "Note that a task was already completed and is not run."
+Write the `SessionResult` dataclass and the `FrontEnd` protocol exactly as listed in Shared Interfaces, each method with a one-line docstring taken from the "Engine asks the front end to" column of the table in `docs/design/03_system_architecture.md`. `task_skipped` is the one call not in that table: "Note that a task was already completed and is not run."
 
 - [ ] **Step 7: Run the tests to see them pass**
 
@@ -2112,7 +2114,7 @@ git commit -m "Port the end-to-end suite from gralph and pin the import boundari
 Use the `/readme-writer` skill. The README must say, in the owner's casual voice:
 
 - What alr is now: the Python port of gralph, drop-in compatible, on its way to becoming an agent. Replace the "Why this when you have gralph?" section; the learning-project framing no longer applies.
-- Usage, with the full flag table from `docs/architecture/01_requirements_v01.md`, and these examples:
+- Usage, with the full flag table from `docs/design/01_requirements.md`, and these examples:
 
 ```sh
 alr -t tasks.yaml --dry-run
@@ -2122,7 +2124,7 @@ alr -d path/to/folder --skip-permissions --commit
 
 - How a run works: one fresh `claude --print` session per task, the JSON result line, gates, `--commit`, a failed task stops the run.
 - Key considerations: needs the `claude` CLI on `PATH`; every real run needs `--sandbox-settings` or `--skip-permissions`; gates and commits run unsandboxed; no retries; Linux and macOS only; no full-screen view yet, so `--log-dir` is not usable yet.
-- Development: `uv sync`, `make test`, `make build`; a link to `docs/architecture/00_overview_v01.md`.
+- Development: `uv sync`, `make test`, `make build`; a link to `docs/design/00_overview.md`.
 - Remove the dated "Current state" paragraph and the link to `docs/requirements/01_requirements_v01.md`.
 
 - [ ] **Step 2: Update `CHANGELOG.md`**
@@ -2134,7 +2136,7 @@ Under `## [Unreleased]`, add:
 
 - alr is now a Python port of gralph's engine and is drop-in compatible with
   it: same flags, task file, result line, gates, commits, and sandbox
-  behavior. See `docs/architecture/`.
+  behavior. See `docs/design/`.
 - Task states are `pending`, `completed`, and `failed`. `abandoned` is gone.
 - `-d` now means `--dir`. `--dry-run` has no short form.
 
