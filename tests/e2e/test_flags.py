@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from e2e_helpers import (
     TWO_TASKS_YAML,
     Result,

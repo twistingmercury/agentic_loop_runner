@@ -27,4 +27,4 @@ testpaths = ["tests/unit"]
 extend-exclude = ["docs"]
 
 [tool.ruff.lint]
-select = ["N"]
+select = ["F", "N"]
