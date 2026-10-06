@@ -161,7 +161,7 @@ def test_parse_tasks_empty_state_defaults_to_pending(text: str) -> None:
 
 
 def test_parse_tasks_trims_the_shared_prompt() -> None:
-    # The shared prompt is sent to Claude as the prompt file was, trimmed.
+    # The shared prompt is sent to Claude trimmed, so stray blank lines must not reach it.
     got = tasks.parse_tasks(
         "shared:\n  prompt: |\n\n    Be careful.\n\n"
         "tasks:\n  - {id: 1, name: a, prompt: p}\n"

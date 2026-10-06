@@ -78,7 +78,7 @@ def _parser() -> argparse.ArgumentParser:
         "-d",
         "--dir",
         default="",
-        help="Run folder holding tasks.yaml; --tasks overrides its file",
+        help="Run folder holding tasks.yaml (and optionally sandbox.json); --tasks and --sandbox-settings override",
     )
     parser.add_argument(
         "-t",

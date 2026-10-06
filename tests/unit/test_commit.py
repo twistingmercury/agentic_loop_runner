@@ -114,7 +114,7 @@ async def test_open_repo_dirty_tree_is_refused(
 
 
 async def test_open_repo_ignored_files_are_clean(git_repo: Path) -> None:
-    write_nested_file(git_repo / "run" / "prompt.md", "prompt\n")
+    write_nested_file(git_repo / "run" / "notes.md", "notes\n")
     tasks_file = write_nested_file(_task_file(git_repo), "tasks: []\n")
 
     assert await open_repo(str(tasks_file)) is not None
