@@ -13,6 +13,15 @@ def bypass_args() -> list[str]:
     return ["--dangerously-skip-permissions"]
 
 
+def folder_sandbox(dir: str) -> str | None:
+    """Return the run folder's sandbox.json as dir was given, or None when it has none.
+
+    A directory of that name does not count.
+    """
+    path = Path(dir) / "sandbox.json"
+    return str(path) if path.is_file() else None
+
+
 def sandbox_args(path: str) -> list[str]:
     """Return the flags for a sandboxed session, from the Claude Code settings file at path.
 

@@ -376,3 +376,131 @@ def test_a_second_signal_does_not_leave_git_running(
     assert process.returncode == 1
     assert err == "error: loop error: task 1: a: stopped during commit\n"
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
+
+
+@pytest.fixture
+def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Capture the session flags a real run starts with, without running it."""
+    seen: list[list[str]] = []
+
+    async def fake_start(
+        tasks_file: str, gate_timeout: str, session: list[str], commit: bool
+    ) -> None:
+        seen.append(session)
+
+    monkeypatch.setattr(cli, "start", fake_start)
+    return seen
+
+
+def _add_sandbox(folder: Path, content: str = "{}") -> Path:
+    path = folder / "sandbox.json"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_the_folders_sandbox_json_sandboxes_the_run(
+    folder: Path, sessions: list[list[str]]
+) -> None:
+    _add_sandbox(folder)
+
+    assert cli.main(["-d", str(folder)]) == 0
+    assert sessions == [SANDBOXED]
+
+
+def test_the_folders_sandbox_json_still_applies_with_tasks(
+    folder: Path, sessions: list[list[str]]
+) -> None:
+    _add_sandbox(folder)
+    tasks = folder / "tasks.yaml"
+
+    assert cli.main(["-d", str(folder), "-t", str(tasks)]) == 0
+    assert sessions == [SANDBOXED]
+
+
+def test_sandbox_settings_flag_wins_over_the_folder(
+    folder: Path, tmp_path: Path, sessions: list[list[str]]
+) -> None:
+    _add_sandbox(folder, '{"permissions": {"deny": ["WebFetch"]}}')
+    other = tmp_path / "other.json"
+    other.write_text("{}", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--sandbox-settings", str(other)]) == 0
+    assert sessions == [SANDBOXED]
+
+
+def test_skip_permissions_opts_out_of_the_folders_sandbox(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _add_sandbox(folder)
+
+    assert cli.main(["-d", str(folder), "--skip-permissions"]) == 0
+    assert sessions == [["--dangerously-skip-permissions"]]
+    assert capsys.readouterr().err == ""
+
+
+def test_both_flags_are_still_refused_with_a_folder_file(
+    folder: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _add_sandbox(folder)
+
+    code = cli.main(
+        ["-d", str(folder), "--sandbox-settings", "s.json", "--skip-permissions"]
+    )
+
+    assert code == 1
+    assert capsys.readouterr().err == f"error: {BOTH_PERMISSIONS}\n"
+
+
+@pytest.mark.parametrize("content", ["[]", "{not json"])
+def test_a_bad_folder_file_fails_and_never_runs_unsandboxed(
+    content: str,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _add_sandbox(folder, content)
+
+    assert cli.main(["-d", str(folder)]) == 1
+    assert sessions == []
+    assert "error: --sandbox-settings: must be a JSON object" in capsys.readouterr().err
+
+
+def test_an_unreadable_folder_file_fails(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _add_sandbox(folder).chmod(0)
+    if os.access(folder / "sandbox.json", os.R_OK):
+        pytest.skip("permissions are not enforced for this user")
+
+    assert cli.main(["-d", str(folder)]) == 1
+    assert sessions == []
+    assert "is not accessible" in capsys.readouterr().err
+
+
+def test_no_folder_file_keeps_the_neither_flag_error(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folder / "sandbox.json").mkdir()
+
+    assert cli.main(["-d", str(folder)]) == 1
+    assert sessions == []
+    assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
+
+
+def test_tasks_alone_ignores_a_neighboring_sandbox_json(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _add_sandbox(folder)
+
+    assert cli.main(["-t", str(folder / "tasks.yaml")]) == 1
+    assert sessions == []
+    assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
+
+
+def test_dry_run_names_the_folders_sandbox_json(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _add_sandbox(folder)
+
+    assert cli.main(["-d", str(folder), "--dry-run"]) == 0
+    assert f"sandbox settings: {folder}/sandbox.json" in capsys.readouterr().out

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import bypass_args, sandbox_args
+from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
 from alr.errors import SandboxError
 
 FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
@@ -150,3 +150,28 @@ def test_sandbox_args_settings_can_always_be_encoded(tmp_path: Path, text: str) 
 
     settings.encode("utf-8")
     assert json.loads(settings)["sandbox"]["note"] == json.loads(f'"{text}"')
+
+
+def test_folder_sandbox_names_the_file_as_dir_was_given(tmp_path: Path) -> None:
+    _write_settings(tmp_path, "{}")
+
+    assert folder_sandbox(str(tmp_path)) == str(tmp_path / "sandbox.json")
+
+
+def test_folder_sandbox_keeps_a_relative_dir_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_settings(tmp_path, "{}")
+    monkeypatch.chdir(tmp_path.parent)
+
+    assert folder_sandbox(tmp_path.name) == f"{tmp_path.name}/sandbox.json"
+
+
+def test_folder_sandbox_without_a_file(tmp_path: Path) -> None:
+    assert folder_sandbox(str(tmp_path)) is None
+
+
+def test_folder_sandbox_ignores_a_directory_of_that_name(tmp_path: Path) -> None:
+    (tmp_path / "sandbox.json").mkdir()
+
+    assert folder_sandbox(str(tmp_path)) is None

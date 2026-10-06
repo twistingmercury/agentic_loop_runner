@@ -9,7 +9,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from alr.engine.sandbox import bypass_args, sandbox_args
+from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
 from alr.errors import AlrError, UsageError
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
@@ -38,6 +38,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 
     try:
         tasks_file = resolve_dir(args.dir, args.tasks)
+        sandbox_settings = resolve_sandbox(
+            args.dir, args.sandbox_settings, args.skip_permissions
+        )
         # An explicitly empty value counts as passed, and is bad.
         if args.gate_timeout is not None:
             check_gate_timeout(args.gate_timeout)
@@ -48,9 +51,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             return 1
 
         check_log_dir(args.log_dir, args.dry_run)
-        session = session_args(
-            args.sandbox_settings, args.skip_permissions, args.dry_run
-        )
+        session = session_args(sandbox_settings, args.skip_permissions, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -58,9 +59,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     gate_timeout = args.gate_timeout or ""
     if args.dry_run:
         return _run(
-            dry_run(
-                sys.stdout, tasks_file, gate_timeout, args.sandbox_settings, args.commit
-            )
+            dry_run(sys.stdout, tasks_file, gate_timeout, sandbox_settings, args.commit)
         )
 
     return _run(start(tasks_file, gate_timeout, session, args.commit))
@@ -139,6 +138,18 @@ def resolve_dir(dir: str, tasks_path: str) -> str:
         raise UsageError(f"--dir: no tasks.yaml in {dir}")
 
     return str(path)
+
+
+def resolve_sandbox(dir: str, sandbox_settings: str, skip: bool) -> str:
+    """Return the sandbox settings path, taking the run folder's sandbox.json when no flag chose.
+
+    The folder only ever supplies the sandboxed choice: either explicit
+    permission flag wins, and --skip-permissions is how a run opts out.
+    """
+    if not dir or sandbox_settings or skip:
+        return sandbox_settings
+
+    return folder_sandbox(dir) or ""
 
 
 def check_gate_timeout(value: str) -> None:
