@@ -137,20 +137,9 @@ async def _drain(
         proc.read_lines(process.stderr, on_stderr),
     ]
     if stdin is not None:
-        readers.append(_feed(process, stdin))
+        if process.stdin is None:
+            raise RuntimeError("the session was started without a stdin pipe")
+
+        readers.append(proc.feed_stdin(process.stdin, stdin))
 
     await asyncio.gather(*readers)
-
-
-async def _feed(process: asyncio.subprocess.Process, data: bytes) -> None:
-    if process.stdin is None:
-        raise RuntimeError("the session was started without a stdin pipe")
-
-    process.stdin.write(data)
-    try:
-        await process.stdin.drain()
-    except (BrokenPipeError, ConnectionResetError):
-        # A session may exit without reading its stdin.
-        pass
-    finally:
-        process.stdin.close()

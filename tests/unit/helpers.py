@@ -19,6 +19,7 @@ import pytest
 from alr import tasks
 from alr.engine import loop
 from alr.engine.commit import Repo
+from alr.engine.frontend import FrontEnd
 from alr.engine.sandbox import bypass_args
 from alr.errors import RunCancelledError
 from alr.plain.frontend import PlainFrontEnd
@@ -78,15 +79,18 @@ async def run_loop(
     gate_timeout: str = "",
     session_args: list[str] | None = None,
     repo: Repo | None = None,
+    front_end: FrontEnd | None = None,
 ) -> None:
-    """Run the loop on task_list with the plain front end."""
+    """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(
         tasks_file=str(tasks_file),
         gate_timeout=gate_timeout,
         session_args=bypass_args() if session_args is None else session_args,
         repo=repo,
     )
-    await loop.run(task_list, options, PlainFrontEnd())
+    await loop.run(
+        task_list, options, PlainFrontEnd() if front_end is None else front_end
+    )
 
 
 async def cancel_run(run: asyncio.Future[None]) -> RunCancelledError:

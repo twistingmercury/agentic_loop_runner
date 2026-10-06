@@ -16,7 +16,6 @@ from helpers import (
 
 from alr import tasks
 from alr.engine import loop
-from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FailedTasksError,
     RunError,
@@ -567,15 +566,6 @@ class _RecordingFrontEnd(PlainFrontEnd):
         self.done.append(error)
 
 
-async def _run_recorded(
-    task_list: TaskList, tasks_file: Path, front_end: _RecordingFrontEnd
-) -> None:
-    options = loop.RunOptions(
-        tasks_file=str(tasks_file), gate_timeout="", session_args=bypass_args()
-    )
-    await loop.run(task_list, options, front_end)
-
-
 async def test_run_done_names_a_crash_and_the_crash_propagates(
     record: Path, tmp_path: Path
 ) -> None:
@@ -583,7 +573,7 @@ async def test_run_done_names_a_crash_and_the_crash_propagates(
     task_list = tasks.parse_tasks(TWO_PENDING_YAML)
 
     with pytest.raises(RuntimeError, match="boom"):
-        await _run_recorded(task_list, tmp_path / "tasks.yaml", front_end)
+        await run_loop(task_list, tmp_path / "tasks.yaml", front_end=front_end)
 
     assert front_end.done == ["RuntimeError: boom"]
 
@@ -595,7 +585,7 @@ async def test_run_done_reports_a_cancellation_with_a_non_empty_error(
     task_list = tasks.parse_tasks(TWO_PENDING_YAML)
 
     with pytest.raises(asyncio.CancelledError):
-        await _run_recorded(task_list, tmp_path / "tasks.yaml", front_end)
+        await run_loop(task_list, tmp_path / "tasks.yaml", front_end=front_end)
 
     assert front_end.done == ["CancelledError"]
 
@@ -605,13 +595,15 @@ async def test_run_done_reports_a_failed_task_and_a_clean_run(
 ) -> None:
     tasks_file = tmp_path / "tasks.yaml"
     clean = _RecordingFrontEnd()
-    await _run_recorded(tasks.parse_tasks(TWO_PENDING_YAML), tasks_file, clean)
+    await run_loop(tasks.parse_tasks(TWO_PENDING_YAML), tasks_file, front_end=clean)
 
     assert clean.done == [None]
 
     monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
     failed = _RecordingFrontEnd()
     with pytest.raises(RunError):
-        await _run_recorded(tasks.parse_tasks(TWO_PENDING_YAML), tasks_file, failed)
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML), tasks_file, front_end=failed
+        )
 
     assert failed.done == ["task 1: First failed: exit status 1"]

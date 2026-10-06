@@ -8,6 +8,7 @@ from helpers import (
     cancel_run,
     fake_claude_records,
     git,
+    run_loop,
     wait_for_text,
     write_file,
 )
@@ -53,15 +54,15 @@ async def _run(
     repo: Repo | None = None,
     events: list[Event] | None = None,
 ) -> list[Event]:
-    """Run the loop with the stream front end and return the events it reported."""
     events = [] if events is None else events
-    options = loop.RunOptions(
-        tasks_file=str(tasks_file),
+    await run_loop(
+        task_list,
+        tasks_file,
         gate_timeout=gate_timeout,
-        session_args=bypass_args() if session_args is None else session_args,
+        session_args=session_args,
         repo=repo,
+        front_end=StreamFrontEnd(events.append),
     )
-    await loop.run(task_list, options, StreamFrontEnd(events.append))
     return events
 
 

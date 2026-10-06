@@ -97,18 +97,9 @@ async def _pump(
     if process.stdin is None or process.stdout is None:
         raise RuntimeError("the session was started without stdin and stdout pipes")
 
-    await asyncio.gather(_feed(process.stdin, stdin), _tee(process.stdout, chunks))
-
-
-async def _feed(writer: asyncio.StreamWriter, data: bytes) -> None:
-    writer.write(data)
-    try:
-        await writer.drain()
-    except (BrokenPipeError, ConnectionResetError):
-        # A session may exit without reading its stdin.
-        pass
-    finally:
-        writer.close()
+    await asyncio.gather(
+        proc.feed_stdin(process.stdin, stdin), _tee(process.stdout, chunks)
+    )
 
 
 async def _tee(reader: asyncio.StreamReader, chunks: list[bytes]) -> None:

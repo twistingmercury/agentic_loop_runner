@@ -211,6 +211,18 @@ async def read_lines(
         on_line(b"".join(pieces))
 
 
+async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:
+    """Write data to a child's stdin, wait for it to drain, and close the pipe."""
+    writer.write(data)
+    try:
+        await writer.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        # A session may exit without reading its stdin.
+        pass
+    finally:
+        writer.close()
+
+
 async def _read_pipes(
     process: asyncio.subprocess.Process, stdout: bytearray, stderr: bytearray
 ) -> None:
