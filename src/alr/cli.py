@@ -65,7 +65,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             )
         )
 
-    return _run(start(prompt_file, tasks_file, gate_timeout, session, args.commit))
+    return _run(start(tasks_file, gate_timeout, session, args.commit))
 
 
 def _parser() -> argparse.ArgumentParser:

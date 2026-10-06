@@ -75,7 +75,6 @@ async def run_loop(
     task_list: TaskList,
     tasks_file: Path,
     *,
-    prompt: str = "prompt",
     gate_timeout: str = "",
     session_args: list[str] | None = None,
     repo: Repo | None = None,
@@ -87,7 +86,7 @@ async def run_loop(
         session_args=bypass_args() if session_args is None else session_args,
         repo=repo,
     )
-    await loop.run(prompt, task_list, options, PlainFrontEnd())
+    await loop.run(task_list, options, PlainFrontEnd())
 
 
 async def cancel_run(run: asyncio.Future[None]) -> RunCancelledError:

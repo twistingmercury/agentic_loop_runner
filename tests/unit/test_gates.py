@@ -167,7 +167,7 @@ async def test_run_loop_gates_never_reach_claude(tmp_path: Path, record: Path) -
         _gated_task(Gate(cmd="true # gate-only-text")), tmp_path / "tasks.yaml"
     )
 
-    assert _stdins(record) == ["prompt\n\n1: First\n\np1\n"], (
+    assert _stdins(record) == ["shared\n\n1: First\n\np1\n"], (
         "the stdin contract must not change when a task has gates"
     )
 

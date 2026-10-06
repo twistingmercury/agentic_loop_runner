@@ -18,12 +18,11 @@ from alr import tasks
 from alr.engine import loop
 from alr.errors import (
     FailedTasksError,
-    PromptError,
     RunError,
     TaskFileError,
     quote,
 )
-from alr.tasks import COMPLETED, FAILED, PENDING, Task, TaskList
+from alr.tasks import COMPLETED, FAILED, PENDING, Shared, Task, TaskList
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -52,44 +51,6 @@ async def _wait_until(condition: Callable[[], bool], what: str) -> None:
             pytest.fail(what)
 
         await asyncio.sleep(0.01)
-
-
-def test_load_prompt_missing_file(tmp_path: Path) -> None:
-    path = str(tmp_path / "missing.md")
-
-    with pytest.raises(PromptError) as caught:
-        loop.load_prompt(path)
-
-    assert (
-        str(caught.value)
-        == f"prompt file {quote(path)} is not accessible: No such file or directory"
-    )
-
-
-def test_load_prompt_read_error(tmp_path: Path) -> None:
-    # A directory exists but cannot be read as a file.
-    with pytest.raises(PromptError, match="not accessible"):
-        loop.load_prompt(str(tmp_path))
-
-
-def test_load_prompt_empty(tmp_path: Path) -> None:
-    path = write_file(tmp_path / "prompt.md", "")
-
-    with pytest.raises(PromptError, match="the prompt file is empty"):
-        loop.load_prompt(path)
-
-
-def test_load_prompt_whitespace_only(tmp_path: Path) -> None:
-    path = write_file(tmp_path / "prompt.md", " \t\n ")
-
-    with pytest.raises(PromptError, match="the prompt file is just whitespace"):
-        loop.load_prompt(path)
-
-
-def test_load_prompt_success(tmp_path: Path) -> None:
-    path = write_file(tmp_path / "prompt.md", "  Follow the plan.  \n")
-
-    assert loop.load_prompt(path) == "Follow the plan."
 
 
 def test_load_tasks_missing_file(tmp_path: Path) -> None:
@@ -169,7 +130,7 @@ async def test_run_loop_happy_path_invokes_in_order_with_exact_stdin(
     tasks_file = tmp_path / "tasks.yaml"
     prompt = "Follow the runbook."
     task_list = TaskList(
-        shared=SHARED,
+        shared=Shared(prompt=prompt),
         tasks=[
             Task(id=1, name="First", prompt="Do the first thing."),
             Task(id=2, name="Second", prompt="Do the second thing."),
@@ -177,7 +138,7 @@ async def test_run_loop_happy_path_invokes_in_order_with_exact_stdin(
         ],
     )
 
-    await run_loop(task_list, tasks_file, prompt=prompt)
+    await run_loop(task_list, tasks_file)
 
     records = fake_claude_records(record)
     assert len(records) == 3
@@ -266,14 +227,14 @@ async def test_run_loop_prints_prompt_to_stdout(
     record: Path, tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     task_list = TaskList(
-        shared=SHARED,
+        shared=Shared(prompt="Follow the runbook."),
         tasks=[
             Task(id=1, name="First", prompt="Do the first thing."),
             Task(id=2, name="Second", prompt="Do the second thing."),
         ],
     )
 
-    await run_loop(task_list, tmp_path / "tasks.yaml", prompt="Follow the runbook.")
+    await run_loop(task_list, tmp_path / "tasks.yaml")
 
     output = capfd.readouterr().out
     for task in task_list.tasks:
@@ -580,7 +541,7 @@ async def test_plain_session_survives_output_that_is_not_utf8(
     task_list = TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")])
     tasks.save_tasks(str(tasks_file), task_list)
 
-    await run_loop(task_list, tasks_file, prompt="shared", session_args=[])
+    await run_loop(task_list, tasks_file, session_args=[])
 
     assert task_list.tasks[0].state == COMPLETED
     assert " binary\n" in capfd.readouterr().out

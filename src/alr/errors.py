@@ -30,10 +30,6 @@ class TaskFileError(AlrError):
     """The task file cannot be read, parsed, validated, or saved."""
 
 
-class PromptError(AlrError):
-    """The prompt file is missing, unreadable, or empty."""
-
-
 class FailedTasksError(AlrError):
     """The task file already holds a failed task."""
 

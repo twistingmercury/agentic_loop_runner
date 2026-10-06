@@ -13,7 +13,6 @@ from alr.engine.result import last_result_line, outcome
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
     FailedTasksError,
-    PromptError,
     RunCancelledError,
     RunError,
     TaskFileError,
@@ -21,12 +20,12 @@ from alr.errors import (
 )
 from alr.tasks import COMPLETED, FAILED, Gate, Task, TaskList, parse_tasks, save_tasks
 
-__all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_prompt", "load_tasks", "run"]
+__all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_tasks", "run"]
 
 
 @dataclass(frozen=True)
 class RunOptions:
-    """What a run needs besides the prompt and the tasks."""
+    """What a run needs besides the tasks."""
 
     tasks_file: str
 
@@ -40,30 +39,11 @@ class RunOptions:
     """Where each completed task is committed; None for a run without --commit."""
 
 
-def load_prompt(path: str) -> str:
-    """Read the shared prompt and return it trimmed."""
-    try:
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        raise PromptError(
-            f"prompt file {quote(path)} is not accessible: {exc.strerror}"
-        ) from exc
-
-    if not text:
-        raise PromptError("the prompt file is empty")
-
-    prompt = text.strip()
-    if not prompt:
-        raise PromptError("the prompt file is just whitespace")
-
-    return prompt
-
-
 def load_tasks(path: str) -> TaskList:
     """Read and validate the task file; a file holding a failed task is refused."""
     try:
-        # Strict, unlike the prompt: the file is saved back, and a replacement
-        # character would overwrite the user's byte on the first save.
+        # Strict: the file is saved back, and a replacement character would
+        # overwrite the user's byte on the first save.
         text = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         raise TaskFileError(
@@ -83,14 +63,12 @@ def load_tasks(path: str) -> TaskList:
     return task_list
 
 
-async def run(
-    prompt: str, task_list: TaskList, options: RunOptions, front_end: FrontEnd
-) -> None:
+async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> None:
     """Run every pending task in file order, saving the file after each one."""
     started = time.monotonic()
     error: str | None = None
     try:
-        await _run_loop(prompt, task_list, options, front_end)
+        await _run_loop(task_list, options, front_end)
     except RunError as exc:
         error = str(exc)
         raise
@@ -99,18 +77,17 @@ async def run(
 
 
 async def _run_loop(
-    prompt: str, task_list: TaskList, options: RunOptions, front_end: FrontEnd
+    task_list: TaskList, options: RunOptions, front_end: FrontEnd
 ) -> None:
     for task in task_list.tasks:
         if task.state == COMPLETED:
             front_end.task_skipped(task)
             continue
 
-        await _run_and_save(prompt, task, task_list, options, front_end)
+        await _run_and_save(task, task_list, options, front_end)
 
 
 async def _run_and_save(
-    prompt: str,
     task: Task,
     task_list: TaskList,
     options: RunOptions,
@@ -120,7 +97,7 @@ async def _run_and_save(
     front_end.task_started(replace(task))
     started = time.monotonic()
     state, error = await _run_task(
-        prompt, task, task_list.gate_list(), options, front_end
+        task, task_list.shared.prompt, task_list.gate_list(), options, front_end
     )
     task.state, task.error = state, error
     failure = (
@@ -133,8 +110,8 @@ async def _run_and_save(
 
 
 async def _run_task(
-    prompt: str,
     task: Task,
+    prompt: str,
     gates: Sequence[Gate],
     options: RunOptions,
     front_end: FrontEnd,
