@@ -1,4 +1,4 @@
-"""--dir: a run folder stands in for --tasks and --prompt."""
+"""--dir: a run folder holding tasks.yaml stands in for --tasks."""
 
 from pathlib import Path
 
@@ -8,15 +8,18 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     task_states,
-    write_prompt,
+    shared_block,
     write_tasks_yaml,
 )
 
-DIR_TASKS_YAML = """tasks:
+DIR_TASKS_YAML = (
+    shared_block("FOLDER PROMPT")
+    + """tasks:
   - id: 1
     name: Folder task
     prompt: Do the folder thing.
 """
+)
 
 
 def run_folder(tmp_path: Path) -> Path:
@@ -25,10 +28,10 @@ def run_folder(tmp_path: Path) -> Path:
     return folder
 
 
-def test_dir_runs_the_folders_files(tmp_path: Path, fake_claude: Path) -> None:
+def test_dir_runs_with_only_tasks_yaml(tmp_path: Path, fake_claude: Path) -> None:
     folder = run_folder(tmp_path)
-    write_prompt(folder, "FOLDER PROMPT\n")
     tasks_path = write_tasks_yaml(folder, DIR_TASKS_YAML)
+    assert [path.name for path in folder.iterdir()] == ["tasks.yaml"]
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
@@ -49,11 +52,11 @@ def test_dir_runs_the_folders_files(tmp_path: Path, fake_claude: Path) -> None:
 
 def test_dir_tasks_flag_wins(tmp_path: Path, fake_claude: Path) -> None:
     folder = run_folder(tmp_path)
-    write_prompt(folder, "FOLDER PROMPT\n")
     folder_tasks = write_tasks_yaml(folder, DIR_TASKS_YAML)
     other_tasks = write_tasks_yaml(
         tmp_path,
-        "tasks:\n  - id: 7\n    name: Other task\n    prompt: Do the other thing.\n",
+        shared_block("FOLDER PROMPT")
+        + "tasks:\n  - id: 7\n    name: Other task\n    prompt: Do the other thing.\n",
     )
     record_file = tmp_path / "record.ndjson"
 
@@ -91,7 +94,7 @@ def test_dir_missing_tasks_file(tmp_path: Path, fake_claude: Path) -> None:
     assert fake_claude_records(record_file) == []
 
 
-def test_dir_dry_run_needs_no_prompt(tmp_path: Path, fake_claude: Path) -> None:
+def test_dir_dry_run(tmp_path: Path, fake_claude: Path) -> None:
     folder = run_folder(tmp_path)
     tasks_path = write_tasks_yaml(folder, DIR_TASKS_YAML)
 

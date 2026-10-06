@@ -11,14 +11,16 @@ import pytest
 from e2e_helpers import (
     assert_no_tmp_file,
     run_args,
+    shared_block,
     start_alr,
     wait_for_file,
     wait_process_gone,
-    write_prompt,
     write_tasks_yaml,
 )
 
-TASKS_YAML = """tasks:
+TASKS_YAML = (
+    shared_block()
+    + """tasks:
   - id: 1
     name: First task
     prompt: Block forever.
@@ -26,6 +28,7 @@ TASKS_YAML = """tasks:
     name: Second task
     prompt: Should never start.
 """
+)
 
 
 @pytest.mark.parametrize(
@@ -35,7 +38,6 @@ def test_loop_signal_kills_process_tree(
     tmp_path: Path, fake_claude: Path, sig: signal.Signals
 ) -> None:
     """Covers gralph's TestLoop_SIGINT_KillsProcessTree and TestLoop_SIGTERM_KillsProcessTree."""
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(tmp_path, TASKS_YAML)
     ready_file = tmp_path / "ready"
     descendant_pid_file = tmp_path / "descendant.pid"
@@ -46,7 +48,7 @@ def test_loop_signal_kills_process_tree(
     }
 
     with stopped_at_exit(
-        start_alr(*run_args(prompt_path, tasks_path), env=env),
+        start_alr(*run_args(tasks_path), env=env),
         ready_file,
         descendant_pid_file,
     ) as process:
@@ -71,7 +73,6 @@ def test_loop_signal_kills_process_tree(
 def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
     tmp_path: Path,
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(tmp_path, TASKS_YAML)
     ready_file = tmp_path / "ready"
     session_pid_file = tmp_path / "session.pid"
@@ -95,7 +96,7 @@ def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
     env = {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
 
     with stopped_at_exit(
-        start_alr(*run_args(prompt_path, tasks_path), env=env),
+        start_alr(*run_args(tasks_path), env=env),
         session_pid_file,
         sleeper_pid_file,
     ) as process:

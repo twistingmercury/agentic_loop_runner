@@ -1,4 +1,4 @@
-"""Gates: commands from the task file's top-level list that alr runs itself after each session."""
+"""Gates: commands from the task file's shared.gates list that alr runs itself after each session."""
 
 import time
 from pathlib import Path
@@ -12,10 +12,10 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     run_args,
+    shared_block,
     run_dry_run,
     task_errors,
     task_states,
-    write_prompt,
     write_tasks_yaml,
 )
 
@@ -38,16 +38,18 @@ NOT_POSITIVE = "--gate-timeout: must be greater than zero"
 def test_gates_passing_gates_complete_the_task(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     marker = tmp_path / "gate-ran"
     tasks_path = write_tasks_yaml(
         tmp_path,
-        f"gates:\n  - cmd: echo gate-output\n  - cmd: touch '{marker}'\n{ONE_TASK}",
+        shared_block(
+            "Body.", [{"cmd": "echo gate-output"}, {"cmd": f"touch '{marker}'"}]
+        )
+        + ONE_TASK,
     )
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
@@ -64,21 +66,24 @@ def test_gates_passing_gates_complete_the_task(
 
     after = read_tasks_yaml(tasks_path)
     assert task_states(after) == {1: "completed"}
-    assert after["gates"] == [{"cmd": "echo gate-output"}, {"cmd": f"touch '{marker}'"}]
+    assert after["shared"]["gates"] == [
+        {"cmd": "echo gate-output"},
+        {"cmd": f"touch '{marker}'"},
+    ]
     assert_no_tmp_file(tasks_path)
 
 
 def test_gates_failing_gate_fails_the_task_and_blocks_the_next_run(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     never = tmp_path / "never"
     tasks_path = write_tasks_yaml(
         tmp_path,
-        f'gates:\n  - cmd: test "a" = "b"\n  - cmd: touch \'{never}\'\n{TWO_TASKS}',
+        shared_block("Body.", [{"cmd": 'test "a" = "b"'}, {"cmd": f"touch '{never}'"}])
+        + TWO_TASKS,
     )
     record_file = tmp_path / "record.ndjson"
-    args = run_args(prompt_path, tasks_path)
+    args = run_args(tasks_path)
     env = {"FAKECLAUDE_RECORD_FILE": str(record_file)}
 
     res = run_alr(*args, env=env)
@@ -106,14 +111,13 @@ def test_gates_failing_gate_fails_the_task_and_blocks_the_next_run(
 def test_gates_skipped_when_the_session_fails(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     marker = tmp_path / "gate-ran"
     tasks_path = write_tasks_yaml(
-        tmp_path, f"gates:\n  - cmd: touch '{marker}'\n{ONE_TASK}"
+        tmp_path, shared_block("Body.", [{"cmd": f"touch '{marker}'"}]) + ONE_TASK
     )
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         env={"FAKECLAUDE_OUTPUT": '{"state":"failed","error":"something broke"}\n'},
     )
 
@@ -125,15 +129,21 @@ def test_gates_skipped_when_the_session_fails(
 
 
 def test_gates_timed_out_gate_fails_the_task(tmp_path: Path, fake_claude: Path) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     never = tmp_path / "never"
     tasks_path = write_tasks_yaml(
         tmp_path,
-        f"gates:\n  - cmd: sleep 30\n    timeout: 200ms\n  - cmd: touch '{never}'\n{ONE_TASK}",
+        shared_block(
+            "Body.",
+            [
+                {"cmd": "sleep 30", "timeout": "200ms"},
+                {"cmd": f"touch '{never}'"},
+            ],
+        )
+        + ONE_TASK,
     )
 
     started = time.monotonic()
-    res = run_alr(*run_args(prompt_path, tasks_path), timeout=20)
+    res = run_alr(*run_args(tasks_path), timeout=20)
 
     gate_err = 'gate "sleep 30" timed out after 200ms'
     assert res.code != 0, res
@@ -145,23 +155,24 @@ def test_gates_timed_out_gate_fails_the_task(tmp_path: Path, fake_claude: Path) 
     after = read_tasks_yaml(tasks_path)
     assert task_states(after)[1] == "failed"
     assert task_errors(after)[1] == gate_err
-    assert after["gates"][0]["timeout"] == "200ms"
+    assert after["shared"]["gates"][0]["timeout"] == "200ms"
     assert_no_tmp_file(tasks_path)
 
 
 def test_gates_gate_timeout_flag_overrides_the_gate_timeout(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(
         tmp_path,
-        f"gates:\n  - cmd: sleep 30\n    timeout: 30s\n  - cmd: echo no-timeout\n{ONE_TASK}",
+        shared_block(
+            "Body.",
+            [{"cmd": "sleep 30", "timeout": "30s"}, {"cmd": "echo no-timeout"}],
+        )
+        + ONE_TASK,
     )
 
     started = time.monotonic()
-    res = run_alr(
-        *run_args(prompt_path, tasks_path), "--gate-timeout", "200ms", timeout=20
-    )
+    res = run_alr(*run_args(tasks_path), "--gate-timeout", "200ms", timeout=20)
 
     gate_err = 'gate "sleep 30" timed out after 200ms'
     assert res.code != 0, res
@@ -171,7 +182,7 @@ def test_gates_gate_timeout_flag_overrides_the_gate_timeout(
     after = read_tasks_yaml(tasks_path)
     assert task_errors(after)[1] == gate_err
     # The flag is never written to the task file.
-    assert after["gates"] == [
+    assert after["shared"]["gates"] == [
         {"cmd": "sleep 30", "timeout": "30s"},
         {"cmd": "echo no-timeout"},
     ]
@@ -195,15 +206,13 @@ def test_gates_gate_timeout_flag_overrides_the_gate_timeout(
 def test_gates_dry_run_lists_effective_timeouts(
     tmp_path: Path, fake_claude: Path, flags: list[str], want: str
 ) -> None:
-    tasks_yaml = """gates:
-  - cmd: go test ./...
-    timeout: 30s
-  - cmd: make lint
-tasks:
-  - id: 1
-    name: First task
-    prompt: p
-"""
+    tasks_yaml = (
+        shared_block(
+            "Body.",
+            [{"cmd": "go test ./...", "timeout": "30s"}, {"cmd": "make lint"}],
+        )
+        + "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+    )
 
     res, tasks_path = run_dry_run(tmp_path, tasks_yaml, *flags)
 
@@ -223,14 +232,13 @@ tasks:
 def test_gates_bad_gate_timeout_flag_runs_nothing(
     tmp_path: Path, fake_claude: Path, value: str, dry_run: bool, want: str
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
-    tasks_yaml = "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+    tasks_yaml = shared_block("Body.") + ONE_TASK
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
     flags = ["--dry-run"] if dry_run else []
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         f"--gate-timeout={value}",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
@@ -251,7 +259,7 @@ def test_gates_bad_gate_timeout_flag_runs_nothing(
     ],
 )
 def test_gates_bad_gate_timeout_flag_is_reported_before_anything_else(arg: str) -> None:
-    """With --prompt and --tasks also missing, only a check that runs first reports the bad value."""
+    """With --tasks also missing, only a check that runs first reports the bad value."""
     res = run_alr(arg)
 
     assert res.code == 1, res
@@ -262,13 +270,12 @@ def test_gates_bad_gate_timeout_flag_is_reported_before_anything_else(arg: str) 
 def test_gates_multi_line_gate_error_names_only_the_first_line(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(
         tmp_path,
-        f"gates:\n  - cmd: |\n      echo first-line\n      exit 3\n{ONE_TASK}",
+        shared_block("Body.", [{"cmd": "echo first-line\nexit 3\n"}]) + ONE_TASK,
     )
 
-    res = run_alr(*run_args(prompt_path, tasks_path))
+    res = run_alr(*run_args(tasks_path))
 
     assert res.code != 0, res
     assert (
@@ -278,13 +285,16 @@ def test_gates_multi_line_gate_error_names_only_the_first_line(
 
 
 def test_gates_task_level_gates_are_rejected(tmp_path: Path, fake_claude: Path) -> None:
-    tasks_yaml = 'tasks:\n  - id: 1\n    name: First task\n    prompt: do it\n    gates:\n      - cmd: "true"\n'
+    tasks_yaml = (
+        shared_block()
+        + 'tasks:\n  - id: 1\n    name: First task\n    prompt: do it\n    gates:\n      - cmd: "true"\n'
+    )
 
     res, _ = run_dry_run(tmp_path, tasks_yaml)
 
     assert res.code == 1, res
     assert (
-        "tasks[0] (id 1): gates: gates are set once for the whole file now, as a top-level gates: list; see the HOWTO"
+        "tasks[0] (id 1): gates: gates are set once for the whole file, as shared.gates; see the HOWTO"
         in res.err
     )
 
@@ -292,15 +302,15 @@ def test_gates_task_level_gates_are_rejected(tmp_path: Path, fake_claude: Path) 
 def test_gates_shared_gates_run_for_every_task(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     marker = tmp_path / "gate-runs"
     tasks_path = write_tasks_yaml(
-        tmp_path, f"gates:\n  - cmd: echo ran >> '{marker}'\n{TWO_TASKS}"
+        tmp_path,
+        shared_block("Body.", [{"cmd": f"echo ran >> '{marker}'"}]) + TWO_TASKS,
     )
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
@@ -317,4 +327,4 @@ def test_gates_shared_gates_run_for_every_task(
 
     after = read_tasks_yaml(tasks_path)
     assert task_states(after) == {1: "completed", 2: "completed"}
-    assert after["gates"] == [{"cmd": f"echo ran >> '{marker}'"}]
+    assert after["shared"]["gates"] == [{"cmd": f"echo ran >> '{marker}'"}]

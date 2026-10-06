@@ -11,14 +11,15 @@ from pathlib import Path
 import pytest
 
 from e2e_helpers import (
+    TWO_TASKS,
     Result,
     fake_claude_records,
     read_tasks_yaml,
     run_alr,
     run_args,
     task_errors,
+    shared_block,
     task_states,
-    write_prompt,
     write_tasks_yaml,
 )
 
@@ -27,30 +28,30 @@ BROKEN_REPO_ERROR = "error: --commit: git rev-parse:"
 
 # The gates are shared by both tasks, so the one gate picks its file by what
 # the first task left behind: each commit then holds exactly one new file.
-TWO_WORK_TASKS = """gates:
-  - cmd: if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi
-tasks:
-  - id: 1
-    name: First task
-    prompt: Do the first thing.
-  - id: 2
-    name: Second task
-    prompt: Do the second thing.
-"""
+TWO_WORK_TASKS = (
+    shared_block(
+        "Body.",
+        [
+            {
+                "cmd": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
+            }
+        ],
+    )
+    + TWO_TASKS
+)
 
 
 @dataclass(frozen=True)
 class CommitRepo:
-    """A git repository whose ignored run/ folder holds the prompt and the task file."""
+    """A git repository whose ignored run/ folder holds the task file."""
 
     dir: Path
-    prompt_path: Path
     tasks_path: Path
     record_file: Path
 
     def run(self, *flags: str) -> Result:
         return run_alr(
-            *run_args(self.prompt_path, self.tasks_path),
+            *run_args(self.tasks_path),
             *flags,
             env={"FAKECLAUDE_RECORD_FILE": str(self.record_file)},
         )
@@ -75,7 +76,6 @@ def new_commit_repo(git_repo: Path, tasks_yaml: str = TWO_WORK_TASKS) -> CommitR
     run = git_repo / "run"
     return CommitRepo(
         dir=git_repo,
-        prompt_path=write_prompt(run, "Body.\n"),
         tasks_path=write_tasks_yaml(run, tasks_yaml),
         record_file=run / "record.ndjson",
     )
@@ -132,7 +132,7 @@ def test_commit_task_file_git_can_see_is_refused(repo: CommitRepo) -> None:
     visible = write_tasks_yaml(repo.dir, TWO_WORK_TASKS)
 
     res = run_alr(
-        *run_args(repo.prompt_path, visible),
+        *run_args(visible),
         "--commit",
         env={"FAKECLAUDE_RECORD_FILE": str(repo.record_file)},
     )
@@ -169,13 +169,14 @@ def test_commit_broken_repository_is_an_error_dry_run(repo: CommitRepo) -> None:
 def test_commit_failed_gate_leaves_no_commit_and_blocks_the_rerun(
     git_repo: Path, fake_claude: Path
 ) -> None:
-    tasks_yaml = """gates:
-  - cmd: echo one > one.txt; exit 1
-tasks:
+    tasks_yaml = (
+        shared_block("Body.", [{"cmd": "echo one > one.txt; exit 1"}])
+        + """tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
 """
+    )
     repo = new_commit_repo(git_repo, tasks_yaml)
 
     res = repo.run("--commit")
@@ -219,11 +220,10 @@ def test_commit_outside_a_repository_runs_without_committing(
 ) -> None:
     folder = tmp_path.resolve() / "plain"
     folder.mkdir()
-    prompt_path = write_prompt(folder, "Body.\n")
     tasks_path = write_tasks_yaml(folder, TWO_WORK_TASKS)
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         "--commit",
         cwd=folder,
         # Stops git from finding a repository above the folder.

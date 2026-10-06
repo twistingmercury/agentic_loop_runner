@@ -16,7 +16,6 @@ from e2e_helpers import (
     run_alr,
     run_dry_run,
     task_states,
-    write_prompt,
     write_tasks_yaml,
 )
 
@@ -33,15 +32,12 @@ class LogDirRun:
 
 def run_with_log_dir(tmp_path: Path, *flags: str, empty: bool = False) -> LogDirRun:
     """Run a one-task file with --log-dir, set to an empty value when asked, plus flags."""
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
     log_dir = tmp_path / "logs"
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
         "--skip-permissions",
-        "-p",
-        str(prompt_path),
         "-t",
         str(tasks_path),
         "--log-dir=" if empty else f"--log-dir={log_dir}",

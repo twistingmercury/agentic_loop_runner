@@ -1,4 +1,7 @@
-"""--sandbox-settings and --skip-permissions: a run must choose one, and the sandbox keys are forced."""
+"""--sandbox-settings and --skip-permissions: a run must choose one, and the sandbox keys are forced.
+
+A run folder's sandbox.json makes the sandboxed choice when no flag does.
+"""
 
 import json
 from dataclasses import dataclass
@@ -9,6 +12,7 @@ import pytest
 
 from e2e_helpers import (
     ONE_TASK_TABLE,
+    SHARED_PROMPT,
     TWO_TASKS_YAML,
     VALID_TASKS_YAML,
     Result,
@@ -18,7 +22,6 @@ from e2e_helpers import (
     run_alr,
     run_dry_run,
     task_states,
-    write_prompt,
     write_tasks_yaml,
 )
 
@@ -54,11 +57,9 @@ def run_with_flags(
 ) -> SandboxRun:
     """Run tasks_yaml with the given permission flags, the fake claude recording its argv."""
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
-    prompt_path = write_prompt(tmp_path, "Follow the runbook.\n")
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        f"--prompt={prompt_path}",
         f"--tasks={tasks_path}",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
@@ -86,7 +87,7 @@ def test_sandbox_argv_carries_forced_settings(
     assert_sandboxed(run.records[0]["argv"])
     # The stdin contract does not change.
     assert run.records[0]["stdin"] == expected_stdin(
-        "Follow the runbook.", 1, "First task", "Do the thing."
+        SHARED_PROMPT, 1, "First task", "Do the thing."
     )
     assert settings.read_text(encoding="utf-8") == content
     assert task_states(read_tasks_yaml(run.tasks_path))[1] == "completed"
@@ -109,8 +110,8 @@ def test_sandbox_every_task_gets_the_same_settings(
     assert_sandboxed(run.records[0]["argv"])
     assert run.records[1]["argv"] == run.records[0]["argv"]
     assert [record["stdin"] for record in run.records] == [
-        expected_stdin("Follow the runbook.", 1, "First task", "Do the first thing."),
-        expected_stdin("Follow the runbook.", 2, "Second task", "Do the second thing."),
+        expected_stdin(SHARED_PROMPT, 1, "First task", "Do the first thing."),
+        expected_stdin(SHARED_PROMPT, 2, "Second task", "Do the second thing."),
     ]
     assert task_states(read_tasks_yaml(run.tasks_path)) == {
         1: "completed",
@@ -196,3 +197,91 @@ def test_dry_run_names_sandbox_settings(tmp_path: Path, fake_claude: Path) -> No
     assert res.out == (
         f"{ONE_TASK_TABLE}sandbox settings: {settings}\n{tasks_path} is valid\n"
     )
+
+
+def run_folder(
+    tmp_path: Path, sandbox_json: str | None, *flags: str
+) -> tuple[SandboxRun, Path]:
+    """Run a folder holding tasks.yaml, and sandbox.json when given, with only --dir to name it."""
+    folder = tmp_path / "run"
+    folder.mkdir()
+    tasks_path = write_tasks_yaml(folder, VALID_TASKS_YAML)
+    if sandbox_json is not None:
+        write_sandbox_settings(folder, sandbox_json)
+
+    record_file = tmp_path / "record.ndjson"
+    res = run_alr(
+        "-d",
+        str(folder),
+        *flags,
+        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
+    )
+    return SandboxRun(res, fake_claude_records(record_file), tasks_path), folder
+
+
+def test_dir_sandbox_json_runs_sandboxed(tmp_path: Path, fake_claude: Path) -> None:
+    run, _ = run_folder(tmp_path, '{"sandbox":{"filesystem":{"denyRead":["~/"]}}}')
+
+    assert run.res.code == 0, run.res
+    assert len(run.records) == 1
+    assert_sandboxed(run.records[0]["argv"])
+    assert task_states(read_tasks_yaml(run.tasks_path))[1] == "completed"
+
+
+def test_dir_without_sandbox_json_needs_a_permission_flag(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    run, _ = run_folder(tmp_path, None)
+
+    assert run.res.code == 1, run.res
+    assert NEITHER_FLAG_ERROR in run.res.err
+    assert run.records == [], "claude must not run"
+
+
+def test_dir_skip_permissions_wins_over_sandbox_json(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    run, _ = run_folder(tmp_path, "{}", "--skip-permissions")
+
+    assert run.res.code == 0, run.res
+    assert [record["argv"] for record in run.records] == [
+        ["--print", "--dangerously-skip-permissions"]
+    ]
+
+
+def test_dir_sandbox_settings_flag_wins_over_sandbox_json(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    other = write_sandbox_settings(
+        tmp_path, '{"sandbox":{"filesystem":{"denyRead":["~/"]}}}'
+    )
+
+    run, _ = run_folder(tmp_path, "null", f"--sandbox-settings={other}")
+
+    assert run.res.code == 0, run.res
+    assert_sandboxed(run.records[0]["argv"])
+
+
+@pytest.mark.parametrize("mode", [[], ["--dry-run"]], ids=["run", "dry run"])
+def test_dir_bad_sandbox_json_starts_nothing(
+    tmp_path: Path, fake_claude: Path, mode: list[str]
+) -> None:
+    run, _ = run_folder(tmp_path, "null", *mode)
+
+    assert run.res.code == 1, run.res
+    assert "--sandbox-settings: must be a JSON object" in run.res.err
+    assert run.records == [], "claude must not run"
+    assert run.tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
+
+
+def test_dir_dry_run_names_the_folders_sandbox_json(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    run, folder = run_folder(tmp_path, "{}", "--dry-run")
+
+    assert run.res.code == 0, run.res
+    assert run.res.out == (
+        f"{ONE_TASK_TABLE}sandbox settings: {folder}/sandbox.json\n"
+        f"{run.tasks_path} is valid\n"
+    )
+    assert run.records == [], "claude must not run"

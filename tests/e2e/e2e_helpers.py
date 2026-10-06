@@ -20,13 +20,15 @@ from typing import Any
 import pytest
 import yaml
 
-VALID_TASKS_YAML = """tasks:
+SHARED_PROMPT = "Follow the runbook."
+
+ONE_TASK = """tasks:
   - id: 1
     name: First task
     prompt: Do the thing.
 """
 
-TWO_TASKS_YAML = """tasks:
+TWO_TASKS = """tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
@@ -83,15 +85,24 @@ def write_tasks_yaml(folder: Path, content: str) -> Path:
     return path
 
 
-def write_prompt(folder: Path, body: str) -> Path:
-    path = folder / "prompt.md"
-    path.write_text(body, encoding="utf-8")
-    return path
+def shared_block(
+    prompt: str = SHARED_PROMPT, gates: list[dict[str, str]] | None = None
+) -> str:
+    """The shared: block that opens a task file; put the tasks after it."""
+    shared: dict[str, Any] = {"prompt": prompt}
+    if gates is not None:
+        shared["gates"] = gates
+
+    return yaml.safe_dump({"shared": shared}, sort_keys=False)
 
 
-def run_args(prompt_path: Path, tasks_path: Path) -> list[str]:
+def run_args(tasks_path: Path) -> list[str]:
     """The flags of an ordinary unsandboxed run."""
-    return ["--skip-permissions", f"--prompt={prompt_path}", f"--tasks={tasks_path}"]
+    return ["--skip-permissions", f"--tasks={tasks_path}"]
+
+
+VALID_TASKS_YAML = shared_block() + ONE_TASK
+TWO_TASKS_YAML = shared_block() + TWO_TASKS
 
 
 def expected_stdin(shared_prompt: str, id: int, name: str, prompt: str) -> str:

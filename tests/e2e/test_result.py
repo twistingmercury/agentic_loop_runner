@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from e2e_helpers import (
+    SHARED_PROMPT,
     TWO_TASKS_YAML,
     Result,
     assert_no_tmp_file,
@@ -11,24 +12,26 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     run_args,
+    shared_block,
     task_errors,
     task_states,
-    write_prompt,
     write_tasks_yaml,
 )
 
-ONE_TASK_YAML = """tasks:
+ONE_TASK_YAML = (
+    shared_block("Body.")
+    + """tasks:
   - id: 1
     name: First task
     prompt: Do the first thing.
 """
+)
 NO_RESULT_LINE = "no valid result line in session output"
 
 
 def run_one_task(tmp_path: Path, env: dict[str, str]) -> tuple[Result, Path]:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(tmp_path, ONE_TASK_YAML)
-    return run_alr(*run_args(prompt_path, tasks_path), env=env), tasks_path
+    return run_alr(*run_args(tasks_path), env=env), tasks_path
 
 
 def assert_saved_failed(tasks_path: Path, error: str) -> None:
@@ -41,13 +44,12 @@ def assert_saved_failed(tasks_path: Path, error: str) -> None:
 def test_loop_json_failed_result_writes_error_and_stops_loop(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
     record_file = tmp_path / "record.ndjson"
     result_line = '{"state":"failed","error":"something broke"}\n'
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         env={
             "FAKECLAUDE_RECORD_FILE": str(record_file),
             "FAKECLAUDE_OUTPUT": result_line,
@@ -63,7 +65,7 @@ def test_loop_json_failed_result_writes_error_and_stops_loop(
     assert len(records) == 1, "the loop must stop before the second task"
     # The error text is never sent to claude.
     assert records[0]["stdin"] == expected_stdin(
-        "Body.", 1, "First task", "Do the first thing."
+        SHARED_PROMPT, 1, "First task", "Do the first thing."
     )
 
     after = read_tasks_yaml(tasks_path)
@@ -159,14 +161,13 @@ def test_loop_fenced_result_line_completes(tmp_path: Path, fake_claude: Path) ->
 def test_loop_stale_error_cleared_when_task_completes(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    prompt_path = write_prompt(tmp_path, "Body.\n")
     tasks_path = write_tasks_yaml(
         tmp_path, ONE_TASK_YAML + "    state: pending\n    error: boom old\n"
     )
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        *run_args(prompt_path, tasks_path),
+        *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
