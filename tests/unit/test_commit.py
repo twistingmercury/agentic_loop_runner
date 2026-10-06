@@ -632,8 +632,10 @@ async def test_run_cancel_during_commit_leaves_file_untouched(
 # whole group is killed.
 @pytest.mark.usefixtures("fake_claude")
 async def test_run_cancel_during_commit_kills_a_hook_that_ignores_sigterm(
-    git_repo: Path, tmp_path: Path
+    git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Short, so the test waits for the kill instead of the real two seconds.
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.3)
     tasks_file = write_nested_file(
         _task_file(git_repo),
         "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
