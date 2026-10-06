@@ -67,6 +67,16 @@ ACTIVITY_CASES = [
         id="unknown tool has no target and no trailing space",
     ),
     pytest.param(
+        assistant(tool("Bash", '"make test"')),
+        ["→ Bash"],
+        id="tool input of the wrong kind has no target",
+    ),
+    pytest.param(
+        assistant(tool("Read", '{"file_path":7}')),
+        ["→ Read"],
+        id="tool target of the wrong kind is dropped",
+    ),
+    pytest.param(
         assistant(tool("Bash", "{}")),
         ["→ Bash"],
         id="known tool with missing target has no trailing space",
@@ -132,16 +142,16 @@ IGNORED = [
     pytest.param('"assistant"', id="a bare string"),
     pytest.param('{"message":{}}', id="no type"),
     pytest.param('{"type":["assistant"]}', id="type of the wrong kind"),
+    pytest.param(b'{"type":"assistant","x":"\xff"}', id="bytes that are not UTF-8"),
+    pytest.param(b"[" * 200000, id="deeply nested garbage"),
+    pytest.param(assistant('{"type":"text","text":5}'), id="text of the wrong kind"),
 ]
 
 
 @pytest.mark.parametrize("line", IGNORED)
-def test_other_lines_give_nothing(line: str) -> None:
-    assert parse_stream_line(line.encode()) == ([], "", False)
-
-
-def test_bytes_that_are_not_utf8_give_nothing() -> None:
-    assert parse_stream_line(b'{"type":"assistant","x":"\xff"}') == ([], "", False)
+def test_other_lines_give_nothing(line: str | bytes) -> None:
+    data = line.encode() if isinstance(line, str) else line
+    assert parse_stream_line(data) == ([], "", False)
 
 
 MALFORMED = [
@@ -163,27 +173,5 @@ def test_malformed_assistant_line_counts_as_empty(line: str) -> None:
     assert parse_stream_line(line.encode()) == ([], "", False)
 
 
-def test_tool_input_of_the_wrong_kind_has_no_target() -> None:
-    line = assistant(tool("Bash", '"make test"'))
-
-    assert parse_stream_line(line.encode()) == (["→ Bash"], "", False)
-
-
-def test_tool_target_of_the_wrong_kind_is_dropped() -> None:
-    line = assistant(tool("Read", '{"file_path":7}'))
-
-    assert parse_stream_line(line.encode()) == (["→ Read"], "", False)
-
-
-def test_text_of_the_wrong_kind_is_dropped() -> None:
-    line = assistant('{"type":"text","text":5}')
-
-    assert parse_stream_line(line.encode()) == ([], "", False)
-
-
 def test_result_that_is_not_text_is_empty() -> None:
     assert parse_stream_line(b'{"type":"result","result":null}') == ([], "", True)
-
-
-def test_deeply_nested_garbage_is_dropped() -> None:
-    assert parse_stream_line(b"[" * 200000) == ([], "", False)

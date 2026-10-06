@@ -244,48 +244,67 @@ def test_record_failed_task_ends_the_run_as_failed(
     )
 
 
+def _stopped(error: str, seconds: str) -> str:
+    return (
+        "{" + STAMP + ',"event":"run_finished","result":"stopped",'
+        f'"error":"{error}","duration":"{seconds}"}}'
+    )
+
+
+FIRST = Task(id=1, name="First", prompt="")
+SECOND = Task(id=2, name="Second", prompt="")
+
 # A stopped run has no outcome for the task that was running, which matches
-# the task file: that task stays as it was.
-def test_record_stopped_run_writes_no_task_finished(
+# the task file: that task stays as it was. A completed task earlier in the run
+# must not make a later stop read as failed.
+STOPPED_CASES = [
+    pytest.param(
+        [
+            TaskStarted(FIRST),
+            Activity(FIRST, "working"),
+            RunDone("task 1: First failed: signal: killed", 2.0),
+        ],
+        _stopped("task 1: First failed: signal: killed", "2s"),
+        3,
+        "task-1.log",
+        "14:02:11 working\n",
+        id="a task was running",
+    ),
+    pytest.param(
+        [
+            TaskStarted(FIRST),
+            TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
+            TaskStarted(SECOND),
+            RunDone("stopped", 0.0),
+        ],
+        _stopped("stopped", "0s"),
+        5,
+        "task-2.log",
+        "",
+        id="after a completed task",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("events", "last_line", "ledger_count", "detail", "detail_text"), STOPPED_CASES
+)
+def test_record_stopped_run(
     opened: tuple[RunLog, Path],
+    events: list[Event],
+    last_line: str,
+    ledger_count: int,
+    detail: str,
+    detail_text: str,
 ) -> None:
     log, path = opened
-    task = Task(id=1, name="First", prompt="")
 
-    record(
-        log,
-        TaskStarted(task),
-        Activity(task, "working"),
-        RunDone("task 1: First failed: signal: killed", 2.0),
-    )
+    record(log, *events)
 
     lines = ledger_lines(path)
-    assert len(lines) == 3
-    assert lines[2] == (
-        "{" + STAMP + ',"event":"run_finished","result":"stopped",'
-        '"error":"task 1: First failed: signal: killed","duration":"2s"}'
-    )
-    assert read_lines(path / "task-1.log") == ["14:02:11 working"]
-
-
-# A failed task earlier in the run must not make a later stop read as failed.
-def test_record_stop_after_a_completed_task_is_stopped(
-    opened: tuple[RunLog, Path],
-) -> None:
-    log, path = opened
-    first = Task(id=1, name="First", prompt="")
-    second = Task(id=2, name="Second", prompt="")
-
-    record(
-        log,
-        TaskStarted(first),
-        TaskFinished(replace(first, state=COMPLETED), None, 0.0),
-        TaskStarted(second),
-        RunDone("stopped", 0.0),
-    )
-
-    assert '"result":"stopped"' in ledger_lines(path)[-1]
-    assert (path / "task-2.log").exists()
+    assert len(lines) == ledger_count
+    assert lines[-1] == last_line
+    assert (path / detail).read_text(encoding="utf-8") == detail_text
 
 
 def test_record_each_task_gets_its_own_detail_file(
@@ -324,31 +343,29 @@ def test_record_many_activity_events_each_land_whole(
     assert lines == ["14:02:11 " + line] * 1000
 
 
-# A task name or an Info field can hold a lone surrogate, which UTF-8 cannot
-# encode; the log writes "?" in its place rather than failing the run.
-def test_record_lone_surrogate_in_activity_is_replaced(
-    opened: tuple[RunLog, Path],
-) -> None:
-    log, path = opened
-    task = Task(id=1, name="First", prompt="")
-
-    record(log, TaskStarted(task), Activity(task, "x\ud800y"))
-
-    assert read_lines(path / "task-1.log") == ["14:02:11 x?y"]
-
-
-def test_record_lone_surrogate_in_the_ledger_is_replaced(
-    opened: tuple[RunLog, Path],
-) -> None:
-    log, path = opened
+# A task name, an Info field, or an activity line can hold a lone surrogate,
+# which UTF-8 cannot encode; the log writes "?" in its place rather than failing
+# the run.
+def test_record_lone_surrogates_are_replaced(tmp_path: Path) -> None:
+    path = tmp_path / "run"
+    info = replace(INFO, tasks_file="run/ta\ud800sks.yaml")
+    log = RunLog.open(path, info, now=fixed_now)
     task = Task(id=1, name="Bad\ud800name", prompt="")
     failed = replace(task, state=FAILED, error="bad\udfffend")
 
-    record(log, TaskStarted(task), TaskFinished(failed, None, 0.0))
+    record(
+        log,
+        TaskStarted(task),
+        Activity(task, "x\ud800y"),
+        TaskFinished(failed, None, 0.0),
+    )
+    log.close()
 
     lines = ledger_lines(path)
+    assert '"tasks_file":"run/ta?sks.yaml"' in lines[0]
     assert '"name":"Bad?name"' in lines[1]
     assert '"error":"bad?end"' in lines[2]
+    assert read_lines(path / "task-1.log") == ["14:02:11 x?y"]
 
 
 needs_dev_full = pytest.mark.skipif(
@@ -413,24 +430,21 @@ def test_close_with_a_failing_detail_close_still_closes_the_ledger(
     assert open_fds() == before
 
 
-def test_record_task_started_after_close_opens_no_detail_file(
-    opened: tuple[RunLog, Path],
+@pytest.mark.parametrize(
+    "event",
+    [TaskStarted(FIRST), RunDone(None, 0.0)],
+    ids=["task started", "run done"],
+)
+def test_record_after_close_is_an_error_and_opens_no_detail_file(
+    opened: tuple[RunLog, Path], event: Event
 ) -> None:
     log, path = opened
     log.close()
 
     with pytest.raises(RunLogError):
-        log.record(TaskStarted(Task(id=1, name="First", prompt="")))
+        log.record(event)
 
     assert not (path / "task-1.log").exists()
-
-
-def test_record_after_close_is_an_error(opened: tuple[RunLog, Path]) -> None:
-    log, _ = opened
-    log.close()
-
-    with pytest.raises(RunLogError):
-        log.record(RunDone(None, 0.0))
 
 
 def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:
