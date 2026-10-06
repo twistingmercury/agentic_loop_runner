@@ -1,7 +1,7 @@
 ---
-version: 2
+version: 3
 date: 2026-10-06
-notes: "Follows gralph v0.12.0. Adds ADR-008 (shared prompt and gates in the task file), ADR-009 (the run folder's `sandbox.json`), and ADR-010 (unit tests and container e2e tests); the inherited table and ADR-001 and ADR-006 follow. Moved to docs/design with frontmatter versioning."
+notes: "Fixed the path to gralph's own decision log, which a bulk rename had pointed at this repository's docs/design."
 ---
 
 # alr — Architectural Decisions
@@ -42,7 +42,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 
 ## Inherited Decisions
 
-These gralph decisions apply to `alr` unchanged. Their full text is in gralph's `docs/design/02_architectural_decisions.md` at v0.12.0. Where a later gralph ADR amends one of them, the last column says which `alr` ADR carries the change.
+These gralph decisions apply to `alr` unchanged. Their full text is in gralph's `docs/architecture/02_architectural_decisions.md` at v0.12.0. Where a later gralph ADR amends one of them, the last column says which `alr` ADR carries the change.
 
 | gralph ADR | Title                                                          | Amended by                |
 | ---------- | -------------------------------------------------------------- | ------------------------- |

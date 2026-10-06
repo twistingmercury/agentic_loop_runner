@@ -1,7 +1,7 @@
 ---
-version: 3
+version: 4
 date: 2026-10-06
-notes: "The earlier learning-project requirements document is removed. Follows gralph v0.12.0. The shared prompt and the gates live in the task file under `shared` (ADR-008), a run folder's `sandbox.json` answers the permission choice (ADR-009), and the tests split into unit and container e2e suites (ADR-010). Moved to docs/design with frontmatter versioning."
+notes: "Reformatted the Core Concept diagram with the mermaid skill: files and programs grouped, palette colors, one back edge."
 ---
 
 # alr — Architecture Overview
@@ -28,14 +28,35 @@ This set of documents covers the first step: porting gralph's engine and its pla
 ## Core Concept
 
 ```mermaid
-graph TB
-    User[User in a terminal, script, or CI] -->|flags| ALR["alr"]
-    ALR -->|reads and writes| Tasks["tasks.yaml (shared prompt, gates, tasks)"]
-    ALR -->|reads once| Settings["sandbox settings JSON"]
-    ALR -->|one fresh session per task, prompt on stdin| Claude["claude --print"]
-    Claude -->|output ending in a JSON result line| ALR
-    ALR -->|sh -c, after a completed session| Gates["gate commands"]
-    ALR -->|add -A and commit, with --commit| Git["git"]
+---
+title: alr and what it talks to
+---
+flowchart TD
+    user["User in a terminal, script, or CI"]
+    alr["alr"]:::blue
+
+    subgraph files["Files"]
+        tasks["tasks.yaml<br/>shared prompt, gates, tasks"]:::green
+        sandbox["sandbox settings JSON<br/>(--sandbox-settings or the run folder)"]:::green
+    end
+
+    subgraph programs["Programs alr starts"]
+        claude["claude --print"]:::amber
+        gates["gate commands"]:::amber
+        git["git"]:::amber
+    end
+
+    user -->|flags| alr
+    alr -->|reads and writes| tasks
+    alr -->|reads once| sandbox
+    alr -->|"one fresh session per task, prompt on stdin"| claude
+    claude -->|"output ending in a JSON result line"| alr
+    alr -->|"sh -c, after a completed session"| gates
+    alr -->|"add -A and commit, with --commit"| git
+
+    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#1f2328
+    classDef green fill:#9fd8a8,stroke:#6e7781,color:#1f2328
+    classDef amber fill:#f2cc80,stroke:#6e7781,color:#1f2328
 ```
 
 For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.gates` run and, with `--commit`, is committed. The task file is saved after every task. A failed task stops the run.

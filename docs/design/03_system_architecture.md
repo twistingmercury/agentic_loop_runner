@@ -1,7 +1,7 @@
 ---
-version: 2
+version: 3
 date: 2026-10-06
-notes: "Follows gralph v0.12.0: the `shared` block replaces the prompt file (ADR-008), the run folder's `sandbox.json` (ADR-009), and the unit and container e2e test layout (ADR-010). Moved to docs/design with frontmatter versioning."
+notes: "Split the Architecture Overview diagram into an import diagram and a front end diagram, reformatted with the mermaid skill. Fixed the paths to gralph's own documents, which a bulk rename had pointed at this repository's docs/design."
 ---
 
 # alr — System Architecture
@@ -24,27 +24,56 @@ notes: "Follows gralph v0.12.0: the `shared` block replaces the prompt file (ADR
 
 `alr` has one engine and two front ends. The engine holds the rules of a run. A front end decides how each subprocess is run and shown. `alr.cli` picks the front end once and hands it to the engine; the engine never asks which one it got.
 
-Imports point one way. `cli` imports everything below it. `plain` and `stream` import `engine`. `engine` imports `tasks`. Nothing imports upward, and `plain` and `stream` never import each other.
+Imports point one way. `cli` imports everything below it (the first diagram leaves out its direct edges to `engine` and `tasks`). `plain` and `stream` import `engine`. `engine` imports `tasks`. Nothing imports upward, and `plain` and `stream` never import each other.
 
 ```mermaid
-graph TB
-    CLI["alr.cli<br/>(flags, startup checks, routing)"]
-    Plain["alr.plain<br/>(plain front end, dry-run report)"]
-    Stream["alr.stream<br/>(stream front end, events, run log)"]
-    TUI["alr.tui<br/>(next design)"]
-    Engine["alr.engine<br/>(loop, outcome, gates, commit, sandbox, processes)"]
-    Tasks["alr.tasks<br/>(parse, validate, save)"]
+---
+title: Which package imports which
+---
+flowchart TD
+    cli["alr.cli<br/>flags, startup checks, routing"]:::blue
+    plain["alr.plain<br/>plain front end, dry-run report"]:::green
+    tui["alr.tui<br/>next design"]:::gray
+    stream["alr.stream<br/>stream front end, events, run log"]:::green
+    engine["alr.engine<br/>loop, outcome, gates, commit, sandbox, processes"]:::blue
+    tasks["alr.tasks<br/>parse, validate, save"]:::blue
 
-    CLI --> Plain
-    CLI -.->|next design| TUI
-    TUI -.-> Stream
-    Plain --> Engine
-    Stream --> Engine
-    CLI --> Engine
-    Engine --> Tasks
-    Engine -->|calls the front end it was handed| FE(["FrontEnd interface"])
-    Plain -.->|implements| FE
-    Stream -.->|implements| FE
+    cli --> plain
+    cli -.->|next design| tui
+    tui -.-> stream
+    plain --> engine
+    stream --> engine
+    engine --> tasks
+
+    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#1f2328
+    classDef green fill:#9fd8a8,stroke:#6e7781,color:#1f2328
+    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#1f2328
+```
+
+The engine does not import a front end. It is handed one and calls it through the `FrontEnd` interface, which `alr.cli` picks once:
+
+```mermaid
+---
+title: How the engine reaches a front end
+---
+flowchart TD
+    cli["alr.cli"]:::blue
+    engine["alr.engine"]:::blue
+    iface(["FrontEnd interface"]):::purple
+    plain["alr.plain<br/>used in this design"]:::green
+    stream["alr.stream<br/>built and tested, switched on by the TUI"]:::green
+    tui["alr.tui<br/>next design"]:::gray
+
+    cli -->|"picks the front end once, hands it over"| engine
+    engine -->|"calls the front end it was handed"| iface
+    iface -.->|implemented by| plain
+    iface -.->|implemented by| stream
+    tui -.->|"will use"| stream
+
+    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#1f2328
+    classDef green fill:#9fd8a8,stroke:#6e7781,color:#1f2328
+    classDef purple fill:#c9b2ee,stroke:#6e7781,color:#1f2328
+    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#1f2328
 ```
 
 In this design `alr.cli` always picks the plain front end. The stream front end and the run log are complete and tested, and the next design switches them on from the TUI.

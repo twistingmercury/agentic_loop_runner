@@ -1,7 +1,7 @@
 ---
-version: 2
+version: 3
 date: 2026-10-06
-notes: "Behavioral reference moves from gralph `170dc6f` to v0.12.0: no `--prompt`, a `shared` block in the task file, `-d` also finds `sandbox.json`, no skill check. Moved to docs/design with frontmatter versioning."
+notes: "Fixed the paths to gralph's own documents, which a bulk rename had pointed at this repository's docs/design."
 ---
 
 # alr — Requirements
@@ -29,7 +29,7 @@ gralph, the Go loop runner, has reached the point where its next step is to beco
 
 gralph v0.12.0 (commit `433a5c1`) is the reference for behavior. The first version of these documents was written against `v0.9.8-25-g170dc6f`; three gralph releases since then (v0.10.0, v0.11.0, v0.12.0) changed the task file, the command line, and the run folder, and this version follows them. Where this document set is silent, gralph's own documents and code at that tag decide:
 
-- `docs/design/01_requirements.md` (v14), `02_architectural_decisions.md`, `03_system_architecture.md` (v25)
+- gralph's `docs/architecture/01_requirements.md` (v14), `02_architectural_decisions.md`, `03_system_architecture.md` (v25)
 - `docs/howto.md`
 - `src/internal/tasks`, `src/internal/looper`, `src/internal/runlog`, `src/cmd/main`, and `tests/e2e`
 
