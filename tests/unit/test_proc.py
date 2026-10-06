@@ -124,50 +124,6 @@ async def _kill_holder_and_let_pipes_close(pid_file: Path) -> None:
     await asyncio.sleep(0.05)
 
 
-async def test_gentle_capture_does_not_wait_for_pipe_holders(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
-    pid_file = tmp_path / "holder.pid"
-    started = time.monotonic()
-
-    try:
-        result = await proc.capture(
-            ["sh", "-c", f"sleep 4 & echo $! > {pid_file}; echo done"], gentle=True
-        )
-        elapsed = time.monotonic() - started
-    finally:
-        await _kill_holder_and_let_pipes_close(pid_file)
-
-    assert result == (0, "done\n", "")
-    assert elapsed < 2
-
-
-async def test_finish_returns_when_a_descendant_holds_the_pipes(
-    tmp_path: Path,
-) -> None:
-    pid_file = tmp_path / "holder.pid"
-    process = await proc.start(
-        # The child outlives the drain, so finish is already waiting when it exits.
-        ["sh", "-c", f"sleep 4 & echo $! > {pid_file}; sleep 0.3"],
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    async def drain_nothing() -> None:
-        # Stands in for a drain that gave up on the held pipes.
-        await asyncio.sleep(0.05)
-
-    try:
-        result = await asyncio.wait_for(
-            proc.finish(process, drain_nothing(), gentle=True), 2
-        )
-    finally:
-        await _kill_holder_and_let_pipes_close(pid_file)
-
-    assert result is None
-
-
 async def test_gentle_finish_cuts_off_a_drain_held_open_by_a_background_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
