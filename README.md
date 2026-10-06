@@ -1,93 +1,113 @@
 # Agentic Loop Runner (alr)
 
-> **Maturity Level**: Emerging - in active, initial development; expect breaking changes.  
-> **Version**: v0.0.3
+> **Maturity Level**: Emerging - in active, initial development; expect breaking changes.
+> **Version**: v0.0.5
+>
+> - **Emerging**: Prototype, not production-ready, expect breaking changes
+> - **Basic**: Production-ready but actively evolving, expect minor version changes
+> - **Mature**: Stable, battle-tested, changes are rare
 
 ---
 
 ## Table of Contents
 
-- [Why this when you have gralph?](#why)
 - [Usage](#usage)
 - [How it works](#how-it-works)
 - [Key Considerations](#key-considerations)
 - [Development Considerations](#development-considerations)
 - [Versioning](#versioning)
 
-
-## Why this when you have gralph?
-
-I don't like how [gralph](https://github.com/twistingmercury/gralph) evolved. The code is too complicated.
-Why? I relied too much on Claude and Codex. Yeah, it works, but...it's hard for me to follow.
-Part of the reason it got so complex is that I made the requirements too complex. Durable task states mainly.
-That's not needed with a good ole Ralph loop.
-
-So, I'm writing a _new_ agentic loop runner in Python. Why Python? Because I need to learn
-Python. I'm using Claude to help tutor me, but I decide on how I want it implemented, I write
-the code, and I write tests. Claude is just there to offer advice and help when I get stuck.
-
 ## Usage
 
-`alr` is a command line tool used to run ["ralph loops"](https://ghuntley.com/loop/).
+`alr` runs ["ralph loops"](https://ghuntley.com/loop/) with Claude Code. It is the
+Python port of [gralph](https://github.com/twistingmercury/gralph) and follows
+gralph v0.12.0: the same task file, flags, and behavior.
 
-```sh
-# Validate a task file only; launches no agent and changes no files.
-alr -t tasks.yaml --dry-run
+A run starts from one `tasks.yaml`:
 
-# Run the tasks with a coding agent.
-alr -t tasks.yaml -p prompt.md
+```yaml
+shared:
+  prompt: |
+    You are working on the widget service. End your output with one JSON line:
+    {"state": "completed"} or {"state": "failed", "error": "why"}.
+  gates:
+    - cmd: uv run pytest
+      timeout: 10m
+tasks:
+  - id: 1
+    name: Add the widget repository
+    prompt: |
+      Objective: ...
 ```
 
-| Flag              | Short | Required            | Description                                        |
-| ----------------- | ----- | ------------------- | -------------------------------------------------- |
-| `--tasks <path>`  | `-t`  | Always              | YAML file holding the task list                    |
-| `--prompt <path>` | `-p`  | Execution only      | Markdown file with the shared prompt for each loop |
-| `--dry-run`       | `-d`  | No                  | Validation-only mode; ignores `--prompt`           |
+```sh
+# Validate the task file only; launches no agent and changes no files.
+alr -t tasks.yaml --dry-run
+
+# Run the tasks, with Claude in its sandbox.
+alr -t tasks.yaml --sandbox-settings sandbox.json
+
+# Run a folder that holds tasks.yaml and sandbox.json, and commit each task.
+alr -d .local/feature --commit
+```
+
+| Flag                        | Short | Description                                                                              |
+| --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
+| `--tasks <path>`            | `-t`  | The task file. Required unless `--dir` gives it                                          |
+| `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`          |
+| `--dry-run`                 |       | Validate and report only                                                                 |
+| `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
+| `--skip-permissions`        |       | Run sessions with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json`  |
+| `--commit`                  |       | Commit each completed task after its gates pass                                          |
+| `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
+| `--version`                 | `-v`  | Print the version                                                                        |
+
+A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
+`--skip-permissions`. `--no-tui` is accepted and does nothing yet, and `--log-dir` is
+refused until the full-screen view exists.
 
 ## How it works
 
-> Note: the tasks yaml and prompt markdown are created using this skill: [ralph-loop-docs-writer](https://github.com/twistingmercury/gralph/blob/develop/skills/ralph-loop-docs-writer/SKILL.md)
+Tasks run one at a time, in file order, each in a fresh `claude --print` session. The
+shared prompt and the task go to Claude on stdin. The runner owns task state: Claude
+reports its outcome as one JSON line at the end of its output. When a task completes,
+the file's `shared.gates` run, and the task counts as done only if every gate exits
+zero. The file is saved after every task, and the first failed task stops the run.
 
-A run reads a YAML task file and a shared Markdown prompt. Tasks execute one at
-a time in list order, each in a fresh agent session. The runner owns task
-state; the agent reports its outcome as one JSON line at the end of its output.
+Each task has an `id`, a `name`, a `prompt`, and an optional `state` of `pending`,
+`completed`, or `failed`.
 
-Each task has an `id`, a `name`, a `prompt`, and an optional `state` of
-`pending`, `completed`, or `abandoned`. A missing or empty `state` means
-`pending`. Dry-run prints one line per task and flags `abandoned` tasks with a
-warning so you can look at them before running.
-
-Current state (2026-09-22): **FR-005 (YAML input validation)** and **FR-001
-(read the shared prompt)** are done. Task parsing and validation live in
-`src/alr/tasks.py`, prompt loading in `src/alr/prompt.py`, argument parsing in
-`src/alr/cli.py`, and the entry point in `src/alr/main.py`. The run loop in
-`src/alr/looper.py` is a stub; task execution (FR-002 through FR-004, FR-007)
-is not implemented yet. Next up: the run loop.
-
-Full requirements: [docs/requirements/01_requirements_v01.md](docs/requirements/01_requirements_v01.md).
+Full design: [docs/design/00_overview.md](docs/design/00_overview.md). The build plan is
+in [docs/plans/](docs/plans/).
 
 ## Key Considerations
 
 - Supported platforms are Linux and macOS only.
 - No automatic retries: at most one attempt per task per run.
-- Claude Code is the only supported agent. It uses your installed CLI's own
-  model and authentication settings; `alr` adds no model-selection flags.
+- Claude Code is the only supported agent. It uses your installed CLI's own model and
+  authentication settings; `alr` adds no model-selection flags.
+- The task file is code: its prompts go to Claude and its gates run through `sh -c`.
+  Do not run `alr` on a task file you do not trust.
+- This is a breaking change from earlier `alr` builds: there is no `-p/--prompt` and no
+  `prompt.md`, and the `abandoned` state is gone.
 
 ## Development Considerations
 
-Requires Python >= 3.12 and [uv](https://docs.astral.sh/uv/).
+Requires Python >= 3.12 and [uv](https://docs.astral.sh/uv/). The e2e tests need Docker.
 
 ### Quick Start
 
 ```sh
 uv sync
-uv run alr -t tests/data/tasks.yaml --dry-run
+uv run alr -t path/to/tasks.yaml --dry-run
 ```
 
 ### Testing
 
 ```sh
-make test      # sync, lint, and run pytest
+make test      # format, lint, and run the unit tests
+make build     # build the wheel, then run the e2e tests in a container
+make e2e       # run the e2e tests against the wheel already in dist/
 make analyze   # format and auto-fix lint findings
 make help      # list available targets
 ```

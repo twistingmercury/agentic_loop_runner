@@ -9,22 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--dry-run` prints a one-line summary per task and flags `abandoned` tasks
-  with a warning (FR-005).
-- Shared prompt loading from `--prompt`, rejecting unsupported extensions and
-  empty files (FR-001).
+- Task file format with a required `shared` block (containing a required `prompt`
+  and optional `gates`), and an ordered `tasks` array. Each task has `id`,
+  `name`, `prompt`, and optional `state` (`pending`, `completed`, `failed`) and
+  `error`.
+- `--dir` run folder support: finds `tasks.yaml` and, if present,
+  `sandbox.json`.
+- `--commit` to commit each completed task after all gates pass.
+- `--sandbox-settings` and `--skip-permissions` flags to control session
+  permissions; `--skip-permissions` wins over a folder's `sandbox.json`.
+- `--gate-timeout <duration>` to set a time limit for every gate (e.g. `90s`,
+  `10m`).
+- `--dry-run` validates the task file and reports each task and gate without
+  starting Claude or writing files.
+- Clean stop on SIGINT or SIGTERM: kills the running process group, leaves the
+  task file untouched, exits 1.
+- Engine infrastructure: stream-json parsing, run events, and the run log
+  (internal, not yet exposed through the CLI).
 
 ### Changed
 
-- Task states simplified to `pending`, `completed`, `abandoned`. Dropped
-  `in_progress` and `blocked`.
-- Task fields simplified to `id`, `name`, `prompt`, `state`. Dropped `title`,
-  `agent`, `checkpoint`.
-- An empty `state` now means `pending` instead of being rejected.
+- Replaces the previous learning-project runner entirely. This is a breaking
+  change from earlier `alr` versions.
+- Task file format is now `shared` + `tasks` in one YAML file (no separate
+  `-p/--prompt`).
+- Task states are now `pending`, `completed`, `failed`. Dropped `abandoned`,
+  `in_progress`, `blocked`.
+- The `-d` flag now means `--dir` run folder (was `--dry-run` short form);
+  use `--dry-run` instead.
+- Unit tests (`make test`) and container-based e2e tests (`make build`, `make
+  e2e`) are now split and share nothing.
 
 ### Removed
 
+- `-p/--prompt` and `prompt.md`. The shared prompt moves into the task file's
+  `shared.prompt` block.
+- `abandoned` task state.
 - `--agent` flag and Codex support. Claude Code is the only agent.
-
-- Activity log and JSON result files (FR-006 withdrawn). The agent reports its
-  outcome as a single JSON line on stdout instead.

@@ -1,7 +1,7 @@
 ---
-version: 2
+version: 3
 date: 2026-10-06
-notes: "Follows gralph v0.12.0. The shared prompt and the gates live in the task file under `shared` (ADR-008), a run folder's `sandbox.json` answers the permission choice (ADR-009), and the tests split into unit and container e2e suites (ADR-010). Moved to docs/design with frontmatter versioning."
+notes: "The earlier learning-project requirements document is removed. Follows gralph v0.12.0. The shared prompt and the gates live in the task file under `shared` (ADR-008), a run folder's `sandbox.json` answers the permission choice (ADR-009), and the tests split into unit and container e2e suites (ADR-010). Moved to docs/design with frontmatter versioning."
 ---
 
 # alr — Architecture Overview
@@ -23,7 +23,7 @@ notes: "Follows gralph v0.12.0. The shared prompt and the gates live in the task
 
 `alr` is the Python port of [gralph](https://github.com/twistingmercury/gralph), which is written in Go. The port exists because the next step for the tool is to grow into a full agent built on a Python framework such as LangGraph or CrewAI. Those frameworks are Python only, so the runner moves to Python first.
 
-This set of documents covers the first step: porting gralph's engine and its plain (no full-screen view) mode. The port is drop-in compatible: an existing gralph v0.12.0 task file, sandbox settings file, and command line work with `alr` unchanged. These documents replace the earlier learning-project requirements in `docs/requirements/01_requirements_v01.md`.
+This set of documents covers the first step: porting gralph's engine and its plain (no full-screen view) mode. The port is drop-in compatible: an existing gralph v0.12.0 task file, sandbox settings file, and command line work with `alr` unchanged. These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
 
 ## Core Concept
 
