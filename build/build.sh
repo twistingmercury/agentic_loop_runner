@@ -92,18 +92,6 @@ e2e_tests() {
 }
 
 main() {
-    local mode="${1:-all}"
-
-    if [ "${mode}" = "e2e" ]; then
-        e2e_tests
-        return $?
-    fi
-
-    if [ "${mode}" != "all" ]; then
-        printf "ERROR: unknown mode %s; use no argument or e2e\n" "${mode}" >&2
-        return 1
-    fi
-
     build
     e2e_tests
 }

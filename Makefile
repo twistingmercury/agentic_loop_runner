@@ -6,15 +6,8 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\n\033[1mAvailable targets:\033[0m\n"} /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 
-
-test: analyze unit ## Run analyze, then the unit tests (e2e runs in a container: make e2e)
-
-unit: ## Run the unit tests only
+test: analyze ## Run analyze, then the unit tests (e2e runs in a container: make e2e)
 	uv run pytest tests/unit
-
-e2e: ## Run the e2e tests in a container against the wheel in dist/ (run make build first)
-	build/build.sh e2e
-
 
 analyze: ## Runs formatting and linting
 	uv run ruff format
