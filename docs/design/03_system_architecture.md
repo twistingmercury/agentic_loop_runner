@@ -1,7 +1,7 @@
 ---
-version: 3
+version: 4
 date: 2026-10-06
-notes: "Split the Architecture Overview diagram into an import diagram and a front end diagram, reformatted with the mermaid skill. Fixed the paths to gralph's own documents, which a bulk rename had pointed at this repository's docs/design."
+notes: "Architecture Overview diagrams: block text is #333333 on every fill."
 ---
 
 # alr — System Architecture
@@ -45,9 +45,9 @@ flowchart TD
     stream --> engine
     engine --> tasks
 
-    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#1f2328
-    classDef green fill:#9fd8a8,stroke:#6e7781,color:#1f2328
-    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#1f2328
+    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#333333
+    classDef green fill:#9fd8a8,stroke:#6e7781,color:#333333
+    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
 The engine does not import a front end. It is handed one and calls it through the `FrontEnd` interface, which `alr.cli` picks once:
@@ -70,10 +70,10 @@ flowchart TD
     iface -.->|implemented by| stream
     tui -.->|"will use"| stream
 
-    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#1f2328
-    classDef green fill:#9fd8a8,stroke:#6e7781,color:#1f2328
-    classDef purple fill:#c9b2ee,stroke:#6e7781,color:#1f2328
-    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#1f2328
+    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#333333
+    classDef green fill:#9fd8a8,stroke:#6e7781,color:#333333
+    classDef purple fill:#c9b2ee,stroke:#6e7781,color:#333333
+    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
 In this design `alr.cli` always picks the plain front end. The stream front end and the run log are complete and tested, and the next design switches them on from the TUI.

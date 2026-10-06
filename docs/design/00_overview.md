@@ -1,7 +1,7 @@
 ---
-version: 4
+version: 5
 date: 2026-10-06
-notes: "Reformatted the Core Concept diagram with the mermaid skill: files and programs grouped, palette colors, one back edge."
+notes: "Core Concept diagram: every block has an explicit fill and a #333333 text color, so none depends on the viewer's theme."
 ---
 
 # alr — Architecture Overview
@@ -32,7 +32,7 @@ This set of documents covers the first step: porting gralph's engine and its pla
 title: alr and what it talks to
 ---
 flowchart TD
-    user["User in a terminal, script, or CI"]
+    user["User in a terminal, script, or CI"]:::gray
     alr["alr"]:::blue
 
     subgraph files["Files"]
@@ -54,9 +54,12 @@ flowchart TD
     alr -->|"sh -c, after a completed session"| gates
     alr -->|"add -A and commit, with --commit"| git
 
-    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#1f2328
-    classDef green fill:#9fd8a8,stroke:#6e7781,color:#1f2328
-    classDef amber fill:#f2cc80,stroke:#6e7781,color:#1f2328
+    classDef blue fill:#9ec5f4,stroke:#6e7781,color:#333333
+    classDef green fill:#9fd8a8,stroke:#6e7781,color:#333333
+    classDef amber fill:#f2cc80,stroke:#6e7781,color:#333333
+    classDef gray fill:#c4cbd3,stroke:#6e7781,color:#333333
+    style files fill:#c4cbd3,stroke:#6e7781,color:#333333
+    style programs fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
 For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.gates` run and, with `--commit`, is committed. The task file is saved after every task. A failed task stops the run.
