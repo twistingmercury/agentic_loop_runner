@@ -1,7 +1,7 @@
 ---
-version: 9
+version: 10
 date: 2026-10-07
-notes: "The flag that keeps a terminal run in plain mode is --plain, not gralph's --no-tui (ADR-013); ADR-002 notes the rename."
+notes: "ADR-013 makes the view keyboard-only: the mouse is not captured, and every action has a key."
 ---
 
 # alr — Architectural Decisions
@@ -599,6 +599,9 @@ One main window and modal dialogs on top of it.
 - **Layout.** A settings strip (commit mode dropdown, a permissions label, a logging switch, the Start button, and the
   reason Start is disabled), a menu (Folder, Permissions, Gates, Tasks, Sandbox, and Quit buttons, since Textual has no
   menu-bar widget), three panes (tasks, activity for the selected task, and gates and commits), and a status bar.
+- **Keyboard only.** The view is driven entirely from the keyboard and never captures the mouse (`App.run(mouse=False)`),
+  so the terminal's own selection, copy, and scroll work. `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers. Esc cancels any dialog, and Enter in a text
+  field submits it. The menu buttons are a visual menu: Tab and Enter work on them too.
 - **States.** Setup (something is missing, Start disabled with the reason shown), Ready, Running (Start becomes Stop,
   the settings are locked), and Finished (a summary pop-up with the outcome and time, then the app stays open until
   quit). There is no second run in the same session.
@@ -634,6 +637,7 @@ One main window and modal dialogs on top of it.
 - A new third-party dependency, Textual, to track and scan
 - A second run needs a relaunch
 - A folder that holds a `sandbox.json` can still be run unsandboxed from the permissions setting, by an explicit choice
+- Nothing in the view can be clicked: every action needs its key, so the footer has to keep showing them
 
 ### ADR-014: Commits in the TUI: per task or after all tasks, when there is a work tree
 

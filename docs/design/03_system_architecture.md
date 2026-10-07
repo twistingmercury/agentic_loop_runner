@@ -1,7 +1,7 @@
 ---
-version: 10
+version: 11
 date: 2026-10-07
-notes: "The flag that keeps a terminal run in plain mode is --plain (ADR-013)."
+notes: "The TUI component is keyboard-only: it captures no mouse, and every action has a key (ADR-013)."
 ---
 
 # alr — System Architecture
@@ -290,6 +290,7 @@ How gralph's packages map onto this:
   user stopped (the app's stop flag) as stopped, and any other error as failed; the error text of a cancelled run
   varies, so it is not matched
 - Open `tasks.yaml` and `sandbox.json` in a read-only viewer from the menu
+- Capture no mouse and take every action from the keyboard: `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers; Esc cancels a dialog (ADR-013)
 
 **Key Characteristics:**
 
@@ -298,7 +299,7 @@ How gralph's packages map onto this:
 | Library        | Textual                                                       |
 | Runtime        | The app's own `asyncio` loop; the engine is one worker in it  |
 | State          | The run settings, the app state, and the events seen so far   |
-| Controls       | Start, Stop, the settings, the menu; no pause, skip, or retry |
+| Controls       | Keys only, no mouse; no pause, skip, or retry                  |
 | Imports        | `alr.stream`, `alr.engine`, `alr.tasks`; never `alr.plain`    |
 
 ## The Front End Interface

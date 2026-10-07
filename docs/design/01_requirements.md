@@ -1,7 +1,7 @@
 ---
-version: 6
+version: 7
 date: 2026-10-07
-notes: "--plain replaces gralph's --no-tui: the command-line table and the known differences say so."
+notes: "Goal 20 and a success criterion: the view is keyboard-only and never captures the mouse."
 ---
 
 # alr — Requirements
@@ -58,6 +58,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 17. Offer a permissions setting of the folder's `sandbox.json` (the default when it exists) or skip permissions, never defaulting to unsandboxed
 18. Offer a logging toggle, on by default, writing to `<folder>/logs` and, inside a git work tree, blocking Start when that folder is not git-ignored
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
+20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
 
 ### Secondary Goals
 
@@ -132,6 +133,7 @@ Known differences from gralph in this step:
 | Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
 | View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |
 | Skill install          | The bundled skill lands in `~/.claude/skills/gralph-docs-writer/`, replacing any copy           | Unit test with a temporary home; e2e                                        |
+| Keyboard only          | The mouse is not captured; the whole setup and a run can be done with keys alone                | TUI unit test of the keyboard-only flow                                     |
 | Build                  | `make test` (analyze and unit tests) and `make build` (wheel, then e2e in a container) pass     | CI                                                                          |
 
 ## Constraints
