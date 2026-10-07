@@ -680,8 +680,11 @@ async def test_launch_opens_the_gates_dialog_when_flags_answer_everything_else(
     text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
-    async with app.run_test():
+    async with app.run_test() as pilot:
         await _until(lambda: isinstance(app.screen, GatesDialog))
+        # Let the table's queued first highlight land; leaving with it queued
+        # makes it arrive in a closing app on a busy worker.
+        await pilot.pause()
 
 
 async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
