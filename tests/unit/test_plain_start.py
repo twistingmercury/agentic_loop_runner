@@ -1,12 +1,20 @@
 """The plain real run: load, check the repository, then run the loop."""
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import commit_subjects, write_file, write_nested_file
+from helpers import (
+    cancel_run,
+    commit_subjects,
+    wait_for_text,
+    wait_until_gone,
+    write_file,
+    write_nested_file,
+)
 
 from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args
@@ -19,7 +27,8 @@ from alr.errors import (
     TaskFileError,
 )
 from alr.plain.start import start
-from alr.record.runlog import run_dir
+from alr.record.events import Activity, Event
+from alr.record.runlog import RunLog, run_dir
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -340,3 +349,66 @@ async def test_start_twice_in_the_same_second_keeps_two_run_folders(
     for name in folders:
         events = _ledger(tmp_path / "logs" / name)
         assert events[0]["event"] == "run_started"
+
+
+def _spy_on_close(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count the calls to RunLog.close, which still closes the log."""
+    closed: list[int] = []
+    real_close = RunLog.close
+
+    def close(self: RunLog) -> None:
+        closed.append(1)
+        real_close(self)
+
+    monkeypatch.setattr(RunLog, "close", close)
+    return closed
+
+
+async def test_start_cancel_ends_the_ledger_with_stopped(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+    closed = _spy_on_close(monkeypatch)
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    run = asyncio.ensure_future(_start(tasks_file))
+    await wait_for_text(ready)
+    await cancel_run(run)
+
+    last = _ledger(_run_folder(tasks_file))[-1]
+    assert last["event"] == "run_finished"
+    assert last["result"] == "stopped"
+    assert closed == [1], "the log must be closed once"
+    assert (tmp_path / "tasks.yaml").read_text(encoding="utf-8") == ONE_TASK_YAML
+
+
+async def test_start_log_write_failure_stops_the_run_and_the_child(
+    fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    # Writes its pid, prints a line, which the log records as activity, then blocks as the
+    # same process, so the pid in the ready file is the one that must go.
+    script = fake_claude / "claude"
+    script.write_text(
+        f"#!/bin/sh\necho $$ > {ready}\necho working\nexec sleep 300\n",
+        encoding="utf-8",
+    )
+    closed = _spy_on_close(monkeypatch)
+    real_record = RunLog.record
+
+    def failing_record(self: RunLog, event: Event) -> None:
+        if isinstance(event, Activity):
+            raise RunLogError("disk full")
+
+        real_record(self, event)
+
+    monkeypatch.setattr(RunLog, "record", failing_record)
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    with pytest.raises(RunLogError, match="disk full"):
+        await _start(tasks_file)
+
+    await wait_until_gone(int(await wait_for_text(ready)))
+    assert closed == [1], "the log must be closed once"
