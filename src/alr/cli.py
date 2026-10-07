@@ -94,8 +94,8 @@ def _install_skill() -> int:
 
 
 def wants_tui(args: argparse.Namespace) -> bool:
-    """Report whether this run opens the full-screen view: a terminal, no --no-tui, no dry run."""
-    if args.no_tui or args.dry_run:
+    """Report whether this run opens the full-screen view: a terminal, no --plain, no dry run."""
+    if args.plain or args.dry_run:
         return False
 
     return sys.stdin.isatty() and sys.stdout.isatty()
@@ -162,7 +162,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)",
     )
     parser.add_argument(
-        "--no-tui",
+        "--plain",
         action="store_true",
         help="Use plain output instead of the full-screen view",
     )

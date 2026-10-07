@@ -57,19 +57,19 @@ def assert_log_dir_refused(run: LogDirRun) -> None:
     assert run.tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
 
 
-def test_log_dir_no_tui_is_refused(tmp_path: Path, fake_claude: Path) -> None:
-    assert_log_dir_refused(run_with_log_dir(tmp_path, "--no-tui"))
+def test_log_dir_plain_is_refused(tmp_path: Path, fake_claude: Path) -> None:
+    assert_log_dir_refused(run_with_log_dir(tmp_path, "--plain"))
 
 
 def test_log_dir_no_terminal_is_refused(tmp_path: Path, fake_claude: Path) -> None:
-    """With no terminal the run is plain without --no-tui, so the same refusal applies."""
+    """With no terminal the run is plain without --plain, so the same refusal applies."""
     assert_log_dir_refused(run_with_log_dir(tmp_path))
 
 
 def test_log_dir_empty_value_counts_as_not_passed(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    run = run_with_log_dir(tmp_path, "--no-tui", empty=True)
+    run = run_with_log_dir(tmp_path, "--plain", empty=True)
 
     assert run.res.code == 0, run.res
     assert run.calls == 1, "the run must go ahead"

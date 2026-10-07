@@ -1,4 +1,4 @@
-"""The command line itself: --version, --help, required flags, missing files, and --no-tui."""
+"""The command line itself: --version, --help, required flags, missing files, and --plain."""
 
 from pathlib import Path
 
@@ -32,7 +32,7 @@ def test_help_flag() -> None:
         "--commit",
         "--log-dir",
         "--dry-run",
-        "--no-tui",
+        "--plain",
         "--version",
     ):
         assert flag in res.out
@@ -68,8 +68,8 @@ def run_two_tasks(folder: Path, *flags: str) -> tuple[Result, str]:
 
 
 def test_non_terminal_defaults_to_plain(tmp_path: Path, fake_claude: Path) -> None:
-    """With no terminal attached, a run without --no-tui matches one with it."""
-    plain, plain_saved = run_two_tasks(tmp_path / "plain", "--no-tui")
+    """With no terminal attached, a run without --plain matches one with it."""
+    plain, plain_saved = run_two_tasks(tmp_path / "plain", "--plain")
     default, default_saved = run_two_tasks(tmp_path / "default")
 
     assert plain.code == 0, plain
@@ -77,10 +77,10 @@ def test_non_terminal_defaults_to_plain(tmp_path: Path, fake_claude: Path) -> No
     assert default_saved == plain_saved
 
 
-def test_no_tui_is_accepted_and_the_run_is_plain(
+def test_plain_is_accepted_and_the_run_is_plain(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    res, saved = run_two_tasks(tmp_path / "plain", "--no-tui")
+    res, saved = run_two_tasks(tmp_path / "plain", "--plain")
 
     assert res.code == 0, res
     assert res.err == ""

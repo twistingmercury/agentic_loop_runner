@@ -157,11 +157,21 @@ def test_prompt_flag_is_an_unknown_argument(
     assert "required flag" not in err
 
 
+def test_no_tui_flag_is_an_unknown_argument(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--no-tui", "-t", "t.yaml", "--dry-run"])
+
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --no-tui" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("flag", ["-d", "--dir"])
 def test_dir_with_only_tasks_yaml_dry_runs(
     flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main([flag, str(folder), "--dry-run", "--no-tui"]) == 0
+    assert cli.main([flag, str(folder), "--dry-run", "--plain"]) == 0
     assert f"{folder / 'tasks.yaml'} is valid" in capsys.readouterr().out
 
 
@@ -477,10 +487,10 @@ def test_check_commit_flags_maps_the_flags_to_a_mode(
     [
         ([], True, True),
         ([], False, False),
-        (["--no-tui"], True, False),
+        (["--plain"], True, False),
         (["--dry-run"], True, False),
     ],
-    ids=["terminal", "no terminal", "--no-tui", "--dry-run"],
+    ids=["terminal", "no terminal", "--plain", "--dry-run"],
 )
 def test_wants_tui(
     flags: list[str], tty: bool, want: bool, monkeypatch: pytest.MonkeyPatch
