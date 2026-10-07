@@ -123,6 +123,10 @@ def wait_for_file(path: Path, timeout: float = 10) -> str:
 
 async def wait_for_text(path: Path, timeout: float = 5) -> str:
     """Wait for a child to write something to path and return it."""
+    # Always yield once: when the file is already there, a task the caller just
+    # created would otherwise never get to run before the caller cancels it,
+    # and cancelling a task that has not started stops nothing it would start.
+    await asyncio.sleep(0)
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         if text := _written_text(path):
