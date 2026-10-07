@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pexpect
 from e2e_helpers import (
+    assert_no_tmp_file,
     find_alr,
     read_tasks_yaml,
     shared_block,
@@ -70,6 +71,7 @@ def test_view_stop_ends_a_blocked_run_as_stopped(
 ) -> None:
     folder = git_repo / "run"
     tasks_path = write_tasks_yaml(folder, TASKS)
+    before = tasks_path.read_text(encoding="utf-8")
     ready_file = tmp_path / "ready"
     child = _spawn(
         folder, {"FAKECLAUDE_BLOCK": "1", "FAKECLAUDE_READY_FILE": str(ready_file)}
@@ -87,7 +89,9 @@ def test_view_stop_ends_a_blocked_run_as_stopped(
         child.close(force=True)
 
     assert child.exitstatus == 1
-    assert task_states(read_tasks_yaml(tasks_path)) == {1: "pending"}
+    # A stopped run saves nothing, so the next run picks the task up again.
+    assert tasks_path.read_text(encoding="utf-8") == before
+    assert_no_tmp_file(tasks_path)
 
 
 def test_view_runs_to_done_outside_a_git_repository(
