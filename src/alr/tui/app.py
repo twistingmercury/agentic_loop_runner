@@ -3,6 +3,7 @@
 import asyncio
 import signal
 from enum import StrEnum
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -16,11 +17,11 @@ from alr.errors import AlrError
 from alr.stream.events import RunDone
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
-from alr.tui.dialogs import ErrorDialog, SummaryDialog
+from alr.tui.dialogs import ErrorDialog, FolderDialog, SummaryDialog
 from alr.tui.panes import ActivityPane, GatesPane, TasksPane
 from alr.tui.prepare import prepare
 from alr.tasks import TaskList
-from alr.tui.settings import RunSettings
+from alr.tui.settings import Permissions, RunSettings
 
 
 class AppState(StrEnum):
@@ -90,6 +91,21 @@ class AlrApp(App[None]):
             return
 
         self.query_one(TasksPane).load(self._task_list)
+
+    async def ask_folder(self) -> None:
+        """Show the folder dialog and apply an accepted answer to the settings."""
+        check = await self.push_screen_wait(FolderDialog(str(Path.cwd())))
+        if check is None:
+            return
+
+        self.settings.tasks_file = check.tasks_file
+        self._task_list = check.task_list
+        if check.sandbox_file and self.settings.permissions is Permissions.UNSET:
+            self.settings.permissions = Permissions.SANDBOX
+            self.settings.sandbox_file = check.sandbox_file
+
+        self.query_one(TasksPane).load(check.task_list)
+        self._refresh()
 
     def on_unmount(self) -> None:
         asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
