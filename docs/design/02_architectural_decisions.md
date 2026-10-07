@@ -1,7 +1,7 @@
 ---
-version: 4
-date: 2026-10-06
-notes: "Added ADR-011: the unit tests keep one case per branch, not one per ported gralph case."
+version: 6
+date: 2026-10-07
+notes: "Decision Summary numbers link to their ADRs, and each ADR links back to the summary. Added ADR-012 to ADR-016 for the TUI design: in-process worker with Stop only, modal dialogs and an explicit Start, per-task or after-all commits, the logging toggle, and --install-skill."
 ---
 
 # alr — Architectural Decisions
@@ -27,58 +27,79 @@ Each architectural decision is recorded as an ADR with the following structure:
 
 ## Decision Summary
 
-| ADR # | Title                                                  | Status   | Date       |
-| ----- | ------------------------------------------------------ | -------- | ---------- |
-| 001   | Port gralph to Python, drop-in compatible              | Accepted | 2026-10-04 |
-| 002   | Engine first; the TUI is the next design               | Accepted | 2026-10-04 |
-| 003   | An async engine                                        | Accepted | 2026-10-04 |
-| 004   | One engine, two front ends                             | Accepted | 2026-10-04 |
-| 005   | PyYAML nodes and hand-written validation, no pydantic  | Accepted | 2026-10-04 |
-| 006   | Port the tests first, with a fake claude on PATH       | Accepted | 2026-10-04 |
-| 007   | Compatible in use, Python-native inside                | Accepted | 2026-10-04 |
-| 008   | The shared prompt and gates live in the task file      | Accepted | 2026-10-06 |
-| 009   | The run folder's sandbox.json answers the permission choice | Accepted | 2026-10-06 |
-| 010   | Unit tests under `make test`, e2e tests in a container | Accepted | 2026-10-06 |
-| 011   | The unit tests keep one case per branch                | Accepted | 2026-10-06 |
+| ADR #                                                                              | Title                                                               | Status   | Date       |
+|------------------------------------------------------------------------------------|---------------------------------------------------------------------|----------|------------|
+| [001](#adr-001-port-gralph-to-python-drop-in-compatible)                           | Port gralph to Python, drop-in compatible                           | Accepted | 2026-10-04 |
+| [002](#adr-002-engine-first-the-tui-is-the-next-design)                            | Engine first; the TUI is the next design                            | Accepted | 2026-10-04 |
+| [003](#adr-003-an-async-engine)                                                    | An async engine                                                     | Accepted | 2026-10-04 |
+| [004](#adr-004-one-engine-two-front-ends)                                          | One engine, two front ends                                          | Accepted | 2026-10-04 |
+| [005](#adr-005-pyyaml-nodes-and-hand-written-validation-no-pydantic)               | PyYAML nodes and hand-written validation, no pydantic               | Accepted | 2026-10-04 |
+| [006](#adr-006-port-the-tests-first-with-a-fake-claude-on-path)                    | Port the tests first, with a fake claude on PATH                    | Accepted | 2026-10-04 |
+| [007](#adr-007-compatible-in-use-python-native-inside)                             | Compatible in use, Python-native inside                             | Accepted | 2026-10-04 |
+| [008](#adr-008-the-shared-prompt-and-gates-live-in-the-task-file)                  | The shared prompt and gates live in the task file                   | Accepted | 2026-10-06 |
+| [009](#adr-009-the-run-folders-sandboxjson-answers-the-permission-choice)          | The run folder's sandbox.json answers the permission choice         | Accepted | 2026-10-06 |
+| [010](#adr-010-unit-tests-under-make-test-e2e-tests-in-a-container)                | Unit tests under `make test`, e2e tests in a container              | Accepted | 2026-10-06 |
+| [011](#adr-011-the-unit-tests-keep-one-case-per-branch)                            | The unit tests keep one case per branch                             | Accepted | 2026-10-06 |
+| [012](#adr-012-the-tui-runs-the-engine-in-process-as-a-textual-worker)             | The TUI runs the engine in-process as a Textual worker              | Proposed | 2026-10-07 |
+| [013](#adr-013-setup-in-modal-dialogs-over-one-main-window-with-an-explicit-start) | Setup in modal dialogs over one main window, with an explicit Start | Proposed | 2026-10-07 |
+| [014](#adr-014-commits-in-the-tui-are-always-on-per-task-or-after-all-tasks)       | Commits in the TUI are always on: per task or after all tasks       | Proposed | 2026-10-07 |
+| [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)   | Logging is a toggle, on by default; the gate timeout has no dialog  | Proposed | 2026-10-07 |
+| [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Proposed | 2026-10-07 |
 
 ## Inherited Decisions
 
-These gralph decisions apply to `alr` unchanged. Their full text is in gralph's `docs/architecture/02_architectural_decisions.md` at v0.12.0. Where a later gralph ADR amends one of them, the last column says which `alr` ADR carries the change.
+These gralph decisions apply to `alr` unchanged. Their full text is in gralph's
+`docs/architecture/02_architectural_decisions.md` at v0.12.0. Where a later gralph ADR amends one of them, the last
+column says which `alr` ADR carries the change.
 
-| gralph ADR | Title                                                          | Amended by                |
-| ---------- | -------------------------------------------------------------- | ------------------------- |
-| ADR-001    | Claude Code only, no agent abstraction                         |                           |
-| ADR-002    | YAML task file + shared prompt, strict parsing                 | ADR-008: one file         |
-| ADR-003    | One fresh session per task, no retry                           |                           |
-| ADR-004    | The runner owns task state, atomic writes                      |                           |
-| ADR-005    | Outcome from JSON result line, not exit code                   |                           |
-| ADR-006    | Failed task blocks run until manual reset                      |                           |
-| ADR-007    | Unix only, process group lifecycle management                  |                           |
-| ADR-013    | The runner runs the gates after a completed session            |                           |
-| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request  | ADR-009: found in the run folder |
-| ADR-015    | The runner commits a completed task on request                 |                           |
-| ADR-016    | The runner logs a run on request                               | ADR-008: no `prompt_file` |
-| ADR-019    | One gate list per task file                                    | ADR-008: `shared.gates`   |
-| ADR-020    | The shared prompt and gates live in the task file              | ADR-008 is `alr`'s version |
-| ADR-021    | The run folder's sandbox.json answers the permission choice    | ADR-009 is `alr`'s version |
+| gralph ADR | Title                                                         | Amended by                       |
+|------------|---------------------------------------------------------------|----------------------------------|
+| ADR-001    | Claude Code only, no agent abstraction                        |                                  |
+| ADR-002    | YAML task file + shared prompt, strict parsing                | ADR-008: one file                |
+| ADR-003    | One fresh session per task, no retry                          |                                  |
+| ADR-004    | The runner owns task state, atomic writes                     |                                  |
+| ADR-005    | Outcome from JSON result line, not exit code                  |                                  |
+| ADR-006    | Failed task blocks run until manual reset                     |                                  |
+| ADR-007    | Unix only, process group lifecycle management                 |                                  |
+| ADR-013    | The runner runs the gates after a completed session           |                                  |
+| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request | ADR-009: found in the run folder |
+| ADR-015    | The runner commits a completed task on request                |                                  |
+| ADR-016    | The runner logs a run on request                              | ADR-008: no `prompt_file`        |
+| ADR-019    | One gate list per task file                                   | ADR-008: `shared.gates`          |
+| ADR-020    | The shared prompt and gates live in the task file             | ADR-008 is `alr`'s version       |
+| ADR-021    | The run folder's sandbox.json answers the permission choice   | ADR-009 is `alr`'s version       |
 
-gralph's ADR-008 (Docker-first CI) is already met by this repository's own build. ADR-009 to ADR-012, ADR-017, and ADR-018 cover the skill, the TUI, releases, and the wizard, and are left to later designs. gralph's ADR-022 (no check of the installed skill) supersedes its ADR-010 and needs nothing here: `alr` has no skill check, and the next design's `--install-skill` will not add one. gralph's ADR-018 is partly ported already: `-d` finds `tasks.yaml` (and, by ADR-009, `sandbox.json`); the wizard is left to the next design.
+gralph's ADR-008 (Docker-first CI) is already met by this repository's own build. ADR-009 to ADR-012, ADR-017, and
+ADR-018 cover the skill, the TUI, releases, and the wizard, and are left to later designs. gralph's ADR-022 (no check of
+the installed skill) supersedes its ADR-010 and needs nothing here: `alr` has no skill check, and the next design's
+`--install-skill` will not add one. gralph's ADR-018 is partly ported already: `-d` finds `tasks.yaml` (and, by ADR-009,
+`sandbox.json`); the wizard is left to the next design.
 
 ## Decisions
 
 ### ADR-001: Port gralph to Python, drop-in compatible
 
-**Status:** Accepted; what "drop-in compatible" covers is narrowed by ADR-007, and its reference version moves to gralph v0.12.0 under ADR-008 and ADR-009
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted; what "drop-in compatible" covers is narrowed by ADR-007, and its reference version moves to gralph
+v0.12.0 under ADR-008 and ADR-009
 
 **Context:**
 
-The runner is meant to grow into a full agent on a Python framework such as LangGraph or CrewAI. gralph is Go. `alr` was started as a simpler Python runner written by hand as a learning project, with a different task model. Three levels of faithfulness were considered: drop-in compatible, the same behavior with warts tidied, and a rethink shaped around the future agent.
+The runner is meant to grow into a full agent on a Python framework such as LangGraph or CrewAI. gralph is Go. `alr` was
+started as a simpler Python runner written by hand as a learning project, with a different task model. Three levels of
+faithfulness were considered: drop-in compatible, the same behavior with warts tidied, and a rethink shaped around the
+future agent.
 
 **Decision:**
 
-Port gralph to Python in this repository, replacing the existing `alr` code and keeping the name `alr`. The port is drop-in compatible: same flags, task file format, result line, gates, commit, sandbox behavior, run log, and error text. gralph at commit `170dc6f` is the behavioral reference. The code is written by Claude and reviewed by the owner; the earlier rule that the owner writes every line no longer applies.
+Port gralph to Python in this repository, replacing the existing `alr` code and keeping the name `alr`. The port is
+drop-in compatible: same flags, task file format, result line, gates, commit, sandbox behavior, run log, and error text.
+gralph at commit `170dc6f` is the behavioral reference. The code is written by Claude and reviewed by the owner; the
+earlier rule that the owner writes every line no longer applies.
 
-Tidying was rejected because every tidy-up is a compatibility decision that slows the port. A rethink was rejected because it has no acceptance tests and guesses at what the agent will need.
+Tidying was rejected because every tidy-up is a compatibility decision that slows the port. A rethink was rejected
+because it has no acceptance tests and guesses at what the agent will need.
 
 **Consequences:**
 
@@ -96,17 +117,24 @@ Tidying was rejected because every tidy-up is a compatibility decision that slow
 
 ### ADR-002: Engine first; the TUI is the next design
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-gralph is about 14,700 lines of Go, roughly half tests. It includes a full-screen view and a setup wizard on Bubble Tea. The owner wants a TUI, and a more capable one than the Go version, because plain command-line use is tedious. Porting everything at once makes one very large change to review.
+gralph is about 14,700 lines of Go, roughly half tests. It includes a full-screen view and a setup wizard on Bubble Tea.
+The owner wants a TUI, and a more capable one than the Go version, because plain command-line use is tedious. Porting
+everything at once makes one very large change to review.
 
 **Decision:**
 
-Split the work. This design covers the task file, the engine, plain mode, dry-run, and the engine side of the full-screen path (stream-json parsing, events, the run log). The Textual view, the wizard, `--install-skill`, and the skill check are the next design.
+Split the work. This design covers the task file, the engine, plain mode, dry-run, and the engine side of the
+full-screen path (stream-json parsing, events, the run log). The Textual view, the wizard, `--install-skill`, and the
+skill check are the next design.
 
-Until the view exists, `alr` always runs plain mode: `--no-tui` is accepted and does nothing, and `--log-dir` on a real run gives gralph's plain-mode error.
+Until the view exists, `alr` always runs plain mode: `--no-tui` is accepted and does nothing, and `--log-dir` on a real
+run gives gralph's plain-mode error.
 
 **Consequences:**
 
@@ -123,15 +151,22 @@ Until the view exists, `alr` always runs plain mode: `--no-tui` is accepted and 
 
 ### ADR-003: An async engine
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-The engine runs subprocesses, reads two pipes at once on the stream path, enforces gate timeouts, and must stop cleanly on a signal. gralph does this with goroutines and context cancellation. In Python the choice is `asyncio` or synchronous code with threads. The planned TUI library (Textual) is built on `asyncio`, and LangGraph is designed for async use.
+The engine runs subprocesses, reads two pipes at once on the stream path, enforces gate timeouts, and must stop cleanly
+on a signal. gralph does this with goroutines and context cancellation. In Python the choice is `asyncio` or synchronous
+code with threads. The planned TUI library (Textual) is built on `asyncio`, and LangGraph is designed for async use.
 
 **Decision:**
 
-Build the engine on `asyncio`: `asyncio` subprocesses, task cancellation for stopping, and loop signal handlers for SIGINT and SIGTERM. A synchronous port with reader threads was rejected: it would be simpler to read today, but the TUI and agent layer would have to run it in a worker thread, and a thread blocked on a subprocess cannot be cancelled without hand-built machinery.
+Build the engine on `asyncio`: `asyncio` subprocesses, task cancellation for stopping, and loop signal handlers for
+SIGINT and SIGTERM. A synchronous port with reader threads was rejected: it would be simpler to read today, but the TUI
+and agent layer would have to run it in a worker thread, and a thread blocked on a subprocess cannot be canceled
+without hand-built machinery.
 
 **Consequences:**
 
@@ -149,17 +184,25 @@ Build the engine on `asyncio`: `asyncio` subprocesses, task cancellation for sto
 
 ### ADR-004: One engine, two front ends
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-gralph has two ways to run a task, picked by whether a `report` hook is set. The plain path prints and passes output through. The stream path captures output and reports events. The choice is checked inside the looper, the gate runner, and the committer, so plain-only and TUI-only logic are mixed into the same functions. The owner wants a clean, clear line between what the plain path runs and what the TUI path runs.
+gralph has two ways to run a task, picked by whether a `report` hook is set. The plain path prints and passes output
+through. The stream path captures output and reports events. The choice is checked inside the looper, the gate runner,
+and the committer, so plain-only and TUI-only logic are mixed into the same functions. The owner wants a clean, clear
+line between what the plain path runs and what the TUI path runs.
 
 **Decision:**
 
-Split the package three ways. `alr.engine` holds the shared rules and never prints. `alr.plain` holds only what plain mode does. `alr.stream` holds only what the full-screen path does. The engine is handed a front end object and calls it to run a session, a gate, or a git command and to hear about progress. `alr.cli` picks the front end once.
+Split the package three ways. `alr.engine` holds the shared rules and never prints. `alr.plain` holds only what plain
+mode does. `alr.stream` holds only what the full-screen path does. The engine is handed a front end object and calls it
+to run a session, a gate, or a git command and to hear about progress. `alr.cli` picks the front end once.
 
-Import rules, enforced by a test: `engine` imports neither `plain`, `stream`, nor `tui`; `plain` and `stream` do not import each other.
+Import rules, enforced by a test: `engine` imports neither `plain`, `stream`, nor `tui`; `plain` and `stream` do not
+import each other.
 
 **Consequences:**
 
@@ -176,15 +219,21 @@ Import rules, enforced by a test: `engine` imports neither `plain`, `stream`, no
 
 ### ADR-005: PyYAML nodes and hand-written validation, no pydantic
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-gralph validates the task file on raw YAML nodes: it rejects any tag outside the core set, requires `id` to be a real YAML integer, detects duplicate keys, and reports errors as `tasks[<index>] (id <id>): <field>: <problem>`. The old `alr` used pydantic models. Matching gralph's rules and exact error text through pydantic means fighting its own error format.
+gralph validates the task file on raw YAML nodes: it rejects any tag outside the core set, requires `id` to be a real
+YAML integer, detects duplicate keys, and reports errors as `tasks[<index>] (id <id>): <field>: <problem>`. The old
+`alr` used pydantic models. Matching gralph's rules and exact error text through pydantic means fighting its own error
+format.
 
 **Decision:**
 
-Parse with PyYAML's node API (`yaml.compose`), validate with hand-written checks, and hold the result in plain dataclasses. Remove pydantic. Parse flags with the standard library's `argparse`, with prefix abbreviation turned off.
+Parse with PyYAML's node API (`yaml.compose`), validate with hand-written checks, and hold the result in plain
+dataclasses. Remove pydantic. Parse flags with the standard library's `argparse`, with prefix abbreviation turned off.
 
 **Consequences:**
 
@@ -201,15 +250,21 @@ Parse with PyYAML's node API (`yaml.compose`), validate with hand-written checks
 
 ### ADR-006: Port the tests first, with a fake claude on PATH
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted; its last sentence is amended by ADR-010, and its port-every-case approach by ADR-011
 
 **Context:**
 
-Drop-in compatibility needs proof. gralph has unit tests per package and a black-box e2e suite that runs the real binary against a scriptable fake `claude` placed first on `PATH` and driven by `FAKECLAUDE_*` environment variables.
+Drop-in compatibility needs proof. gralph has unit tests per package and a black-box e2e suite that runs the real binary
+against a scriptable fake `claude` placed first on `PATH` and driven by `FAKECLAUDE_*` environment variables.
 
 **Decision:**
 
-For each module, port gralph's tests to pytest first, then write the code to pass them. Port the fake `claude` as a Python script that honors the same environment variables. Port the e2e scenarios as pytest tests that run the installed `alr` command as a subprocess. The wizard, TUI, install-skill, and skill-check tests are left to the next design. All tests run under `make test` and inside the Docker build.
+For each module, port gralph's tests to pytest first, then write the code to pass them. Port the fake `claude` as a
+Python script that honors the same environment variables. Port the e2e scenarios as pytest tests that run the installed
+`alr` command as a subprocess. The wizard, TUI, install-skill, and skill-check tests are left to the next design. All
+tests run under `make test` and inside the Docker build.
 
 **Consequences:**
 
@@ -226,11 +281,18 @@ For each module, port gralph's tests to pytest first, then write the code to pas
 
 ### ADR-007: Compatible in use, Python-native inside
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-ADR-001 called the port "drop-in compatible" and listed error text among the things that must match. The first five tasks read that strictly: the task file loader was given a custom YAML resolver so plain values such as `yes` and `12:30` load the way gralph's Go YAML library loads them, and the saver was taught to quote strings that library would read as numbers. The owner then clarified the intent. `alr` replaces gralph; the two are not meant to run side by side on the same files. "Drop-in" was about what a person using the tool sees and types, not about reproducing how the Go code represents things inside.
+ADR-001 called the port "drop-in compatible" and listed error text among the things that must match. The first five
+tasks read that strictly: the task file loader was given a custom YAML resolver so plain values such as `yes` and
+`12:30` load the way gralph's Go YAML library loads them, and the saver was taught to quote strings that library would
+read as numbers. The owner then clarified the intent. `alr` replaces gralph; the two are not meant to run side by side
+on the same files. "Drop-in" was about what a person using the tool sees and types, not about reproducing how the Go
+code represents things inside.
 
 **Decision:**
 
@@ -245,11 +307,17 @@ Compatibility covers the surface a user works with:
 
 Compatibility does not cover internal representation:
 
-- YAML is read and written with PyYAML's standard safe loader and dumper rules. A plain value that YAML 1.1 reads as a boolean or a number (`yes`, `on`, `12:30`) must be quoted to be a string; `alr` rejects it with a clear message otherwise
-- Error messages must be clear and name the task and field. They do not have to match gralph's wording, and a ported test that asserts Go-specific wording may be adapted
-- No new code is added only to imitate a Go library. The `alr.gocompat` module from the first tasks is removed: duration parsing and formatting live in `alr.durations` because that is the task file's own format, and the few message helpers live where they are used
+- YAML is read and written with PyYAML's standard safe loader and dumper rules. A plain value that YAML 1.1 reads as a
+  boolean or a number (`yes`, `on`, `12:30`) must be quoted to be a string; `alr` rejects it with a clear message
+  otherwise
+- Error messages must be clear and name the task and field. They do not have to match gralph's wording, and a ported
+  test that asserts Go-specific wording may be adapted
+- No new code is added only to imitate a Go library. The `alr.gocompat` module from the first tasks is removed: duration
+  parsing and formatting live in `alr.durations` because that is the task file's own format, and the few message helpers
+  live where they are used
 
-The saver keeps two behaviors because they serve `alr`'s own users: multi-line text is written as a `|` block, and lists are indented under their key.
+The saver keeps two behaviors because they serve `alr`'s own users: multi-line text is written as a `|` block, and lists
+are indented under their key.
 
 **Consequences:**
 
@@ -265,11 +333,18 @@ The saver keeps two behaviors because they serve `alr`'s own users: multi-line t
 
 ### ADR-008: The shared prompt and gates live in the task file
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-The first version of these documents read the shared prompt from a second file, `prompt.md`, passed with `-p`, and kept the gates as a top-level key of the task file. gralph v0.11.0 (its ADR-020) merged them: one `tasks.yaml` holds a required `shared` block with the `prompt` and the optional `gates`, and `-p/--prompt` is gone. The two files always travelled together, the skill wrote both in one pass, and every consumer had to find, load, and report two paths. `alr` follows gralph here because ADR-001 makes gralph the reference. It also settles the "single-file input" step that the overview's roadmap listed for later.
+The first version of these documents read the shared prompt from a second file, `prompt.md`, passed with `-p`, and kept
+the gates as a top-level key of the task file. gralph v0.11.0 (its ADR-020) merged them: one `tasks.yaml` holds a
+required `shared` block with the `prompt` and the optional `gates`, and `-p/--prompt` is gone. The two files always
+traveled together, the skill wrote both in one pass, and every consumer had to find, load, and report two paths. `alr`
+follows gralph here because ADR-001 makes gralph the reference. It also settles the "single-file input" step that the
+overview's roadmap listed for later.
 
 **Decision:**
 
@@ -289,17 +364,24 @@ tasks:
       Objective: ...
 ```
 
-- **`shared.prompt` is required.** A missing `shared` block, or a prompt that is missing, not a string, empty, or only whitespace, fails parsing. The text is trimmed on load.
-- **`shared.gates` is optional, with ADR-019's rules unchanged.** Absent means not decided, `[]` means no gates, and a save keeps whichever the file had. Error names read `shared.gates[<j>]`.
-- **Unknown keys are errors.** A top-level `gates` key is an error that says gates live under `shared.gates`, as is a task-level `gates`. Any other top-level key, and any `shared` key other than `prompt` and `gates`, is rejected too. Quietly ignoring an old top-level `gates` list would leave a run with no checks.
+- **`shared.prompt` is required.** A missing `shared` block, or a prompt that is missing, not a string, empty, or only
+  whitespace, fails parsing. The text is trimmed on load.
+- **`shared.gates` is optional, with ADR-019's rules unchanged.** Absent means not decided, `[]` means no gates, and a
+  save keeps whichever the file had. Error names read `shared.gates[<j>]`.
+- **Unknown keys are errors.** A top-level `gates` key is an error that says gates live under `shared.gates`, as is a
+  task-level `gates`. Any other top-level key, and any `shared` key other than `prompt` and `gates`, is rejected too.
+  Quietly ignoring an old top-level `gates` list would leave a run with no checks.
 - **`-p/--prompt` is removed** with no compatibility path. Passing it is the unknown-flag error.
-- **`-d <folder>` means `<folder>/tasks.yaml`.** The "no prompt.md" error goes. `-t` stays as the override for a folder holding two task files. A dry run needs nothing the real run does not, so the prompt carve-out goes.
+- **`-d <folder>` means `<folder>/tasks.yaml`.** The "no prompt.md" error goes. `-t` stays as the override for a folder
+  holding two task files. A dry run needs nothing the real run does not, so the prompt carve-out goes.
 - **The run log drops `prompt_file`** from `run_started`. `tasks_file` stays.
-- **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, the task text, then a newline. Gates and `error` are never sent.
+- **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, the task text, then a newline. Gates
+  and `error` are never sent.
 - **A save keeps `shared`.** `shared` is written above `tasks`, with the prompt intact.
 - **`PromptError` goes** with the file it described. A bad `shared.prompt` is a `TaskFileError`.
 
-Keeping `-p` as an override was rejected: it keeps the two-file code path this removes, and the project is too young to need a compatibility path.
+Keeping `-p` as an override was rejected: it keeps the two-file code path this removes, and the project is too young to
+need a compatibility path.
 
 **Consequences:**
 
@@ -311,27 +393,41 @@ Keeping `-p` as an override was rejected: it keeps the two-file code path this r
 
 *Negative:*
 
-- A breaking change for any `tasks.yaml` and `prompt.md` pair from before: they must be merged by hand, and a top-level `gates` moved under `shared`
+- A breaking change for any `tasks.yaml` and `prompt.md` pair from before: they must be merged by hand, and a top-level
+  `gates` moved under `shared`
 - The shared prompt is YAML now: indentation matters, and it loses Markdown editor support
 - A save rewrites the file and does not keep comments or the prompt's own formatting (ADR-005's saver rules)
 
 ### ADR-009: The run folder's sandbox.json answers the permission choice
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-gralph v0.12.0 (its ADR-021) lets a run folder carry its own sandbox settings, found by a fixed name as `tasks.yaml` is. Without it, a run has to repeat `--sandbox-settings <folder>/sandbox.json` even though the file sits beside the task file. `alr` already has `-d`, so the lookup costs little. The same safety rule as ADR-014 applies: a run never ends up unsandboxed by accident.
+gralph v0.12.0 (its ADR-021) lets a run folder carry its own sandbox settings, found by a fixed name as `tasks.yaml` is.
+Without it, a run has to repeat `--sandbox-settings <folder>/sandbox.json` even though the file sits beside the task
+file. `alr` already has `-d`, so the lookup costs little. The same safety rule as ADR-014 applies: a run never ends up
+unsandboxed by accident.
 
 **Decision:**
 
 A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`.
 
-- **When it applies.** `-d <folder>` was given, `<folder>/sandbox.json` is a regular file, and neither `--sandbox-settings` nor `--skip-permissions` was passed. A directory of that name is ignored. The path is `<folder>/sandbox.json` as `-d` was given, not made absolute. Only `-d` looks; `-t` alone never does, and `-d` with `-t` still uses the folder's file.
-- **Precedence.** An explicit `--sandbox-settings` wins. An explicit `--skip-permissions` also wins, with no error: it is how a run opts out of a folder's sandbox. The "both flags" error is for the two explicit flags only.
-- **It never leads to an unsandboxed run.** It only supplies the sandboxed choice. With no file, nothing changes: a real run still exits 1 with the neither-flag error. A found file that is unreadable or not a JSON object fails through the existing validation, exit 1, and never falls back to going without a sandbox.
-- **Plain output.** Nothing new is printed. `--dry-run -d <folder>` names and validates the file on its existing `sandbox settings:` line.
-- **Startup order.** The file is resolved with the task file, in the `--dir` step, so every later check sees the final value.
+- **When it applies.** `-d <folder>` was given, `<folder>/sandbox.json` is a regular file, and neither
+  `--sandbox-settings` nor `--skip-permissions` was passed. A directory of that name is ignored. The path is
+  `<folder>/sandbox.json` as `-d` was given, not made absolute. Only `-d` looks; `-t` alone never does, and `-d` with
+  `-t` still uses the folder's file.
+- **Precedence.** An explicit `--sandbox-settings` wins. An explicit `--skip-permissions` also wins, with no error: it
+  is how a run opts out of a folder's sandbox. The "both flags" error is for the two explicit flags only.
+- **It never leads to an unsandboxed run.** It only supplies the sandboxed choice. With no file, nothing changes: a real
+  run still exits 1 with the neither-flag error. A found file that is unreadable or not a JSON object fails through the
+  existing validation, exit 1, and never falls back to going without a sandbox.
+- **Plain output.** Nothing new is printed. `--dry-run -d <folder>` names and validates the file on its existing
+  `sandbox settings:` line.
+- **Startup order.** The file is resolved with the task file, in the `--dir` step, so every later check sees the final
+  value.
 
 **Consequences:**
 
@@ -342,26 +438,36 @@ A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`.
 
 *Negative:*
 
-- A settings file in a run folder is applied without being named on the command line, so it is as trusted as the folder's `tasks.yaml`, which is already code the run executes
+- A settings file in a run folder is applied without being named on the command line, so it is as trusted as the
+  folder's `tasks.yaml`, which is already code the run executes
 - The only way to run a folder that holds a `sandbox.json` unsandboxed is `--skip-permissions`
 
 ### ADR-010: Unit tests under `make test`, e2e tests in a container
+
+[Back to Decision Summary](#decision-summary)
 
 **Status:** Accepted
 
 **Context:**
 
-ADR-006 put every test under `make test` and inside the Docker build, with the e2e tests running the installed `alr` command. In practice the e2e tests shared helpers and fixtures with the unit tests, so they could pass against code a user never installs, and they ran against the working tree rather than the built wheel.
+ADR-006 put every test under `make test` and inside the Docker build, with the e2e tests running the installed `alr`
+command. In practice the e2e tests shared helpers and fixtures with the unit tests, so they could pass against code a
+user never installs, and they ran against the working tree rather than the built wheel.
 
 **Decision:**
 
 Split the suites so they share nothing.
 
-- `tests/unit/` has its own conftest, helpers, and fake `claude`. `make test` runs the ruff format and lint steps, then `pytest tests/unit`. The Docker build runs the unit tests only.
-- `tests/e2e/` has its own conftest, helpers, requirements, `pytest.ini`, and fake `claude`. It finds `alr` on `PATH` and runs the real command as a subprocess. It never imports from `src/`.
-- The e2e suite runs in a container (`tests/e2e/Dockerfile`, started by `tests/docker-compose.yaml`) against the wheel installed from `dist/`. `make e2e` runs it against the wheel already in `dist/`, and `make build` builds the wheel and then runs it. `build/build.sh` drives both.
+- `tests/unit/` has its own conftest, helpers, and fake `claude`. `make test` runs the ruff format and lint steps, then
+  `pytest tests/unit`. The Docker build runs the unit tests only.
+- `tests/e2e/` has its own conftest, helpers, requirements, `pytest.ini`, and fake `claude`. It finds `alr` on `PATH`
+  and runs the real command as a subprocess. It never imports from `src/`.
+- The e2e suite runs in a container (`tests/e2e/Dockerfile`, started by `tests/docker-compose.yaml`) against the wheel
+  installed from `dist/`. `make e2e` runs it against the wheel already in `dist/`, and `make build` builds the wheel and
+  then runs it. `build/build.sh` drives both.
 
-This amends ADR-006's last sentence only: the tests are still ported first, the fake `claude` is still driven by `FAKECLAUDE_*` variables, and no test needs a real Claude or the network.
+This amends ADR-006's last sentence only: the tests are still ported first, the fake `claude` is still driven by
+`FAKECLAUDE_*` variables, and no test needs a real Claude or the network.
 
 **Consequences:**
 
@@ -378,16 +484,22 @@ This amends ADR-006's last sentence only: the tests are still ported first, the 
 
 ### ADR-011: The unit tests keep one case per branch
 
+[Back to Decision Summary](#decision-summary)
+
 **Status:** Accepted
 
 **Context:**
 
-ADR-006 ported gralph's tests case by case. By the time the stream path was built, the unit suite held 608 tests: 274 test functions and 334 rows in parametrized tables. A review of the suite found about 180 of them redundant. It judged each one two ways: breaking the source on purpose and seeing whether a test noticed, and comparing branch coverage with and without the test. The redundant ones fell into four groups:
+ADR-006 ported gralph's tests case by case. By the time the stream path was built, the unit suite held 608 tests: 274
+test functions and 334 rows in parametrized tables. A review of the suite found about 180 of them redundant. It judged
+each one two ways: breaking the source on purpose and seeing whether a test noticed, and comparing branch coverage with
+and without the test. The redundant ones fell into four groups:
 
 - Table rows that push different bad values through one branch, so one row proves the rule as well as ten.
 - Tests of the fake `claude` on their own, which the tests that rely on it already prove.
 - Tests of constants and of helpers a refactor should be free to change.
-- About 40 tests that pinned exact error wording or the operating system's own message text, which ADR-007 does not require and which differs between Linux and macOS.
+- About 40 tests that pinned exact error wording or the operating system's own message text, which ADR-007 does not
+  require and which differs between Linux and macOS.
 
 They cost upkeep, and the count made the suite look more thorough than it was.
 
@@ -395,13 +507,21 @@ They cost upkeep, and the count made the suite look more thorough than it was.
 
 The unit suite keeps one case per distinct branch or user-visible rule, not one per ported gralph case.
 
-- A test or row earns its place if removing it loses a branch (checked with branch coverage) or lets a deliberate bug survive. It is not enough that it reads as a duplicate: the review found three tests it wrongly called duplicates, and branch coverage caught each.
-- A test asserts the exception type and the field, flag, task, or path the message must name. It does not assert the full sentence, hints, or operating system text.
-- The fake `claude` is tested through the code that uses it. A test of the fake itself stays only for behavior no other test exercises.
-- A test written for a real bug stays, with a name or comment that says which bug. Tests that look like duplicates but guard such a bug (the process tests for a descendant that holds a pipe open) are judged by re-breaking the fix, not by reading.
-- A prune is checked by comparing branch coverage of the whole suite before and after, and by a set of deliberate bugs. Reading alone is not enough.
+- A test or row earns its place if removing it loses a branch (checked with branch coverage) or lets a deliberate bug
+  survive. It is not enough that it reads as a duplicate: the review found three tests it wrongly called duplicates, and
+  branch coverage caught each.
+- A test asserts the exception type and the field, flag, task, or path the message must name. It does not assert the
+  full sentence, hints, or operating system text.
+- The fake `claude` is tested through the code that uses it. A test of the fake itself stays only for behavior no other
+  test exercises.
+- A test written for a real bug stays, with a name or comment that says which bug. Tests that look like duplicates but
+  guard such a bug (the process tests for a descendant that holds a pipe open) are judged by re-breaking the fix, not by
+  reading.
+- A prune is checked by comparing branch coverage of the whole suite before and after, and by a set of deliberate bugs.
+  Reading alone is not enough.
 
-This amends ADR-006: gralph's tests still guide the port and define what a user sees, but they are not copied row for row. It does not change ADR-010: the e2e suite stays black-box and separate.
+This amends ADR-006: gralph's tests still guide the port and define what a user sees, but they are not copied row for
+row. It does not change ADR-010: the e2e suite stays black-box and separate.
 
 **Consequences:**
 
@@ -414,7 +534,201 @@ This amends ADR-006: gralph's tests still guide the port and define what a user 
 *Negative:*
 
 - Less direct traceability from a `alr` test to the gralph test it came from
-- Branch coverage does not prove two inputs expose the same bug: an input that reaches an existing branch can still reveal a different fault (a byte order mark in a settings file is one), so such a case needs its own row
+- Branch coverage does not prove two inputs expose the same bug: an input that reaches an existing branch can still
+  reveal a different fault (a byte order mark in a settings file is one), so such a case needs its own row
 - A few small checks, such as the leading whitespace of the first line of a gate command, are no longer pinned
+
+### ADR-012: The TUI runs the engine in-process as a Textual worker
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed
+
+**Context:**
+
+Step 2 adds a full-screen view. The engine is `asyncio`, Textual runs on `asyncio`, and the stream front end already
+reports each run event to a `report` callback. The view has to start a run, show it live, and stop it. Three ways to
+host the engine were weighed: an async worker in the app's own event loop, the engine as a child process printing JSON
+lines, and the engine in a separate thread.
+
+**Decision:**
+
+Run the engine as an async Textual worker in the app's own event loop.
+
+- An adapter in `alr.tui` is the `report` callback. It turns each `alr.stream.events` value into a Textual message. It
+  holds only the function that posts messages, never the app or a widget, so the engine's front end cannot pin the app
+  in memory.
+- Each pane listens for those messages and knows nothing about the engine.
+- **Stop** and Ctrl-C both cancel the worker. Textual receives Ctrl-C as a key press, so the app binds it to Stop. The
+  engine's cancel path reports `RunDone` with the text `stopped`, and a clean finish reports `None`.
+- During a run the only control is Stop. Pause, skip, and retry would change how the engine records task state, so they
+  are left for a later design.
+
+**Consequences:**
+
+*Positive:*
+
+- The least new code: the events and the stream front end already exist
+- One event loop, so the engine's process handling and cancellation behave as they do in plain mode
+- The same adapter can feed the agent layer later
+
+*Negative:*
+
+- Ctrl-C needs a binding, and the cancel path needs a test under Textual's own input handling
+- A bug that blocks the event loop freezes the screen, as it would any Textual app
+- No pause, skip, or retry yet
+
+### ADR-013: Setup in modal dialogs over one main window, with an explicit Start
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed
+
+**Context:**
+
+Gralph's setup wizard is a separate sequence of full-screen steps (its ADR-018 and ADR-021). The wanted view is one
+window that is always there, with the setup as pop-ups, and a run that begins only when the user presses Start.
+
+**Decision:**
+
+One main window and modal dialogs on top of it.
+
+- **Layout.** A menu bar, a settings strip (folder, commit mode, permissions, logging, and the Start button), three
+  panes (tasks, activity for the selected task, and gates and commits), and a status bar.
+- **States.** Setup (something is missing, Start disabled with the reason shown), Ready, Running (Start becomes Stop,
+  the settings are locked), and Finished (a summary pop-up with the outcome and time, then the app stays open until
+  quit). There is no second run in the same session.
+- **When dialogs open.** At launch, only for a step the flags and the task file leave open: folder, permissions, then
+  gates. A folder given on the command line, a folder `sandbox.json`, or a task file with `shared.gates` each hides its
+  step. If nothing is open, the app starts in Ready. Until Start, any dialog can be reopened from the menu.
+- **Folder dialog.** A folder picker that starts in the working directory and shows hidden entries. It checks the answer
+  with the functions a run uses: it loads `tasks.yaml`, and it refuses a folder that is not a git repository. The error
+  shows in the dialog.
+- **Permissions.** Sandbox or skip. A folder `sandbox.json` makes sandbox the default. With no such file nothing is
+  pre-selected and Start stays disabled until a settings file is picked or skip is chosen, so nobody runs unsandboxed by
+  accident (gralph ADR-014). An explicit skip wins over the folder file (ADR-009).
+- **Gates dialog.** Add, edit, and delete the shared gates, each a command and an optional timeout.
+- **File viewer.** The menu opens `tasks.yaml` or `sandbox.json` read-only. During a run the dialogs and the viewer are
+  read-only too.
+- **Nothing is written before Start.** Gate edits stay in memory. Start runs the usual startup checks, and the gates are
+  saved to `tasks.yaml` only if they pass. The dialogs fill the same values the flags fill, and the startup checks run
+  again on those values.
+- **When the view is used.** `alr` opens the TUI when stdin and stdout are terminals, `--no-tui` is absent, and the run
+  is not a `--dry-run`. Otherwise, it runs plain mode, as before.
+
+**Consequences:**
+
+*Positive:*
+
+- Nothing starts by accident, and the settings are visible together
+- A typo in a gate or a wrong folder is fixed without restarting
+- The dialogs reuse the run's own checks, so the view cannot accept what a run would refuse
+
+*Negative:*
+
+- A new third-party dependency, Textual, to track and scan
+- A second run needs a relaunch
+- A folder that holds a `sandbox.json` can still be run unsandboxed from the permissions setting, by an explicit choice
+
+### ADR-014: Commits in the TUI are always on: per task or after all tasks
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed
+
+**Context:**
+
+The engine commits per task when `--commit` is passed, and not at all otherwise. The wanted view always commits, and
+offers a choice of one commit per task or one commit when every task is done. The second mode does not exist.
+
+**Decision:**
+
+Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
+
+- **After all.** Each task still runs its session and gates as before. When the last task has completed, the engine runs
+  `git add -A` and one `git commit`, with the first line `alr: <n> tasks completed` and a body listing `<id>: <name>`
+  for each task. A failed or stopped run makes no commit, so the work stays in the tree.
+- **Same checks.** The startup checks are the ones `--commit` has: a clean work tree, and a task file that is ignored or
+  outside the repository.
+- **Flags.** `--commit` keeps its meaning, one commit per task. A new `--commit-after-all` asks for the second mode.
+  Passing both is a usage error. Plain mode accepts both, since the engine is shared.
+- **In the TUI** the commit setting is a choice of the two modes, per task by default, with no way to turn commits off.
+  A passed flag pre-selects its mode.
+
+**Consequences:**
+
+*Positive:*
+
+- One commit per feature is possible without squashing afterward
+- `--commit` and every command line that uses it behave as before
+
+*Negative:*
+
+- After a failed or stopped run, the completed tasks' work is uncommitted, and the dirty-tree check blocks the next
+  start until it is committed or discarded
+- The TUI cannot run without commits, and so cannot run in a folder that is not a git repository
+
+### ADR-015: Logging is a toggle, on by default; the gate timeout has no dialog
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed
+
+**Context:**
+
+`--log-dir` is refused on a real run until the view exists. Gralph asks about logging and about a default gate timeout
+as wizard steps. Since commits are always on in the TUI (ADR-014), a log folder inside the repository would dirty the
+tree unless it is git-ignored.
+
+**Decision:**
+
+- **Logging.** A toggle in the settings strip, on by default, writing the run log to `<folder>/logs`. An explicit
+  `--log-dir` wins and turns the toggle on with that path. Start is blocked, with the line to add to `.gitignore`, when
+  the log folder is not ignored. Plain mode still refuses `--log-dir`.
+- **Gate timeout.** No dialog and no setting. Each gate keeps its own optional timeout, edited in the Gates dialog, and
+  the 10-minute default covers the rest. `--gate-timeout` still works when passed.
+
+**Consequences:**
+
+*Positive:*
+
+- A finished run can be looked at again through its logs
+- The strip and the dialogs stay small
+
+*Negative:*
+
+- A folder that is not ready for logs needs a `.gitignore` edit before the first run, or the toggle off
+- Setting one default timeout for every gate needs the flag, or editing each gate
+
+### ADR-016: `--install-skill` installs the bundled skill and exits
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed
+
+**Context:**
+
+Gralph v0.12.0 has `--install-skill`, which copies its embedded `gralph-docs-writer` skill into `~/.claude/skills/`. It
+no longer checks the install afterward (gralph ADR-022). `alr` reads the same `tasks.yaml`, so the same skill applies.
+
+**Decision:**
+
+- `alr --install-skill` copies the bundled `gralph-docs-writer` skill folder (taken from gralph v0.12.0) to
+  `~/.claude/skills/gralph-docs-writer/`, replacing any existing copy, prints the path, and exits 0. It runs before the
+  other startup checks and opens no screen. An error finding the home folder or writing the files exits 1.
+- The skill ships as package data inside the wheel.
+- Nothing compares the installed copy with the bundled one later, so a missing or edited skill never stops a run.
+
+**Consequences:**
+
+*Positive:*
+
+- One command sets up the helper that writes task files
+- The behavior matches gralph v0.12.0
+
+*Negative:*
+
+- The bundled copy has to be refreshed by hand when gralph's skill changes
+- An installed skill can go stale without any warning
 
 **Next:** [System Architecture](03_system_architecture.md)
