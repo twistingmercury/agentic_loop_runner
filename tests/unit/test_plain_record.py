@@ -7,7 +7,7 @@ import pytest
 from helpers import git, run_loop
 
 from alr.engine.commit import open_repo
-from alr.plain.frontend import PlainFrontEnd, _tee
+from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
     Activity,
     Committed,
@@ -125,7 +125,9 @@ async def test_no_recorder_prints_the_same_output(
 async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_the_terminal(
     capsysbinary: pytest.CaptureFixture[bytes],
 ) -> None:
-    line = b"x" * (8 * 1024 * 1024 - 1) + b"\xff"
+    # "é" is two bytes; starting it on the last byte of the first read splits it across chunks.
+    head = b"x" * (_READ_SIZE - 1) + "é".encode()
+    line = head + b"x" * (8 * 1024 * 1024 - len(head) - 1) + b"\xff"
     reader = asyncio.StreamReader(limit=len(line) * 2)
     reader.feed_data(line)
     reader.feed_eof()
@@ -137,5 +139,7 @@ async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_
     await _tee(reader, chunks, recorder)
 
     assert events == [Activity(task, line.decode("utf-8", errors="replace"))]
+    assert "\ufffd" not in events[0].line[:-1]
+    assert chunks[0][-1:] == b"\xc3"
     assert capsysbinary.readouterr().out == line
     assert b"".join(chunks) == line
