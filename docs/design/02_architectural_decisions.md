@@ -1,7 +1,7 @@
 ---
-version: 15
+version: 16
 date: 2026-10-07
-notes: "ADR-013 describes the view as built: Commit and Logging dropdowns that lock at Start, the menu row with hotkeys in the names and no footer, Stop (^c) and greyed-out buttons during a run, the Tasks and Gates over a full-width Activity layout, the following and wrapping activity pane, elapsed times as 1h 2m 3s, and the command palette off; the inherited table shows ADR-019 amending gralph ADR-016."
+notes: "ADR-013, ADR-015, and ADR-019 say Logging is a setting (a dropdown), and document the -1 folder suffix, the unreported folder name, the unsuffixed check_log_dir check, the idle Gates button, and the 5,000-line Activity limit."
 ---
 
 # alr — Architectural Decisions
@@ -611,9 +611,10 @@ One main window and modal dialogs on top of it.
   and keeps the running task visible. A status bar closes the screen. The layout fits 80x24 and 110x32.
 - **Activity pane.** It shows the lines of one task and follows the running task: when a task starts, the tasks pane
   moves its highlight to that row and the activity pane clears and shows that task's lines. The arrow keys can
-  highlight another task to read its lines (every task's lines are kept); the next task start moves the highlight
+  highlight another task to read its lines (every task's last 5,000 lines are kept); the next task start moves the highlight
   again. The title names the task, `Activity: 3 Add the folder dialog`. Long lines wrap, print raw (no markup), and are
-  redrawn from the kept raw lines when the pane is resized.
+  redrawn from the kept raw lines when the pane is resized. Each task keeps only its last 5,000 lines in the pane;
+  older ones drop without a notice, while the run log keeps every line.
 - **Elapsed times.** The summary pop-up, the status line, and the gate times show elapsed time with
   `format_elapsed`: one decimal under a minute (`12.3s`), then whole seconds with the leading zero units dropped
   (`1m 30s`, `1h 2m 3s`, `2h 0m 0s`). The run log's ledger keeps its own format.
@@ -638,7 +639,8 @@ One main window and modal dialogs on top of it.
 - **Gates dialog.** Add and remove the shared gates, each a command and an optional timeout; a gate is changed by
   removing it and adding it again. Done with no gates is a decision that there are none.
 - **File viewer.** The menu opens `tasks.yaml` or `sandbox.json` read-only, at any time. Once Start is pressed the
-  Folder, Permissions, and Gates buttons do nothing.
+  Folder, Permissions, and Gates buttons do nothing. Gates is not greyed out like the others, so pressing it (or `g`)
+  during a run simply does nothing; the Tasks and Sandbox viewers still open any time.
 - **Nothing is written before Start.** Gate edits stay in memory. Start runs the usual startup checks, and the gates are
   saved to `tasks.yaml` only if they pass. The one exception is resetting failed tasks, which the user asks for
   (ADR-018). The dialogs fill the same values the flags fill, and the startup checks run
@@ -721,10 +723,10 @@ tree unless it is git-ignored.
 
 **Decision:**
 
-- **Logging.** A toggle in the settings strip, on by default, writing the run log to `<folder>/logs`. There is no
+- **Logging.** A dropdown in the settings strip (`on` or `off`), on by default, writing the run log to `<folder>/logs`. There is no
   `--log-dir` ([ADR-019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes)). Inside a work
   tree, Start is blocked, with the line to add to `.gitignore`, when the log folder is not ignored; outside one there is
-  nothing to ignore. Plain mode always logs (ADR-019); the toggle stays in the view.
+  nothing to ignore. Plain mode always logs (ADR-019); the setting stays in the view.
 - **Gate timeout.** No dialog and no setting. Each gate keeps its own optional timeout, edited in the Gates dialog, and
   the 10-minute default covers the rest. `--gate-timeout` still works when passed.
 
@@ -737,7 +739,7 @@ tree unless it is git-ignored.
 
 *Negative:*
 
-- A folder that is not ready for logs needs a `.gitignore` edit before the first run, or the toggle off
+- A folder that is not ready for logs needs a `.gitignore` edit before the first run, or the Logging setting off
 - Setting one default timeout for every gate needs the flag, or editing each gate
 
 ### ADR-016: `--install-skill` installs the bundled skill and exits
@@ -870,7 +872,7 @@ meant two sets of rules.
 - **No `--log-dir`.** The flag is removed; passing it is an unknown-flag error, like `-t` and `--no-tui`.
 - **One place.** Both modes write to `<dir>/logs/<YYYYMMDDTHHMMSS>/`, where `<dir>` is the folder that holds
   `tasks.yaml`.
-- **Plain mode always logs.** There is no way to turn it off. The view keeps its Logging toggle (default on). A dry run
+- **Plain mode always logs.** There is no way to turn it off. The view keeps its Logging setting (default on). A dry run
   never logs, because it writes nothing.
 - **Committing runs.** When a plain run commits (`--commit` or `--commit-after-all`) inside a work tree and the log
   folder is visible to git, the run refuses to start with the engine's `check_log_dir` error. Outside a work tree, or
@@ -882,9 +884,12 @@ meant two sets of rules.
   `→ Tool` lines. `task-<id>.log` holds the lines of Claude's raw stdout and the `→ gate <cmd>` and
   `→ commit <first line of name>` markers. The gates' and git's own output still passes straight through to the
   terminal and is not captured. The ledger (`run.jsonl`) is the same in both modes.
+- **Same-second runs.** If the folder already exists, the writer takes the first free name with a `-1` suffix, then
+  `-2`, and so on, so one run never writes into another's record. The final name is not reported back to the caller (a
+  known limit). `check_log_dir` checks the unsuffixed name, which the same ignore rule for `logs/` covers.
 
 This amends ADR-004 (the plain front end now records events through `alr.record`) and ADR-015 (no `--log-dir`; the
-Logging toggle stays in the view).
+Logging setting stays in the view).
 
 **Consequences:**
 

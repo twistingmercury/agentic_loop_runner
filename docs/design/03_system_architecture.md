@@ -1,7 +1,7 @@
 ---
-version: 15
+version: 16
 date: 2026-10-07
-notes: "The TUI component describes the strip with Commit and Logging dropdowns, the hotkey-named menu row without a footer, the Tasks and Gates over full-width Activity layout, the following activity pane, the Stop (^c) button and greyed-out buttons during a run, and elapsed times as 1h 2m 3s."
+notes: "The engine and TUI components document the -1 run folder suffix, the unreported folder name, the check_log_dir check, the idle Gates button, and the 5,000-line Activity limit; Logging is called a setting."
 ---
 
 # alr — System Architecture
@@ -248,7 +248,8 @@ How gralph's packages map onto this:
 - Record the run (ADR-019): write the run log in `<dir>/logs/<timestamp>/` on every real run, with the ledger
   (`run.jsonl`) and a detail file per task (`task-<id>.log`) holding the lines of Claude's raw stdout plus the
   `→ gate <cmd>` and `→ commit <first line of name>` markers. Gate and git output is not captured. When the run commits
-  inside a work tree and the log folder is not git-ignored, refuse to start with the `check_log_dir` error
+  inside a work tree and the log folder is not git-ignored, refuse to start with the `check_log_dir` error. It checks the unsuffixed folder name, so a `-1` folder is covered only
+  because the ignore rule is for the `logs` folder
 - Dry run: print the task table, each `shared.gates` entry with its effective limit and where the limit came from, the
   sandbox settings path (from a flag or the run folder), and the commit notice; never start Claude or write a file
 
@@ -271,8 +272,9 @@ How gralph's packages map onto this:
 - Report gate and git output as activity lines, with `→ gate <cmd>` and `→ commit <name>` markers
 - Emit events to a `report` callback: `TaskStarted`, `Activity`, `SessionFinished`, `GateFinished`, `Committed`,
   `TaskFinished`, `RunDone`; a cancelled session or gate emits none of the finished kinds
-- Record the run through `alr.record` when the Logging toggle is on: the writer creates the run folder (`0700`, files
-  `0600`), writes `run_started`, appends one ledger line per event to `run.jsonl` with gralph's key order, and appends
+- Record the run through `alr.record` when the Logging setting is on: the writer creates the run folder (`0700`, files
+  `0600`; when two runs start in the same second the later one gets a `-1` suffix, then `-2`, and so on, and the
+  caller is not told the final folder name, a known limit), writes `run_started`, appends one ledger line per event to `run.jsonl` with gralph's key order, and appends
   activity, including the parsed `→ Tool` lines, to `task-<id>.log`
 
 **Key Characteristics:**
@@ -291,10 +293,12 @@ How gralph's packages map onto this:
   button), a menu row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and
   commits side by side on top, the activity pane across the full width below, then a status bar
 - Let the activity pane follow the running task: a task start moves the tasks highlight and shows only that task's
-  lines, wrapped and redrawn on resize; the arrow keys can show another task's lines
+  lines, wrapped and redrawn on resize; the arrow keys can show another task's lines. The pane keeps only the last
+  5,000 lines per task and drops older ones without saying so; the run log keeps every line
 - Show elapsed times with `format_elapsed` (`1h 2m 3s`) in the summary pop-up, the status line, and the gate times
 - Lock the dropdowns at Start for good; while a run goes, make the Start button `Stop (^c)` and grey out Folder,
-  Permissions, Reset, and Quit; at the end disable Start again and re-enable Quit (Folder, Permissions, and Reset stay off)
+  Permissions, Reset, and Quit; at the end disable Start again and re-enable Quit (Folder, Permissions, and Reset stay off). The Gates button is not greyed out but does nothing
+  while a run is going; the Tasks and Sandbox viewers open any time
 - Keep the four states and what each allows: Setup (Start disabled, the reason shown), Ready, Running (settings locked,
   dialogs read-only), and Finished (a summary pop-up with the outcome and time, then the app stays open until quit)
 - At launch open the folder, permissions, and gates dialogs in that order, each only when the flags and the task file
@@ -543,7 +547,7 @@ graph LR
 | alr reads the filesystem    | Task file                     | Treated as code the user chose to run (its prompts go to Claude, its `shared.gates` to `sh -c`); not sanitized                                                                                            |
 | alr reads the filesystem    | Sandbox settings file         | Read once, never written; must be a JSON object; three sandbox keys forced, the rest passed through. May come from the `--dir` folder's `sandbox.json`, which is as trusted as that folder's `tasks.yaml` |
 | alr writes the filesystem   | Task state                    | Atomic: temp file, then rename                                                                                                                                                                            |
-| alr writes the filesystem   | Run log                       | Both modes write `<dir>/logs/<timestamp>/`, a new folder per run: plain mode always, the TUI through its logging toggle; never on a dry run. A run that commits inside a work tree needs the folder git-ignored (plain mode refuses to start, the TUI blocks Start)                                                               |
+| alr writes the filesystem   | Run log                       | Both modes write `<dir>/logs/<timestamp>/`, a new folder per run: plain mode always, the TUI through its Logging setting; never on a dry run. A run that commits inside a work tree needs the folder git-ignored (plain mode refuses to start, the TUI blocks Start)                                                               |
 | alr writes the filesystem   | Gate edits from the TUI       | Only on Start, after the startup checks pass; saved atomically with the task file                                                                                                                         |
 | alr writes the filesystem   | Installed skill               | Only with `--install-skill`: the bundled folder is copied over `~/.claude/skills/gralph-docs-writer/`                                                                                                     |
 | alr starts Claude           | Combined prompt on stdin      | Fixed argv: `--print`, the front end's flags, the session flags                                                                                                                                           |

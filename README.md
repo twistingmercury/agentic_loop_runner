@@ -62,7 +62,9 @@ written, until you press Start. It is keyboard-driven and never captures the mou
 the menu button names show their keys (there is no footer): `s` starts a run (the button
 then reads `Stop (^c)`), Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
 and gates dialogs (Folder, Permissions, Reset, and Quit grey out during a run), `r` resets failed tasks to pending (after you confirm), `t` and `x`
-show `tasks.yaml` and `sandbox.json`, and Esc closes a dialog. Inside a git work tree the
+show `tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a dialog. The Gates
+button does nothing while a run is going. The Activity pane shows only the last 5,000 lines of a
+task, with no warning; the run log keeps every line. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.
@@ -87,7 +89,9 @@ A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 
 A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
 Plain mode always logs; the full-screen view has a Logging dropdown, on by default. When the
-run commits, git must ignore `logs/`, or the run will not start.
+run commits, git must ignore `logs/`, or the run will not start. If two runs start in the
+same second, the later one's folder gets a `-1` suffix (then `-2`); `alr` does not report the
+final folder name back. The git check looks at the plain folder name.
 
 ## How it works
 

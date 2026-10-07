@@ -1,7 +1,7 @@
 ---
-version: 11
+version: 12
 date: 2026-10-07
-notes: "The view goals and success criteria describe the Commit and Logging dropdowns, the hotkey-named menu without a footer, the new layout, greyed-out buttons during a run, and elapsed times in hours, minutes, and seconds."
+notes: "Items 12 and 18 add the same-second folder suffix, the 5,000-line Activity limit, and the idle Gates button during a run."
 ---
 
 # alr — Requirements
@@ -50,13 +50,13 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file
 10. Keep the logic that only plain mode runs clearly apart from the logic that only the full-screen path runs, with the shared rules in one place
 11. Port the full-screen path's engine side now: stream-json parsing, run events, and the run log writer, tested against a fake `claude`
-12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds
+12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds. The Activity pane keeps the last 5,000 lines per task (the run log keeps every line), and the Gates button does nothing while a run goes
 13. Start a run only when the user presses Start, with Start disabled and the reason shown while something is missing
 14. Ask for a missing folder, permission choice, or gate list in modal dialogs over the main window, using gralph's wizard rules, and let any dialog be reopened until Start
 15. Open `tasks.yaml` and `sandbox.json` read-only from the menu
 16. Offer a commit setting of one commit per task (the default) or one commit after all tasks, with commits always on inside a git work tree, and run without commits (with a note) outside one
 17. Offer a permissions setting of the folder's `sandbox.json` (the default when it exists) or skip permissions, never defaulting to unsandboxed
-18. Log every real run to `<folder>/logs/<timestamp>/` in both modes: plain mode always, the view through a Logging dropdown that is on by default. When the run commits inside a git work tree, refuse to start (plain mode) or block Start (the view) if that folder is not git-ignored
+18. Log every real run to `<folder>/logs/<timestamp>/` in both modes: plain mode always, the view through a Logging dropdown that is on by default. When the run commits inside a git work tree, refuse to start (plain mode) or block Start (the view) if that folder is not git-ignored. If two runs start in the same second, the later run's folder gets a `-1` suffix (then `-2`), and the final name is not reported to the caller
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
 20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
 21. Open a task file that holds failed tasks in the view and reset them to pending from the menu after a confirmation, or silently with `--reset-failed` in either mode
