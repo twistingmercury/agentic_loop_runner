@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
@@ -26,7 +27,16 @@ from alr.tui.checks import FolderCheck, check_folder, check_sandbox
 from alr.tui.settings import Permissions
 
 
-class ErrorDialog(ModalScreen[None]):
+class _Dialog[R](ModalScreen[R | None]):
+    """A dialog that Escape closes with no answer, so every one can be left by keyboard."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ErrorDialog(_Dialog[None]):
     """A problem found on Start, or while opening a file."""
 
     def __init__(self, text: str) -> None:
@@ -43,7 +53,7 @@ class ErrorDialog(ModalScreen[None]):
         self.dismiss(None)
 
 
-class SummaryDialog(ModalScreen[None]):
+class SummaryDialog(_Dialog[None]):
     """How the run ended; the app stays open behind it."""
 
     def __init__(self, outcome: str, seconds: float, error: str | None) -> None:
@@ -62,7 +72,7 @@ class SummaryDialog(ModalScreen[None]):
         self.dismiss(None)
 
 
-class FileViewer(ModalScreen[None]):
+class FileViewer(_Dialog[None]):
     """A file shown as it is on disk, read-only."""
 
     def __init__(self, path: str) -> None:
@@ -97,7 +107,7 @@ class _Directories(DirectoryTree):
         return [path for path in paths if path.is_dir()]
 
 
-class FolderDialog(ModalScreen[FolderCheck | None]):
+class FolderDialog(_Dialog[FolderCheck]):
     """Pick the run folder; the answer is checked here, so an error keeps the user on this step."""
 
     def __init__(self, start: str) -> None:
@@ -126,6 +136,9 @@ class FolderDialog(ModalScreen[FolderCheck | None]):
 
         await self._accept(self.query_one("#path", Input).value)
 
+    async def on_input_submitted(self) -> None:
+        await self._accept(self.query_one("#path", Input).value)
+
     async def _accept(self, folder: str) -> None:
         try:
             check = await check_folder(folder)
@@ -144,7 +157,7 @@ class PermissionChoice:
     sandbox_file: str
 
 
-class PermissionsDialog(ModalScreen[PermissionChoice | None]):
+class PermissionsDialog(_Dialog[PermissionChoice]):
     """Sandbox settings file, or skip permissions; nothing is pre-selected without a folder file."""
 
     def __init__(self, default_file: str) -> None:
@@ -174,6 +187,9 @@ class PermissionsDialog(ModalScreen[PermissionChoice | None]):
 
         self._accept()
 
+    def on_input_submitted(self) -> None:
+        self._accept()
+
     def _accept(self) -> None:
         if self.query_one("#skip", RadioButton).value:
             self.dismiss(PermissionChoice(Permissions.SKIP, ""))
@@ -193,8 +209,11 @@ class PermissionsDialog(ModalScreen[PermissionChoice | None]):
         self.dismiss(PermissionChoice(Permissions.SANDBOX, path))
 
 
-class GatesDialog(ModalScreen[list[Gate] | None]):
+class GatesDialog(_Dialog[list[Gate]]):
     """Add and remove the file's shared gates; Done with none is a decision that there are none."""
+
+    # Typing a gate is the first thing to do; the list is reached with Tab.
+    AUTO_FOCUS = "#cmd"
 
     def __init__(self, gates: list[Gate]) -> None:
         super().__init__()
@@ -224,6 +243,9 @@ class GatesDialog(ModalScreen[list[Gate] | None]):
             case "cancel":
                 self.dismiss(None)
 
+    async def on_input_submitted(self) -> None:
+        await self._add()
+
     async def _add(self) -> None:
         cmd = self.query_one("#cmd", Input).value.strip()
         timeout = self.query_one("#timeout", Input).value.strip()
@@ -235,6 +257,8 @@ class GatesDialog(ModalScreen[list[Gate] | None]):
         gate = Gate(cmd=cmd, timeout=timeout)
         self._gates.append(gate)
         await self.query_one("#list", ListView).append(self._item(gate))
+        self.query_one("#cmd", Input).value = ""
+        self.query_one("#timeout", Input).value = ""
 
     async def _remove(self) -> None:
         index = self.query_one("#list", ListView).index

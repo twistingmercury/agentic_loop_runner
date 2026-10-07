@@ -64,6 +64,11 @@ class AlrApp(App[None]):
         # Textual receives Ctrl-C as a key press, so it must be taken here or it quits.
         Binding("ctrl+c", "stop", "Stop", priority=True),
         Binding("q", "quit_if_idle", "Quit"),
+        Binding("f", "menu('folder')", "Folder"),
+        Binding("p", "menu('permissions')", "Permissions"),
+        Binding("g", "menu('gates')", "Gates"),
+        Binding("t", "menu('tasks')", "Tasks file"),
+        Binding("x", "menu('sandbox')", "Sandbox file"),
     ]
 
     def __init__(self, settings: RunSettings) -> None:
@@ -241,6 +246,9 @@ class AlrApp(App[None]):
         if name.startswith("menu-"):
             self._menu(name.removeprefix("menu-"))
 
+    def action_menu(self, item: str) -> None:
+        self._menu(item)
+
     def _menu(self, item: str) -> None:
         """Route a menu button; the viewers work any time, the setup dialogs only before Start."""
         if item == "quit":
@@ -413,5 +421,6 @@ def _outcome(event: RunDone, stopping: bool) -> str:
 def run_app(settings: RunSettings) -> int:
     """Run the view to the end; 0 only when the run finished clean."""
     app = AlrApp(settings)
-    app.run()
+    # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
+    app.run(mouse=False)
     return 0 if app.outcome == "done" else 1

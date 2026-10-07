@@ -22,11 +22,12 @@ from textual.widgets import Input, Select, Static, TextArea
 
 from alr.errors import RunLogError
 from alr.stream.runlog import RunLog
+from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
 from alr.tui.prepare import Prepared
 from alr.tui import app as app_module
-from alr.tui.dialogs import FolderDialog, GatesDialog, PermissionsDialog
+from alr.tui.dialogs import FileViewer, FolderDialog, GatesDialog, PermissionsDialog
 from alr.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
@@ -673,3 +674,159 @@ async def test_stop_in_the_second_task_keeps_the_first_completed(
         states = [task.state for task in saved_tasks(Path(settings.tasks_file)).tasks]
         assert states == ["completed", "pending"]
         assert len(closed_logs) == 1
+
+
+def test_run_app_turns_the_mouse_off(
+    monkeypatch: pytest.MonkeyPatch, git_repo: Path
+) -> None:
+    seen: dict[str, object] = {}
+
+    def record(self: AlrApp, **kwargs: object) -> None:
+        seen.update(kwargs)
+
+    monkeypatch.setattr(AlrApp, "run", record)
+
+    app_module.run_app(_settings(git_repo))
+
+    assert seen == {"mouse": False}
+
+
+@pytest.mark.parametrize(
+    ("key", "dialog"),
+    [("f", FolderDialog), ("p", PermissionsDialog), ("g", GatesDialog)],
+    ids=["folder", "permissions", "gates"],
+)
+async def test_hotkeys_open_the_setup_dialogs_before_start(
+    git_repo: Path, key: str, dialog: type[ModalScreen[object]]
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await pilot.press(key)
+
+        await _until(lambda: isinstance(app.screen, dialog))
+
+
+@pytest.mark.parametrize("key", ["t", "x"])
+async def test_viewer_hotkeys_open_a_viewer(git_repo: Path, key: str) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await pilot.press(key)
+
+        await _until(lambda: isinstance(app.screen, FileViewer))
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("key", ["f", "p", "g"])
+async def test_setup_hotkeys_do_nothing_while_running(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+
+        await pilot.press(key)
+        await pilot.pause()
+        assert not isinstance(app.screen, ModalScreen)
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_viewer_hotkeys_work_while_running(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+
+        await pilot.press("t")
+        await _until(lambda: isinstance(app.screen, FileViewer))
+
+        await pilot.press("escape")
+        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+async def test_hotkeys_do_not_fire_inside_a_dialog(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        await pilot.press("f")
+        await _until(lambda: isinstance(app.screen, FolderDialog))
+        dialog = app.screen
+
+        await pilot.press("g", "tab")
+        await pilot.pause()
+
+        assert app.screen is dialog
+
+
+NO_GATES_TASKS = TASKS.replace("  gates: []\n", "")
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_whole_setup_runs_from_the_keyboard_alone(git_repo: Path) -> None:
+    write_file(git_repo / "run" / "tasks.yaml", NO_GATES_TASKS)
+    settings = RunSettings(logging=False)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        # The folder dialog starts on the working directory; add the folder to it.
+        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await pilot.press("end", *"/run", "enter")
+
+        # Down to "skip", Enter picks it, Tab goes through the file field to OK.
+        await _until(lambda: isinstance(app.screen, PermissionsDialog))
+        await pilot.press("down", "enter", "tab", "tab", "enter")
+
+        # The command field has focus; Enter adds, then Tab to Done.
+        await _until(lambda: isinstance(app.screen, GatesDialog))
+        await pilot.press(*"true", "enter")
+        await pilot.press("tab", "tab", "tab", "tab", "enter")
+
+        await _until(lambda: app.state is AppState.READY)
+        assert settings.gates == [Gate(cmd="true")]
+
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "done"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "enter")
+        await _until(lambda: app.settings.commit_mode is CommitMode.AFTER_ALL)
+
+        await _tab_to(app, pilot, "logging")
+        await pilot.press("space")
+        await _until(lambda: app.settings.logging is True)
+
+        await _tab_to(app, pilot, "start")
+        await pilot.press("enter")
+        await _until(lambda: app.state is not AppState.READY)
+
+
+async def _tab_to(app: AlrApp, pilot: Pilot, widget_id: str) -> None:
+    """Tab along the real focus chain until the widget has focus; fail if it never does."""
+    for _ in range(20):
+        if app.focused is not None and app.focused.id == widget_id:
+            return
+
+        await pilot.press("tab")
+
+    pytest.fail(f"Tab never reached #{widget_id}")

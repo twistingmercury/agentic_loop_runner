@@ -1,14 +1,20 @@
 """The setup dialogs, each driven through a small host app."""
 
+from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 from helpers import write_nested_file
 from textual.app import App
+from textual.screen import ModalScreen
 from textual.widgets import Input, ListView, TextArea
 
 from alr.tui.checks import FolderCheck
 from alr.tasks import Gate
 from alr.tui.dialogs import (
+    ErrorDialog,
+    SummaryDialog,
     FileViewer,
     FolderDialog,
     GatesDialog,
@@ -246,3 +252,98 @@ async def test_file_viewer_closes(tmp_path: Path) -> None:
         await pilot.pause()
 
         assert host.result is None
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: FolderDialog("."),
+        lambda: PermissionsDialog(""),
+        lambda: GatesDialog([]),
+        lambda: FileViewer(""),
+        lambda: ErrorDialog("x"),
+        lambda: SummaryDialog("done", 1.0, None),
+    ],
+    ids=["folder", "permissions", "gates", "viewer", "error", "summary"],
+)
+async def test_escape_closes_every_dialog_with_none(
+    make: Callable[[], ModalScreen[object]],
+) -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(make(), host.record)
+        await pilot.pause()
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert host.result is None
+
+
+async def test_enter_in_the_folder_field_submits(git_repo: Path) -> None:
+    write_nested_file(git_repo / "run" / "tasks.yaml", TASKS)
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(FolderDialog(str(git_repo / "run")), host.record)
+        await pilot.pause()
+        host.screen.query_one("#path", Input).focus()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(host.result, FolderCheck)
+
+
+async def test_enter_in_the_sandbox_field_submits(tmp_path: Path) -> None:
+    sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(PermissionsDialog(str(sandbox)), host.record)
+        await pilot.pause()
+        host.screen.query_one("#file", Input).focus()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert host.result == PermissionChoice(Permissions.SANDBOX, str(sandbox))
+
+
+@pytest.mark.parametrize("field", ["cmd", "timeout"])
+async def test_enter_in_a_gate_field_adds_the_gate(field: str) -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([]), host.record)
+        await pilot.pause()
+        host.screen.query_one("#cmd", Input).value = "pytest"
+        host.screen.query_one(f"#{field}", Input).focus()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert len(host.screen.query_one("#list", ListView).children) == 1
+
+
+async def test_the_gates_dialog_starts_in_the_command_field() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([Gate(cmd="x")]), host.record)
+        await pilot.pause()
+
+        assert host.screen.focused is host.screen.query_one("#cmd", Input)
+
+
+async def test_the_folder_tree_picks_a_folder_with_arrows_and_enter(
+    git_repo: Path,
+) -> None:
+    (git_repo / "run" / "feat").mkdir()
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(FolderDialog(str(git_repo / "run")), host.record)
+        await pilot.pause(0.5)
+
+        await pilot.press("tab", "down", "enter")
+        await pilot.pause()
+
+        assert host.screen.query_one("#path", Input).value == str(
+            git_repo / "run" / "feat"
+        )
