@@ -1,7 +1,7 @@
 ---
-version: 9
+version: 10
 date: 2026-10-07
-notes: "Goal 21 and the --reset-failed flag: failed tasks reset from the view's menu or silently with the flag (ADR-018); the dialog-rules criterion no longer mentions a non-git folder."
+notes: "--log-dir is removed: both modes log to <dir>/logs (ADR-019); the logging goal covers plain mode and the view."
 ---
 
 # alr — Requirements
@@ -56,7 +56,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 15. Open `tasks.yaml` and `sandbox.json` read-only from the menu
 16. Offer a commit setting of one commit per task (the default) or one commit after all tasks, with commits always on inside a git work tree, and run without commits (with a note) outside one
 17. Offer a permissions setting of the folder's `sandbox.json` (the default when it exists) or skip permissions, never defaulting to unsandboxed
-18. Offer a logging toggle, on by default, writing to `<folder>/logs` and, inside a git work tree, blocking Start when that folder is not git-ignored
+18. Log every real run to `<folder>/logs/<timestamp>/` in both modes: plain mode always, the view through a toggle that is on by default. When the run commits inside a git work tree, refuse to start (plain mode) or block Start (the view) if that folder is not git-ignored
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
 20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
 21. Open a task file that holds failed tasks in the view and reset them to pending from the menu after a confirmation, or silently with `--reset-failed` in either mode
@@ -97,7 +97,6 @@ The flags below are accepted, with gralph's meaning and startup order.
 | `--commit`                  |       | Commit each completed task after its gates pass; pre-selects per task in the view        |
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
 | `--commit-after-all`        |       | New in alr. One commit after the last task completes; none on a failed or stopped run; pre-selects after all in the view; with `--commit` is a usage error |
-| `--log-dir <folder>`        |       | Plain mode on a real run exits 1 with gralph's error; the view accepts it and turns logging on |
 | `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
 
 Known differences from gralph in this step:
@@ -105,6 +104,7 @@ Known differences from gralph in this step:
 - The command is `alr`, and messages that name the command say `alr`
 - `--commit-after-all` and `--plain` exist only in `alr`
 - `-t/--tasks` is not accepted: it is an unknown-flag error, and the task file is always `<folder>/tasks.yaml` (ADR-017). Gralph command lines that use `-t` must use `-d`
+- `--log-dir` is not accepted: it is an unknown-flag error, and the run log always goes to `<folder>/logs` (ADR-019)
 - `--no-tui`, gralph's flag for plain output, is not accepted: it is an unknown-flag error, and `--plain` replaces it
 - `-p/--prompt` is not accepted. It is an unknown-flag error, as in gralph v0.11.0 and later
 - Inside a git work tree the view always commits, and offers per task or after all tasks as its two choices; outside one it runs without commits and says so; plain mode still commits only with a flag

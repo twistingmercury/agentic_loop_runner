@@ -1,7 +1,7 @@
 ---
-version: 13
+version: 14
 date: 2026-10-07
-notes: "Failed tasks can be reset from the view's menu or silently with --reset-failed: the TUI component and the startup order say so (ADR-018)."
+notes: "alr.record holds the run events and run log writer; both front ends log to <dir>/logs, --log-dir is gone, and the startup order drops the --log-dir check (ADR-019)."
 ---
 
 # alr — System Architecture
@@ -28,8 +28,9 @@ The plain front end serves scripts and CI. The stream front end serves the full-
 terminal.
 
 Imports point one way. `cli` imports everything below it (the first diagram leaves out its direct edges to `engine` and
-`tasks`). `plain` and `stream` import `engine`. `tui` imports `stream`, `engine`, and `tasks`. `engine` imports `tasks`.
-Nothing imports upward, `plain` and `stream` never import each other, and `tui` never imports `plain`.
+`tasks`). `plain` and `stream` import `engine` and `record`. `tui` imports `stream`, `record`, `engine`, and `tasks`.
+`engine` imports `tasks`. `record` imports only `tasks`, `errors`, and the standard library, and `engine` never imports
+it. Nothing imports upward, `plain` and `stream` never import each other, and `tui` never imports `plain`.
 
 ```mermaid
 ---
@@ -39,14 +40,19 @@ flowchart TD
     cli["alr.cli<br/>flags, startup checks, routing"]:::blue
     plain["alr.plain<br/>plain front end, dry-run report"]:::green
     tui["alr.tui<br/>Textual app, dialogs, run worker"]:::green
-    stream["alr.stream<br/>stream front end, events, run log"]:::green
+    stream["alr.stream<br/>stream front end, parser"]:::green
+    record["alr.record<br/>run events, run log"]:::green
     engine["alr.engine<br/>loop, outcome, gates, commit, sandbox, processes"]:::blue
     tasks["alr.tasks<br/>parse, validate, save"]:::blue
     cli --> plain
     cli --> tui
     tui --> stream
+    tui --> record
     plain --> engine
+    plain --> record
     stream --> engine
+    stream --> record
+    record --> tasks
     engine --> tasks
     classDef blue fill: #9ec5f4, stroke: #6e7781, color: #000000
     classDef green fill: #9fd8a8, stroke: #6e7781, color: #000000
@@ -67,11 +73,14 @@ flowchart TD
     plain["alr.plain<br/>scripts and CI"]:::green
     stream["alr.stream<br/>the full-screen view"]:::green
     tui["alr.tui<br/>Textual app"]:::green
+    record["alr.record<br/>run events, run log"]:::green
     cli -->|" picks the front end once, hands it over "| engine
     engine -->|" calls the front end it was handed "| iface
     iface -.->|implemented by| plain
     iface -.->|implemented by| stream
     tui -->|" builds and hands over "| stream
+    plain -->|records through| record
+    stream -->|records through| record
     classDef blue fill: #9ec5f4, stroke: #6e7781, color: #000000
     classDef green fill: #9fd8a8, stroke: #6e7781, color: #000000
     classDef purple fill: #c9b2ee, stroke: #6e7781, color: #000000
@@ -106,11 +115,12 @@ src/alr/
     report.py      the task table, the failed-task notice, the no-repository notice
     start.py       a real run in plain mode: load, check, run
     dryrun.py      the dry-run report: gate limits, sandbox and commit notices
+  record/
+    events.py      the event types
+    runlog.py      the run log writer: run.jsonl and task-<id>.log
   stream/
     frontend.py    adds the stream-json flags, captures output, emits events
     parser.py      stream-json lines into activity lines and the result text
-    events.py      the event types
-    runlog.py      the --log-dir writer: run.jsonl and task-<id>.log
   tui/
     app.py         the Textual app: states, Start and Stop, the run worker
     adapter.py     the report callback: events into Textual messages
@@ -134,8 +144,8 @@ How gralph's packages map onto this:
 | `internal/looper` (shared rules)             | `alr.engine`                               |
 | `internal/looper` (`report == nil` branches) | `alr.plain`                                |
 | `internal/looper` (`report != nil` branches) | `alr.stream.frontend`, `alr.stream.parser` |
-| `internal/looper/event.go`                   | `alr.stream.events`                        |
-| `internal/runlog`                            | `alr.stream.runlog`                        |
+| `internal/looper/event.go`                   | `alr.record.events`                        |
+| `internal/runlog`                            | `alr.record.runlog`                        |
 | `internal/tui`                               | `alr.tui`                                  |
 | `internal/skillinstall`, `skills/`           | `alr.skillinstall`, `alr/skills`           |
 
@@ -147,7 +157,7 @@ How gralph's packages map onto this:
 
 - Parse the flags listed in [Requirements](01_requirements.md#command-line) with `argparse`, prefix abbreviation off
 - Run the startup checks in gralph's order: resolve `--dir` (the task file and the folder's `sandbox.json`), check
-  `--gate-timeout`, pick the front end, check plain mode's required flags, check `--log-dir`, build the session flags
+  `--gate-timeout`, pick the front end, check plain mode's required flags, build the session flags
 - Route to the dry run, the plain real run, or the full-screen view (ADR-013)
 - Run `--install-skill` first, when passed: copy the bundled skill and exit 0 (ADR-016)
 - Install the SIGINT and SIGTERM handlers that cancel the run
@@ -235,6 +245,10 @@ How gralph's packages map onto this:
 - Before each gate, print `gate: <cmd>`; let the gate's output pass straight through
 - Once something is staged, print `commit: <first line of name>`; let git's output pass straight through
 - Print the failed-task notice and task table when the file already holds a failed task
+- Record the run (ADR-019): write the run log in `<dir>/logs/<timestamp>/` on every real run, with the ledger
+  (`run.jsonl`) and a detail file per task (`task-<id>.log`) holding the lines of Claude's raw stdout plus the
+  `→ gate <cmd>` and `→ commit <first line of name>` markers. Gate and git output is not captured. When the run commits
+  inside a work tree and the log folder is not git-ignored, refuse to start with the `check_log_dir` error
 - Dry run: print the task table, each `shared.gates` entry with its effective limit and where the limit came from, the
   sandbox settings path (from a flag or the run folder), and the commit notice; never start Claude or write a file
 
@@ -244,7 +258,7 @@ How gralph's packages map onto this:
 |----------------|-------------------------------------------------------------------|
 | Used when      | A run is not full-screen: no terminal, `--plain`, or `--dry-run`  |
 | Output         | Plain text on stdout and stderr, same as gralph                   |
-| Imports        | `alr.engine`, `alr.tasks`; never `alr.stream`                     |
+| Imports        | `alr.engine`, `alr.record`, `alr.tasks`; never `alr.stream`       |
 
 ### Stream Front End (alr.stream)
 
@@ -257,8 +271,9 @@ How gralph's packages map onto this:
 - Report gate and git output as activity lines, with `→ gate <cmd>` and `→ commit <name>` markers
 - Emit events to a `report` callback: `TaskStarted`, `Activity`, `SessionFinished`, `GateFinished`, `Committed`,
   `TaskFinished`, `RunDone`; a cancelled session or gate emits none of the finished kinds
-- Run log (`runlog.py`): create the run folder (`0700`, files `0600`), write `run_started`, append one ledger line per
-  event to `run.jsonl` with gralph's key order, and append activity to `task-<id>.log`
+- Record the run through `alr.record` when the Logging toggle is on: the writer creates the run folder (`0700`, files
+  `0600`), writes `run_started`, appends one ledger line per event to `run.jsonl` with gralph's key order, and appends
+  activity, including the parsed `→ Tool` lines, to `task-<id>.log`
 
 **Key Characteristics:**
 
@@ -266,7 +281,7 @@ How gralph's packages map onto this:
 |----------------|---------------------------------------------------|
 | Used when      | The full-screen view, through `alr.tui`           |
 | Output         | Events and log files; nothing on stdout or stderr |
-| Imports        | `alr.engine`, `alr.tasks`; never `alr.plain`      |
+| Imports        | `alr.engine`, `alr.record`, `alr.tasks`; never `alr.plain` |
 
 ### TUI (alr.tui)
 
@@ -302,7 +317,7 @@ How gralph's packages map onto this:
 | Runtime        | The app's own `asyncio` loop; the engine is one worker in it  |
 | State          | The run settings, the app state, and the events seen so far   |
 | Controls       | Keys only, no mouse; no pause, skip, or retry                  |
-| Imports        | `alr.stream`, `alr.engine`, `alr.tasks`; never `alr.plain`    |
+| Imports        | `alr.stream`, `alr.record`, `alr.engine`, `alr.tasks`; never `alr.plain` |
 
 ## The Front End Interface
 
@@ -408,11 +423,11 @@ sequenceDiagram
 4. Pick the front end: full-screen when stdin and stdout are terminals, `--plain` is absent, and the run is not a
    `--dry-run`; otherwise plain
 5. Check plain mode's required flag, `--dir`. The full-screen view asks for a missing one in a dialog instead
-6. Check `--log-dir`: in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; ignored
-   on `--dry-run`. `--commit` together with `--commit-after-all` is a usage error
+6. `--commit` together with `--commit-after-all` is a usage error
 7. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or
    `--skip-permissions` on a real run; a dry run needs neither but still checks a settings file it is given
-8. Dry run, plain real run, or the full-screen view. With `--reset-failed`, a real run sets failed tasks back to pending
+8. Dry run, plain real run, or the full-screen view. A plain real run logs to `<folder>/logs` and, when it commits with
+   that folder visible to git, exits 1 with the `check_log_dir` error (ADR-019). With `--reset-failed`, a real run sets failed tasks back to pending
    silently before it loads the file (the view does it when it first reads the file); `--reset-failed` with `--dry-run`
    is a usage error (ADR-018). The view repeats steps 1 to 6 on Start with the dialogs' values
 
@@ -464,7 +479,7 @@ Tests are ported from gralph before the code they cover is written. There are tw
 |-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | Unit            | Task validation tables, the result rule, stream-json parsing, the sandbox merge, gate limits, commit rules against real git, run log output                                               | `task_test.go`, `internal/looper/*_test.go`, `runlog_test.go`    |
 | Fake `claude`   | A Python script placed first on `PATH`, driven by the same `FAKECLAUDE_*` variables: records argv and stdin, sets output and exit code, can block; one copy per suite                     | `testdata/fakeclaude/main.go`                                    |
-| End to end      | Runs the installed `alr` command as a subprocess, in a container: the loop, results, gates, commit, `--dir`, dry-run, `--plain`, `--log-dir`, sandbox, SIGINT, SIGTERM                   | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check |
+| End to end      | Runs the installed `alr` command as a subprocess, in a container: the loop, results, gates, commit, `--dir`, dry-run, `--plain`, the run log, sandbox, SIGINT, SIGTERM                   | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check |
 | Golden          | The exact stdin text sent to Claude                                                                                                                                                       | gralph's golden assertions                                       |
 | TUI unit        | Each pane and dialog under Textual's headless `run_test` and `Pilot`, fed by a fake event stream, one case per branch (ADR-011); the state rules, Start and Stop, and the dialogs' checks | New                                                              |
 | TUI end to end  | Two pseudo-terminal runs in the container: a happy-path run and a Stop                                                                                                                    | gralph's `wizard_pty` and `wizard_signal` tests                  |
@@ -487,11 +502,11 @@ real Claude and no network are needed.
 | front end       | `claude`      | Subprocess, stdin, stdout, stderr  | Run a session                             | Text; stream-json on the stream path |
 | front end       | gate command  | Subprocess (`sh -c`), exit code    | Check a completed task                    | Shell command text                   |
 | front end       | git           | Subprocess, exit code              | Commit a completed task                   | `git add -A`, `git commit -m <name>` |
-| `stream`        | `report`      | Callback                           | Hand each event to a listener             | `alr.stream.events` values           |
+| `stream`        | `report`      | Callback                           | Hand each event to a listener             | `alr.record.events` values           |
 | `cli`           | `tui`         | Function call                      | Open the full-screen view with the flags  | Python values                        |
 | `tui` adapter   | panes         | Textual messages                   | Update the panes from run events          | One message type per event           |
 | `tui` app       | `engine`      | Worker (awaited), cancel           | Start a run, stop it                      | Run options, the stream front end    |
-| `stream.runlog` | Filesystem    | File appends                       | Write the ledger and detail files         | JSON lines; text                     |
+| `record.runlog` | Filesystem    | File appends                       | Write the ledger and detail files         | JSON lines; text                     |
 
 ## Boundary Definitions
 
@@ -522,7 +537,7 @@ graph LR
 | alr reads the filesystem    | Task file                     | Treated as code the user chose to run (its prompts go to Claude, its `shared.gates` to `sh -c`); not sanitized                                                                                            |
 | alr reads the filesystem    | Sandbox settings file         | Read once, never written; must be a JSON object; three sandbox keys forced, the rest passed through. May come from the `--dir` folder's `sandbox.json`, which is as trusted as that folder's `tasks.yaml` |
 | alr writes the filesystem   | Task state                    | Atomic: temp file, then rename                                                                                                                                                                            |
-| alr writes the filesystem   | Run log                       | Only with `--log-dir` or the TUI's logging toggle, only on the stream path; a new folder per run; in the TUI, inside a work tree, the folder must be git-ignored                                                               |
+| alr writes the filesystem   | Run log                       | Both modes write `<dir>/logs/<timestamp>/`, a new folder per run: plain mode always, the TUI through its logging toggle; never on a dry run. A run that commits inside a work tree needs the folder git-ignored (plain mode refuses to start, the TUI blocks Start)                                                               |
 | alr writes the filesystem   | Gate edits from the TUI       | Only on Start, after the startup checks pass; saved atomically with the task file                                                                                                                         |
 | alr writes the filesystem   | Installed skill               | Only with `--install-skill`: the bundled folder is copied over `~/.claude/skills/gralph-docs-writer/`                                                                                                     |
 | alr starts Claude           | Combined prompt on stdin      | Fixed argv: `--print`, the front end's flags, the session flags                                                                                                                                           |

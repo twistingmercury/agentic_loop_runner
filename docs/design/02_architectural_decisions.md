@@ -1,7 +1,7 @@
 ---
-version: 13
+version: 14
 date: 2026-10-07
-notes: "ADR-017 and ADR-018 are Accepted and match what was built; ADR-013 describes the labelled strip, the Reset item in the menu, and the titled panes."
+notes: "ADR-019: the run log always goes in the run folder's logs folder in both modes, --log-dir is removed, and the run events and run log writer move to alr.record; ADR-004 and ADR-015 point to it."
 ---
 
 # alr — Architectural Decisions
@@ -47,6 +47,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Accepted | 2026-10-07 |
 | [017](#adr-017-the-task-file-is-always-the-run-folders-tasksyaml)    | The task file is always the run folder's tasks.yaml                | Accepted | 2026-10-07 |
 | [018](#adr-018-failed-tasks-are-reset-from-the-menu-or-with---reset-failed)    | Failed tasks are reset from the menu or with --reset-failed         | Accepted | 2026-10-07 |
+| [019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes) | The run log always goes in the run folder's logs folder, in both modes | Accepted | 2026-10-07 |
 
 ## Inherited Decisions
 
@@ -136,7 +137,7 @@ full-screen path (stream-json parsing, events, the run log). The Textual view, t
 skill check are the next design.
 
 Until the view exists, `alr` always runs plain mode: gralph's `--no-tui` flag was accepted and did nothing (it is now
-`--plain`, ADR-013), and `--log-dir` on a real run gives gralph's plain-mode error.
+`--plain`, ADR-013). (`--log-dir` was refused on a real run in plain mode until ADR-019 removed it.)
 
 **Consequences:**
 
@@ -205,6 +206,9 @@ to run a session, a gate, or a git command and to hear about progress. `alr.cli`
 
 Import rules, enforced by a test: `engine` imports neither `plain`, `stream`, nor `tui`; `plain` and `stream` do not
 import each other.
+
+*Amended by [ADR-019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes):* the run events
+and the run log writer live in `alr.record`, which the plain front end also uses.
 
 **Consequences:**
 
@@ -368,7 +372,7 @@ tasks:
 
 - **`shared.prompt` is required.** A missing `shared` block, or a prompt that is missing, not a string, empty, or only
   whitespace, fails parsing. The text is trimmed on load.
-- **`shared.gates` is optional, with ADR-019's rules unchanged.** Absent means not decided, `[]` means no gates, and a
+- **`shared.gates` is optional, with gralph ADR-019's rules unchanged.** Absent means not decided, `[]` means no gates, and a
   save keeps whichever the file had. Error names read `shared.gates[<j>]`.
 - **Unknown keys are errors.** A top-level `gates` key is an error that says gates live under `shared.gates`, as is a
   task-level `gates`. Any other top-level key, and any `shared` key other than `prompt` and `gates`, is rejected too.
@@ -696,15 +700,16 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
 
 **Context:**
 
-`--log-dir` is refused on a real run until the view exists. Gralph asks about logging and about a default gate timeout
+Gralph asks about logging and about a default gate timeout
 as wizard steps. Since the TUI commits whenever it is inside a work tree (ADR-014), a log folder inside the repository would dirty the
 tree unless it is git-ignored.
 
 **Decision:**
 
-- **Logging.** A toggle in the settings strip, on by default, writing the run log to `<folder>/logs`. An explicit
-  `--log-dir` wins and turns the toggle on with that path. Inside a work tree, Start is blocked, with the line to
-  add to `.gitignore`, when the log folder is not ignored; outside one there is nothing to ignore. Plain mode still refuses `--log-dir`.
+- **Logging.** A toggle in the settings strip, on by default, writing the run log to `<folder>/logs`. There is no
+  `--log-dir` ([ADR-019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes)). Inside a work
+  tree, Start is blocked, with the line to add to `.gitignore`, when the log folder is not ignored; outside one there is
+  nothing to ignore. Plain mode always logs (ADR-019); the toggle stays in the view.
 - **Gate timeout.** No dialog and no setting. Each gate keeps its own optional timeout, edited in the Gates dialog, and
   the 10-minute default covers the rest. `--gate-timeout` still works when passed.
 
@@ -832,5 +837,52 @@ do from the view, and a flag that does it without asking.
 - The reset discards the failed task's error text, so the reason for the failure is gone from the file
 - A task that fails for the same reason each time is reset each time without a word when `--reset-failed` is used
 - Reset writes the task file before Start, which is the one exception to ADR-013's rule
+
+### ADR-019: The run log always goes in the run folder's logs folder, in both modes
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+`--log-dir` only worked with the full-screen view, and plain mode refused it. A run that an agent or script drives is
+plain mode, so it had no record to read afterwards. Two ways to name the log folder (the flag, the view's default) also
+meant two sets of rules.
+
+**Decision:**
+
+- **No `--log-dir`.** The flag is removed; passing it is an unknown-flag error, like `-t` and `--no-tui`.
+- **One place.** Both modes write to `<dir>/logs/<YYYYMMDDTHHMMSS>/`, where `<dir>` is the folder that holds
+  `tasks.yaml`.
+- **Plain mode always logs.** There is no way to turn it off. The view keeps its Logging toggle (default on). A dry run
+  never logs, because it writes nothing.
+- **Committing runs.** When a plain run commits (`--commit` or `--commit-after-all`) inside a work tree and the log
+  folder is visible to git, the run refuses to start with the engine's `check_log_dir` error. Outside a work tree, or
+  without a commit flag, there is nothing to check.
+- **Shared record code.** The run events and the run log writer move from `alr.stream` to a neutral package,
+  `alr.record`, which imports only `alr.tasks`, `alr.errors`, and the standard library. `alr.plain`, `alr.stream`, and
+  `alr.tui` may import it; `alr.engine` may not.
+- **Plain mode's detail log is thinner.** Plain mode does not ask Claude for stream-json, so there are no parsed
+  `→ Tool` lines. `task-<id>.log` holds the lines of Claude's raw stdout and the `→ gate <cmd>` and
+  `→ commit <first line of name>` markers. The gates' and git's own output still passes straight through to the
+  terminal and is not captured. The ledger (`run.jsonl`) is the same in both modes.
+
+This amends ADR-004 (the plain front end now records events through `alr.record`) and ADR-015 (no `--log-dir`; the
+Logging toggle stays in the view).
+
+**Consequences:**
+
+*Positive:*
+
+- Logs are in one place, so orchestration can rely on them for every real run
+- One rule for the folder, instead of a flag plus a default
+
+*Negative:*
+
+- No way to put the logs elsewhere, or to turn them off in plain mode
+- The plain detail log is thinner than the view's: no tool activity, and no gate or git output
+- Another departure from gralph's `--log-dir`
+- A committing run needs `logs/` ignored by git, or it will not start
 
 **Next:** [System Architecture](03_system_architecture.md)

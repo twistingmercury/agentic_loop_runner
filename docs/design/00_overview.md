@@ -1,7 +1,7 @@
 ---
-version: 7
+version: 8
 date: 2026-10-07
-notes: "Roadmap step 2 (the TUI, dialogs, after-all commits, --log-dir, --install-skill) is done."
+notes: "The System Model gains alr.record (run events, run log); both modes log to <dir>/logs and --log-dir is gone (ADR-019)."
 ---
 
 # alr — Architecture Overview
@@ -72,7 +72,8 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | `alr.tasks`     | Parses, validates, and atomically saves the task file                                               |
 | `alr.engine`    | The shared run logic: the loop, the outcome rule, gates, commits, session flags, process handling   |
 | `alr.plain`     | Everything only plain mode does: echo, pass-through output, the dry-run report                      |
-| `alr.stream`    | Everything only the full-screen path does: stream-json parsing, events, the run log                 |
+| `alr.record`    | The run events and the run log writer, shared by both front ends                                    |
+| `alr.stream`    | Everything only the full-screen path does: stream-json parsing and the stream front end             |
 | `alr.tui`       | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker |
 | `alr.skillinstall` | `--install-skill`: copies the bundled skill to `~/.claude/skills`                                |
 
@@ -89,7 +90,7 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | Step | Scope                                                                                                      | Status        |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------- |
 | 1    | Engine, plain mode, dry-run, and the stream path plus run log                                              | Done (v0.0.6) |
-| 2    | Textual full-screen view with setup dialogs, after-all commits, `--log-dir` switched on, `--install-skill` | Done          |
+| 2    | Textual full-screen view with setup dialogs, after-all commits, logging in both modes, `--install-skill` | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
 | 4    | Agent layer on LangGraph or CrewAI                                                                         | Later         |
 

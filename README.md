@@ -76,14 +76,16 @@ so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 | `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
 | `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
 | `--plain`                   |       | Use plain output instead of the full-screen view                                         |
-| `--log-dir <folder>`        |       | Keep the run record in this folder; full-screen view only                                |
 | `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
 | `--version`                 | `-v`  | Print the version                                                                        |
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 `--skip-permissions`; the full-screen view asks in a dialog when neither is given.
-`--commit` and `--commit-after-all` cannot be used together, and plain mode refuses
-`--log-dir`.
+`--commit` and `--commit-after-all` cannot be used together.
+
+A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
+Plain mode always logs; the full-screen view has a Logging toggle, on by default. When the
+run commits, git must ignore `logs/`, or the run will not start.
 
 ## How it works
 
