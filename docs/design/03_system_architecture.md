@@ -1,7 +1,7 @@
 ---
-version: 8
+version: 9
 date: 2026-10-07
-notes: "The TUI is built: a run the user stopped is told by the app's stop flag, not by the text `stopped`, since a cancelled run's error text varies."
+notes: "The view no longer requires a git repository: the folder dialog does not check for a work tree, and the TUI component says what happens outside one."
 ---
 
 # alr — System Architecture
@@ -278,8 +278,10 @@ How gralph's packages map onto this:
   dialogs read-only), and Finished (a summary pop-up with the outcome and time, then the app stays open until quit)
 - At launch open the folder, permissions, and gates dialogs in that order, each only when the flags and the task file
   leave it open; until Start, reopen any dialog from the menu
-- Validate each answer with the functions a run uses, and keep the error in the dialog: `tasks.yaml` loads, the folder
-  is a git repository, the settings file loads
+- Validate each answer with the functions a run uses, and keep the error in the dialog: `tasks.yaml` loads, the settings
+  file loads
+- Find out at launch whether the working directory is in a git work tree; when it is not, disable the commit setting
+  with the note "no git repository: nothing will be committed" and run without commits (ADR-014)
 - Fill the same values the flags fill, then on Start run the usual startup checks, save the gates to `tasks.yaml` only
   if they pass, and start the engine as a worker (ADR-012)
 - Turn each run event into a Textual message through the adapter, which holds only the function that posts messages, and
@@ -515,7 +517,7 @@ graph LR
 | alr reads the filesystem    | Task file                     | Treated as code the user chose to run (its prompts go to Claude, its `shared.gates` to `sh -c`); not sanitized                                                                                            |
 | alr reads the filesystem    | Sandbox settings file         | Read once, never written; must be a JSON object; three sandbox keys forced, the rest passed through. May come from the `--dir` folder's `sandbox.json`, which is as trusted as that folder's `tasks.yaml` |
 | alr writes the filesystem   | Task state                    | Atomic: temp file, then rename                                                                                                                                                                            |
-| alr writes the filesystem   | Run log                       | Only with `--log-dir` or the TUI's logging toggle, only on the stream path; a new folder per run; in the TUI the folder must be git-ignored                                                               |
+| alr writes the filesystem   | Run log                       | Only with `--log-dir` or the TUI's logging toggle, only on the stream path; a new folder per run; in the TUI, inside a work tree, the folder must be git-ignored                                                               |
 | alr writes the filesystem   | Gate edits from the TUI       | Only on Start, after the startup checks pass; saved atomically with the task file                                                                                                                         |
 | alr writes the filesystem   | Installed skill               | Only with `--install-skill`: the bundled folder is copied over `~/.claude/skills/gralph-docs-writer/`                                                                                                     |
 | alr starts Claude           | Combined prompt on stdin      | Fixed argv: `--print`, the front end's flags, the session flags                                                                                                                                           |

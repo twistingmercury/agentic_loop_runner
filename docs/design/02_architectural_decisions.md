@@ -1,7 +1,7 @@
 ---
-version: 7
+version: 8
 date: 2026-10-07
-notes: "ADR-012 to ADR-016 are Accepted and match what was built: the outcome comes from RunDone.error and the stop flag, the menu is a row of buttons, the gates dialog adds and removes, and the folder check looks at the work tree around the working directory."
+notes: "ADR-014 and the folder dialog no longer require a git repository: outside a work tree the view runs without commits and says so. ADR-015 applies the log-folder ignore check only inside a work tree. ADR-014 notes the resumed after-all title."
 ---
 
 # alr — Architectural Decisions
@@ -42,7 +42,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [011](#adr-011-the-unit-tests-keep-one-case-per-branch)                            | The unit tests keep one case per branch                             | Accepted | 2026-10-06 |
 | [012](#adr-012-the-tui-runs-the-engine-in-process-as-a-textual-worker)             | The TUI runs the engine in-process as a Textual worker              | Accepted | 2026-10-07 |
 | [013](#adr-013-setup-in-modal-dialogs-over-one-main-window-with-an-explicit-start) | Setup in modal dialogs over one main window, with an explicit Start | Accepted | 2026-10-07 |
-| [014](#adr-014-commits-in-the-tui-are-always-on-per-task-or-after-all-tasks)       | Commits in the TUI are always on: per task or after all tasks       | Accepted | 2026-10-07 |
+| [014](#adr-014-commits-in-the-tui-per-task-or-after-all-tasks-when-there-is-a-work-tree) | Commits in the TUI: per task or after all tasks, when there is a work tree | Accepted | 2026-10-07 |
 | [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)   | Logging is a toggle, on by default; the gate timeout has no dialog  | Accepted | 2026-10-07 |
 | [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Accepted | 2026-10-07 |
 
@@ -606,8 +606,8 @@ One main window and modal dialogs on top of it.
   gates. A folder given on the command line, a folder `sandbox.json`, or a task file with `shared.gates` each hides its
   step. If nothing is open, the app starts in Ready. Until Start, any dialog can be reopened from the menu.
 - **Folder dialog.** A folder picker that starts in the working directory and shows hidden entries. It checks the answer
-  with the functions a run uses: it loads `tasks.yaml`, and it refuses to go on when the working directory is not inside a
-  git work tree (as the engine checks it, not the picked folder itself). The error shows in the dialog.
+  with the functions a run uses: it loads `tasks.yaml`. A folder outside a git work tree is accepted: the run then makes no
+  commits (ADR-014). The error for a bad answer shows in the dialog.
 - **Permissions.** Sandbox or skip. A folder `sandbox.json` makes sandbox the default. With no such file nothing is
   pre-selected and Start stays disabled until a settings file is picked or skip is chosen, so nobody runs unsandboxed by
   accident (gralph ADR-014). An explicit skip wins over the folder file (ADR-009).
@@ -635,7 +635,7 @@ One main window and modal dialogs on top of it.
 - A second run needs a relaunch
 - A folder that holds a `sandbox.json` can still be run unsandboxed from the permissions setting, by an explicit choice
 
-### ADR-014: Commits in the TUI are always on: per task or after all tasks
+### ADR-014: Commits in the TUI: per task or after all tasks, when there is a work tree
 
 [Back to Decision Summary](#decision-summary)
 
@@ -643,8 +643,10 @@ One main window and modal dialogs on top of it.
 
 **Context:**
 
-The engine commits per task when `--commit` is passed, and not at all otherwise. The wanted view always commits, and
-offers a choice of one commit per task or one commit when every task is done. The second mode does not exist.
+The engine commits per task when `--commit` is passed, and not at all otherwise. The wanted view commits whenever it
+can, and offers a choice of one commit per task or one commit when every task is done. The second mode does not exist.
+Requiring a git repository for the view would be too limiting, and plain mode already runs without commits when
+`--commit` is passed outside one.
 
 **Decision:**
 
@@ -657,8 +659,11 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
   outside the repository.
 - **Flags.** `--commit` keeps its meaning, one commit per task. A new `--commit-after-all` asks for the second mode.
   Passing both is a usage error. Plain mode accepts both, since the engine is shared.
-- **In the TUI** the commit setting is a choice of the two modes, per task by default, with no way to turn commits off.
-  A passed flag pre-selects its mode.
+- **In the TUI** the commit setting is a choice of the two modes, per task by default, with no way to turn commits off
+  while there is a work tree. A passed flag pre-selects its mode.
+- **No work tree.** When the working directory is not inside a git work tree there is nothing to commit to. The setting
+  is disabled with the note "no git repository: nothing will be committed", and the run makes no commits, as plain mode
+  does with `--commit` outside a repository.
 
 **Consequences:**
 
@@ -671,7 +676,10 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
 
 - After a failed or stopped run, the completed tasks' work is uncommitted, and the dirty-tree check blocks the next
   start until it is committed or discarded
-- The TUI cannot run without commits, and so cannot run in a folder that is not a git repository
+- Outside a git work tree the view runs but commits nothing, so the changes stay in the folder; only the note beside the
+  commit setting says so
+- Resuming an after-all run after committing the earlier work by hand gives a commit title with a smaller `n` and a
+  body that lists only the tasks that ran in the resumed session
 
 ### ADR-015: Logging is a toggle, on by default; the gate timeout has no dialog
 
@@ -682,14 +690,14 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
 **Context:**
 
 `--log-dir` is refused on a real run until the view exists. Gralph asks about logging and about a default gate timeout
-as wizard steps. Since commits are always on in the TUI (ADR-014), a log folder inside the repository would dirty the
+as wizard steps. Since the TUI commits whenever it is inside a work tree (ADR-014), a log folder inside the repository would dirty the
 tree unless it is git-ignored.
 
 **Decision:**
 
 - **Logging.** A toggle in the settings strip, on by default, writing the run log to `<folder>/logs`. An explicit
-  `--log-dir` wins and turns the toggle on with that path. Start is blocked, with the line to add to `.gitignore`, when
-  the log folder is not ignored. Plain mode still refuses `--log-dir`.
+  `--log-dir` wins and turns the toggle on with that path. Inside a work tree, Start is blocked, with the line to
+  add to `.gitignore`, when the log folder is not ignored; outside one there is nothing to ignore. Plain mode still refuses `--log-dir`.
 - **Gate timeout.** No dialog and no setting. Each gate keeps its own optional timeout, edited in the Gates dialog, and
   the 10-minute default covers the rest. `--gate-timeout` still works when passed.
 

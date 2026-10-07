@@ -57,8 +57,9 @@ alr --install-skill
 In a terminal, `alr` opens a full-screen view: a settings strip, three panes (tasks,
 activity, and gates and commits), and dialogs that ask for whatever the flags and the
 task file leave open (run folder, permissions, gates). Nothing runs, and nothing is
-written, until you press Start; Stop or Ctrl-C ends a run. The view always commits, per
-task by default, and keeps run logs in `<folder>/logs` (a folder git ignores). Use
+written, until you press Start; Stop or Ctrl-C ends a run. Inside a git work tree the
+view always commits, per task by default (outside one it runs without commits and says
+so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--no-tui`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
