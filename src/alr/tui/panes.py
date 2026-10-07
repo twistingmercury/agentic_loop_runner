@@ -1,7 +1,8 @@
 """The three panes of the main window; each knows events, never the engine."""
 
+from textual.events import Resize
 from textual.message import Message
-from textual.widgets import DataTable, Log
+from textual.widgets import DataTable, Log, RichLog
 from textual.widgets.data_table import ColumnKey
 
 from alr.record.events import (
@@ -115,16 +116,21 @@ class TasksPane(DataTable[str]):
         self.update_cell(str(task_id), "state", symbol)
 
 
-class ActivityPane(Log):
-    """The selected task's activity lines."""
+class ActivityPane(RichLog):
+    """The selected task's activity lines, wrapped to the pane's width."""
 
     def on_mount(self) -> None:
         self.border_title = "Activity"
 
     def __init__(self) -> None:
-        super().__init__()
+        # Markup and highlight off, so a line with square brackets prints raw; the default
+        # minimum width of 78 would keep a narrow pane from wrapping at its own edge.
+        super().__init__(
+            wrap=True, markup=False, highlight=False, auto_scroll=True, min_width=10
+        )
         self._by_task: dict[int, list[str]] = {}
         self._shown: int | None = None
+        self._width = 0
 
     def show(self, task_id: int, name: str) -> None:
         """Switch to a task and redraw what it has said so far."""
@@ -133,8 +139,20 @@ class ActivityPane(Log):
 
         self._shown = task_id
         self.border_title = f"Activity: {task_id} {name}"
+        self._redraw()
+
+    def on_resize(self, event: Resize) -> None:
+        """Wrapping is fixed when a line is written, so a new width needs the lines written again."""
+        if event.size.width == self._width:
+            return
+
+        self._width = event.size.width
+        self._redraw()
+
+    def _redraw(self) -> None:
         self.clear()
-        self.write_lines(self._by_task.get(task_id, []))
+        for line in self._by_task.get(self._shown, []):
+            self.write(line)
 
     def apply(self, event: Event) -> None:
         if not isinstance(event, Activity):
@@ -142,7 +160,7 @@ class ActivityPane(Log):
 
         self._by_task.setdefault(event.task.id, []).append(event.line)
         if event.task.id == self._shown:
-            self.write_line(event.line)
+            self.write(event.line)
 
 
 class GatesPane(Log):

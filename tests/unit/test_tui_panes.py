@@ -68,11 +68,56 @@ async def test_activity_pane_shows_only_the_selected_task() -> None:
         pane.apply(Activity(FIRST, "→ read a.py"))
         pane.apply(Activity(SECOND, "→ edit b.py"))
 
-        assert list(pane.lines) == ["→ read a.py"]
+        assert shown_text(pane) == ["→ read a.py"]
 
         pane.show(2, "Second")
 
-        assert list(pane.lines) == ["→ edit b.py"]
+        assert shown_text(pane) == ["→ edit b.py"]
+
+
+def shown_text(pane: ActivityPane) -> list[str]:
+    """The rows on screen, without the padding that fills each to the pane's width."""
+    return [strip.text.rstrip() for strip in pane.lines]
+
+
+async def test_activity_pane_wraps_a_long_line_without_losing_text() -> None:
+    pane = ActivityPane()
+    line = " ".join(f"word{i}" for i in range(40))
+    async with Host(pane).run_test(size=(40, 20)) as pilot:
+        pane.show(1, "First")
+        pane.apply(Activity(FIRST, line))
+        await pilot.pause()
+
+        rows = shown_text(pane)
+
+        assert len(rows) > 1
+        assert " ".join(rows).split() == line.split()
+
+
+async def test_activity_pane_prints_square_brackets_raw() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test() as pilot:
+        pane.show(1, "First")
+        pane.apply(Activity(FIRST, "[tool] [x]"))
+        await pilot.pause()
+
+        assert shown_text(pane) == ["[tool] [x]"]
+
+
+async def test_activity_pane_rewraps_when_it_is_resized() -> None:
+    pane = ActivityPane()
+    line = " ".join(f"word{i}" for i in range(40))
+    async with Host(pane).run_test(size=(40, 20)) as pilot:
+        pane.show(1, "First")
+        pane.apply(Activity(FIRST, line))
+        await pilot.pause()
+        narrow = len(shown_text(pane))
+
+        await pilot.resize_terminal(120, 20)
+        await pilot.pause()
+
+        assert len(shown_text(pane)) < narrow
+        assert " ".join(shown_text(pane)).split() == line.split()
 
 
 async def test_activity_pane_title_names_the_task_it_shows() -> None:

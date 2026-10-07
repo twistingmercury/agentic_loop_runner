@@ -624,7 +624,7 @@ async def test_the_tasks_pane_keeps_room_at_common_terminal_sizes(
 
 
 def _activity_lines(app: AlrApp) -> list[str]:
-    return list(app.query_one(ActivityPane).lines)
+    return [strip.text.rstrip() for strip in app.query_one(ActivityPane).lines]
 
 
 async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> None:
