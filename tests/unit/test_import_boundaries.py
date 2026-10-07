@@ -11,6 +11,7 @@ FORBIDDEN = {
     "engine": ("alr.plain", "alr.stream", "alr.tui"),
     "plain": ("alr.stream", "alr.tui"),
     "stream": ("alr.plain", "alr.tui"),
+    "tui": ("alr.plain", "alr.cli"),
 }
 
 
