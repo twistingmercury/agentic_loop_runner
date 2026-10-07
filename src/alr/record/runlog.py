@@ -204,11 +204,26 @@ class RunLog:
 
     def _activity(self, event: Activity) -> None:
         clock = self._now().strftime("%H:%M:%S")
-        _write(
-            self._detail,
-            self._detail_path or self._path,
-            f"{clock} {event.line}\n",
-        )
+        text = f"{clock} {event.line}\n"
+        if self._detail is not None or self._detail_path is None:
+            _write(self._detail, self._detail_path or self._path, text)
+            return
+
+        self._append_after_finish(self._detail_path, text)
+
+    def _append_after_finish(self, detail_path: Path, text: str) -> None:
+        """Add a line to the file of a task that already finished.
+
+        The commit after all tasks reports on the last task once it is done.
+        """
+        if self._ledger is None:
+            raise _not_open(self._ledger_path)
+
+        file = _open_append(detail_path)
+        try:
+            _write(file, detail_path, text)
+        finally:
+            _close(file, detail_path)
 
     def _step_finished(self, event: str, task: Task, seconds: float) -> None:
         fields: dict[str, Any] = {"task": task.id, "state": task.state}

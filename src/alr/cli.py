@@ -81,7 +81,14 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         )
 
     return _run(
-        start(tasks_file, gate_timeout, session, commit_mode, args.reset_failed)
+        start(
+            tasks_file,
+            gate_timeout,
+            session,
+            commit_mode,
+            args.reset_failed,
+            sandbox_settings=sandbox_settings,
+        )
     )
 
 

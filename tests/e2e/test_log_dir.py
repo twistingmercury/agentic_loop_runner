@@ -1,9 +1,9 @@
-"""--log-dir in plain mode: a real run refuses it, and a dry run ignores it.
+"""The run log in plain mode: every real run leaves one in the run folder.
 
-alr has no full-screen view yet, so only the flag's plain-mode rules can be
-pinned here.
+--log-dir is refused on a real run and ignored by a dry run, which never logs.
 """
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     run_dry_run,
+    run_args,
     task_states,
     write_tasks_yaml,
 )
@@ -74,7 +75,6 @@ def test_log_dir_empty_value_counts_as_not_passed(
     assert run.res.code == 0, run.res
     assert run.calls == 1, "the run must go ahead"
     assert task_states(read_tasks_yaml(run.tasks_path))[1] == "completed"
-    assert not run.log_dir.exists()
 
 
 def test_log_dir_dry_run_ignores_it(tmp_path: Path, fake_claude: Path) -> None:
@@ -87,3 +87,54 @@ def test_log_dir_dry_run_ignores_it(tmp_path: Path, fake_claude: Path) -> None:
     assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
     assert res.err == ""
     assert not log_dir.exists()
+
+
+def test_plain_run_leaves_a_log_in_the_run_folder(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr(*run_args(tasks_path))
+
+    assert res.code == 0, res
+    (folder,) = (tmp_path / "logs").iterdir()
+    ledger = [
+        json.loads(line)
+        for line in (folder / "run.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert ledger[0]["event"] == "run_started"
+    assert ledger[-1]["event"] == "run_finished"
+    assert (folder / "task-1.log").is_file()
+
+
+def test_commit_run_with_a_log_folder_git_can_see_is_refused(
+    tmp_path: Path, git_repo: Path, fake_claude: Path
+) -> None:
+    # Only the task file is ignored, so the logs folder beside it stays visible.
+    (git_repo / ".git" / "info" / "exclude").write_text(
+        "work/tasks.yaml\n", encoding="utf-8"
+    )
+    work = git_repo / "work"
+    work.mkdir()
+    tasks_path = write_tasks_yaml(work, VALID_TASKS_YAML)
+    record_file = git_repo / "run" / "record.ndjson"
+
+    res = run_alr(
+        *run_args(tasks_path),
+        "--commit",
+        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
+    )
+
+    assert res.code == 1, res
+    assert (
+        "error: --commit needs the log directory ignored by git or outside the repository: work/logs\n"
+        in res.err
+    )
+    assert not record_file.exists(), "claude must not run"
+    assert not (work / "logs").exists()
+
+
+def test_dry_run_leaves_no_logs_folder(tmp_path: Path, fake_claude: Path) -> None:
+    run_dry_run(tmp_path, VALID_TASKS_YAML)
+
+    assert not (tmp_path / "logs").exists()

@@ -366,6 +366,7 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         session: list[str],
         commit: CommitMode | None,
         reset_failed: bool,
+        sandbox_settings: str = "",
     ) -> None:
         seen.append(session)
 

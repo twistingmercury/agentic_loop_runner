@@ -422,6 +422,25 @@ def test_record_after_close_is_an_error_and_opens_no_detail_file(
     assert not (path / "task-1.log").exists()
 
 
+def test_record_activity_after_the_task_finished_appends_to_its_detail_file(
+    opened: tuple[RunLog, Path],
+) -> None:
+    # The after-all commit reports its marker on the last task, once that task is done.
+    log, path = opened
+    record(
+        log,
+        TaskStarted(FIRST),
+        Activity(FIRST, "working"),
+        TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
+        Activity(FIRST, "→ commit First"),
+    )
+
+    assert read_lines(path / "task-1.log") == [
+        "14:02:11 working",
+        "14:02:11 → commit First",
+    ]
+
+
 def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:
     log, _ = opened
     log.close()

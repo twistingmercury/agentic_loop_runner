@@ -2,8 +2,11 @@
 
 import sys
 from collections.abc import Sequence
+from datetime import datetime
+from importlib import metadata
+from pathlib import Path
 
-from alr.engine.commit import CommitMode
+from alr.engine.commit import CommitMode, Repo, check_log_dir
 from alr.engine.loop import RunOptions, reset_failed, run
 from alr.errors import (
     RunCancelledError,
@@ -12,6 +15,8 @@ from alr.errors import (
 )
 from alr.plain.frontend import PlainFrontEnd
 from alr.plain.report import load_tasks_report, repo_for
+from alr.record.runlog import Info, RunLog, run_dir
+from alr.tasks import TaskList
 
 
 async def start(
@@ -20,10 +25,12 @@ async def start(
     session_args: Sequence[str],
     commit: CommitMode | None,
     reset: bool = False,
+    sandbox_settings: str = "",
 ) -> None:
     """Run the loop in plain mode: load, check, then run every pending task.
 
-    With reset, failed tasks go back to pending first, without a word.
+    With reset, failed tasks go back to pending first, without a word. Every
+    run is logged in a new folder under logs/ beside the task file.
     """
     try:
         if reset:
@@ -35,6 +42,40 @@ async def start(
         raise type(exc)(f"failed to start loop runner: {exc}") from exc
 
     repo = await repo_for(sys.stdout, tasks_file, commit is not None)
+    path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
+    await check_log_dir(repo, str(path))
+    info = _info(tasks_file, gate_timeout, sandbox_settings, commit is not None)
+    log = RunLog.open(path, info)
+    try:
+        await _run_logged(
+            task_list, tasks_file, gate_timeout, session_args, repo, commit, log
+        )
+    finally:
+        log.close()
+
+
+def _info(
+    tasks_file: str, gate_timeout: str, sandbox_settings: str, commits: bool
+) -> Info:
+    return Info(
+        version=metadata.version("alr"),
+        tasks_file=tasks_file,
+        permissions="sandbox" if sandbox_settings else "skip",
+        sandbox_settings=sandbox_settings,
+        gate_timeout=gate_timeout,
+        commit=commits,
+    )
+
+
+async def _run_logged(
+    task_list: TaskList,
+    tasks_file: str,
+    gate_timeout: str,
+    session_args: Sequence[str],
+    repo: Repo | None,
+    commit: CommitMode | None,
+    log: RunLog,
+) -> None:
     options = RunOptions(
         tasks_file=tasks_file,
         gate_timeout=gate_timeout,
@@ -43,7 +84,7 @@ async def start(
         commit_mode=commit or CommitMode.PER_TASK,
     )
     try:
-        await run(task_list, options, PlainFrontEnd())
+        await run(task_list, options, PlainFrontEnd(record=log.record))
     except RunCancelledError as exc:
         raise RunCancelledError(f"loop error: {exc}") from exc
     except RunError as exc:
