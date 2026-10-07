@@ -1,7 +1,7 @@
 ---
-version: 7
+version: 8
 date: 2026-10-07
-notes: "Sequence diagram participants: text is black (actorTextColor). Architecture Overview diagrams: block text is black (#000000). Added the TUI design: the alr.tui package and its components, the TUI run flow, the after-all commit mode, --install-skill, the startup order, errors, tests, and boundaries."
+notes: "The TUI is built: a run the user stopped is told by the app's stop flag, not by the text `stopped`, since a cancelled run's error text varies."
 ---
 
 # alr — System Architecture
@@ -284,8 +284,9 @@ How gralph's packages map onto this:
   if they pass, and start the engine as a worker (ADR-012)
 - Turn each run event into a Textual message through the adapter, which holds only the function that posts messages, and
   let each pane update itself from those messages
-- Bind Stop and Ctrl-C to cancelling the worker; show a run that ends with `RunDone` carrying `None` as done, and the
-  text `stopped` as stopped
+- Bind Stop and Ctrl-C to cancelling the worker; show a run that ends with `RunDone` carrying `None` as done, a run the
+  user stopped (the app's stop flag) as stopped, and any other error as failed; the error text of a cancelled run
+  varies, so it is not matched
 - Open `tasks.yaml` and `sandbox.json` in a read-only viewer from the menu
 
 **Key Characteristics:**
@@ -384,7 +385,7 @@ sequenceDiagram
         Adapter ->> Panes: Textual message
         Panes -->> User: updated tasks, activity, gates and commits
     end
-    Engine ->> Stream: run done (None, or stopped, or the error)
+    Engine ->> Stream: run done (None, or the error)
     Stream ->> Adapter: RunDone
     Adapter ->> App: message
     App ->> User: summary pop-up, then stays open
@@ -411,7 +412,7 @@ sequenceDiagram
 ### Stopping
 
 SIGINT or SIGTERM cancels the run. In the full-screen view, Stop and Ctrl-C do the same through the worker, and the run
-reports `stopped`. The process group of whatever is running is killed. The interrupted task is not marked failed and the
+ends with a `RunDone` error that the app shows as stopped, since it set its stop flag. The process group of whatever is running is killed. The interrupted task is not marked failed and the
 file is not written, so the task is still `pending` on the next run. `alr` exits 1.
 
 ## Error Handling

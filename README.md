@@ -49,7 +49,17 @@ alr -t tasks.yaml --sandbox-settings sandbox.json
 
 # Run a folder that holds tasks.yaml and sandbox.json, and commit each task.
 alr -d .local/feature --commit
+
+# Install the bundled task-file skill into ~/.claude/skills and exit.
+alr --install-skill
 ```
+
+In a terminal, `alr` opens a full-screen view: a settings strip, three panes (tasks,
+activity, and gates and commits), and dialogs that ask for whatever the flags and the
+task file leave open (run folder, permissions, gates). Nothing runs, and nothing is
+written, until you press Start; Stop or Ctrl-C ends a run. The view always commits, per
+task by default, and keeps run logs in `<folder>/logs` (a folder git ignores). Use
+`--no-tui`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
 | --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
@@ -59,12 +69,17 @@ alr -d .local/feature --commit
 | `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--skip-permissions`        |       | Run sessions with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json`  |
 | `--commit`                  |       | Commit each completed task after its gates pass                                          |
+| `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
+| `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
+| `--no-tui`                  |       | Use plain output instead of the full-screen view                                         |
+| `--log-dir <folder>`        |       | Keep the run record in this folder; full-screen view only                                |
 | `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
 | `--version`                 | `-v`  | Print the version                                                                        |
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
-`--skip-permissions`. `--no-tui` is accepted and does nothing yet, and `--log-dir` is
-refused until the full-screen view exists.
+`--skip-permissions`; the full-screen view asks in a dialog when neither is given.
+`--commit` and `--commit-after-all` cannot be used together, and plain mode refuses
+`--log-dir`.
 
 ## How it works
 

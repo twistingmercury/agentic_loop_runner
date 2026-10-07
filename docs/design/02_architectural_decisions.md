@@ -1,7 +1,7 @@
 ---
-version: 6
+version: 7
 date: 2026-10-07
-notes: "Decision Summary numbers link to their ADRs, and each ADR links back to the summary. Added ADR-012 to ADR-016 for the TUI design: in-process worker with Stop only, modal dialogs and an explicit Start, per-task or after-all commits, the logging toggle, and --install-skill."
+notes: "ADR-012 to ADR-016 are Accepted and match what was built: the outcome comes from RunDone.error and the stop flag, the menu is a row of buttons, the gates dialog adds and removes, and the folder check looks at the work tree around the working directory."
 ---
 
 # alr — Architectural Decisions
@@ -40,11 +40,11 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [009](#adr-009-the-run-folders-sandboxjson-answers-the-permission-choice)          | The run folder's sandbox.json answers the permission choice         | Accepted | 2026-10-06 |
 | [010](#adr-010-unit-tests-under-make-test-e2e-tests-in-a-container)                | Unit tests under `make test`, e2e tests in a container              | Accepted | 2026-10-06 |
 | [011](#adr-011-the-unit-tests-keep-one-case-per-branch)                            | The unit tests keep one case per branch                             | Accepted | 2026-10-06 |
-| [012](#adr-012-the-tui-runs-the-engine-in-process-as-a-textual-worker)             | The TUI runs the engine in-process as a Textual worker              | Proposed | 2026-10-07 |
-| [013](#adr-013-setup-in-modal-dialogs-over-one-main-window-with-an-explicit-start) | Setup in modal dialogs over one main window, with an explicit Start | Proposed | 2026-10-07 |
-| [014](#adr-014-commits-in-the-tui-are-always-on-per-task-or-after-all-tasks)       | Commits in the TUI are always on: per task or after all tasks       | Proposed | 2026-10-07 |
-| [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)   | Logging is a toggle, on by default; the gate timeout has no dialog  | Proposed | 2026-10-07 |
-| [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Proposed | 2026-10-07 |
+| [012](#adr-012-the-tui-runs-the-engine-in-process-as-a-textual-worker)             | The TUI runs the engine in-process as a Textual worker              | Accepted | 2026-10-07 |
+| [013](#adr-013-setup-in-modal-dialogs-over-one-main-window-with-an-explicit-start) | Setup in modal dialogs over one main window, with an explicit Start | Accepted | 2026-10-07 |
+| [014](#adr-014-commits-in-the-tui-are-always-on-per-task-or-after-all-tasks)       | Commits in the TUI are always on: per task or after all tasks       | Accepted | 2026-10-07 |
+| [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)   | Logging is a toggle, on by default; the gate timeout has no dialog  | Accepted | 2026-10-07 |
+| [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Accepted | 2026-10-07 |
 
 ## Inherited Decisions
 
@@ -542,7 +542,7 @@ row. It does not change ADR-010: the e2e suite stays black-box and separate.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Context:**
 
@@ -560,7 +560,10 @@ Run the engine as an async Textual worker in the app's own event loop.
   in memory.
 - Each pane listens for those messages and knows nothing about the engine.
 - **Stop** and Ctrl-C both cancel the worker. Textual receives Ctrl-C as a key press, so the app binds it to Stop. The
-  engine's cancel path reports `RunDone` with the text `stopped`, and a clean finish reports `None`.
+  engine's cancel path reports `RunDone` with an error, and a clean finish reports `None`. The app decides the outcome
+  from `RunDone.error` and its own stop flag: a run the user stopped is "stopped", any other error is "failed", and
+  `None` is "done". The text of a cancelled run's error varies (`task 1: name: stopped`, or a bare `stopped` between
+  tasks), so it is never matched. SIGTERM also stops the run.
 - During a run the only control is Stop. Pause, skip, and retry would change how the engine records task state, so they
   are left for a later design.
 
@@ -582,7 +585,7 @@ Run the engine as an async Textual worker in the app's own event loop.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Context:**
 
@@ -593,8 +596,9 @@ window that is always there, with the setup as pop-ups, and a run that begins on
 
 One main window and modal dialogs on top of it.
 
-- **Layout.** A menu bar, a settings strip (folder, commit mode, permissions, logging, and the Start button), three
-  panes (tasks, activity for the selected task, and gates and commits), and a status bar.
+- **Layout.** A settings strip (commit mode dropdown, a permissions label, a logging switch, the Start button, and the
+  reason Start is disabled), a menu (Folder, Permissions, Gates, Tasks, Sandbox, and Quit buttons, since Textual has no
+  menu-bar widget), three panes (tasks, activity for the selected task, and gates and commits), and a status bar.
 - **States.** Setup (something is missing, Start disabled with the reason shown), Ready, Running (Start becomes Stop,
   the settings are locked), and Finished (a summary pop-up with the outcome and time, then the app stays open until
   quit). There is no second run in the same session.
@@ -602,14 +606,15 @@ One main window and modal dialogs on top of it.
   gates. A folder given on the command line, a folder `sandbox.json`, or a task file with `shared.gates` each hides its
   step. If nothing is open, the app starts in Ready. Until Start, any dialog can be reopened from the menu.
 - **Folder dialog.** A folder picker that starts in the working directory and shows hidden entries. It checks the answer
-  with the functions a run uses: it loads `tasks.yaml`, and it refuses a folder that is not a git repository. The error
-  shows in the dialog.
+  with the functions a run uses: it loads `tasks.yaml`, and it refuses to go on when the working directory is not inside a
+  git work tree (as the engine checks it, not the picked folder itself). The error shows in the dialog.
 - **Permissions.** Sandbox or skip. A folder `sandbox.json` makes sandbox the default. With no such file nothing is
   pre-selected and Start stays disabled until a settings file is picked or skip is chosen, so nobody runs unsandboxed by
   accident (gralph ADR-014). An explicit skip wins over the folder file (ADR-009).
-- **Gates dialog.** Add, edit, and delete the shared gates, each a command and an optional timeout.
-- **File viewer.** The menu opens `tasks.yaml` or `sandbox.json` read-only. During a run the dialogs and the viewer are
-  read-only too.
+- **Gates dialog.** Add and remove the shared gates, each a command and an optional timeout; a gate is changed by
+  removing it and adding it again. Done with no gates is a decision that there are none.
+- **File viewer.** The menu opens `tasks.yaml` or `sandbox.json` read-only, at any time. Once Start is pressed the
+  Folder, Permissions, and Gates buttons do nothing.
 - **Nothing is written before Start.** Gate edits stay in memory. Start runs the usual startup checks, and the gates are
   saved to `tasks.yaml` only if they pass. The dialogs fill the same values the flags fill, and the startup checks run
   again on those values.
@@ -634,7 +639,7 @@ One main window and modal dialogs on top of it.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Context:**
 
@@ -672,7 +677,7 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Context:**
 
@@ -704,7 +709,7 @@ tree unless it is git-ignored.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Context:**
 

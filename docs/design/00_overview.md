@@ -1,7 +1,7 @@
 ---
-version: 6
+version: 7
 date: 2026-10-07
-notes: "Step 2 is now this design: the Textual full-screen view, the dialogs, the commit and permission settings, logging, and --install-skill. Step 1 is done (v0.0.6)."
+notes: "Roadmap step 2 (the TUI, dialogs, after-all commits, --log-dir, --install-skill) is done."
 ---
 
 # alr — Architecture Overview
@@ -89,7 +89,7 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | Step | Scope                                                                                                      | Status        |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------- |
 | 1    | Engine, plain mode, dry-run, and the stream path plus run log                                              | Done (v0.0.6) |
-| 2    | Textual full-screen view with setup dialogs, after-all commits, `--log-dir` switched on, `--install-skill` | This design   |
+| 2    | Textual full-screen view with setup dialogs, after-all commits, `--log-dir` switched on, `--install-skill` | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
 | 4    | Agent layer on LangGraph or CrewAI                                                                         | Later         |
 
