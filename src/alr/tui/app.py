@@ -9,7 +9,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Select, Static
+from textual.widgets import Button, Header, Select, Static
 from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
@@ -49,6 +49,8 @@ class AlrApp(App[None]):
     """Setup, then one run, then the result on screen until the user quits."""
 
     TITLE = "alr"
+    # Ctrl-P would open a palette of commands the buttons already offer.
+    ENABLE_COMMAND_PALETTE = False
     # Horizontal fills the screen by default; the bars should take one row each.
     CSS = """
     #strip, #menu { height: auto; }
@@ -58,7 +60,7 @@ class AlrApp(App[None]):
         height: 1;
         min-width: 0;
         width: auto;
-        padding: 0 1;
+        padding: 0;
         background: transparent;
         color: $text;
         text-style: none;
@@ -135,23 +137,22 @@ class AlrApp(App[None]):
                     allow_blank=False,
                     id="logging",
                 )
-            yield Button("Start", id="start")
+            yield Button("(s)tart", id="start")
         yield Static("", id="reason")
         with Horizontal(id="menu"):
-            yield Button("Folder", id="menu-folder")
-            yield Button("Permissions", id="menu-permissions")
-            yield Button("Gates", id="menu-gates")
-            yield Button("Reset", id="menu-reset")
-            yield Button("Tasks", id="menu-tasks")
-            yield Button("Sandbox", id="menu-sandbox")
-            yield Button("Quit", id="menu-quit")
+            yield Button("(f)older", id="menu-folder")
+            yield Button("(p)ermissions", id="menu-permissions")
+            yield Button("(g)ates", id="menu-gates")
+            yield Button("(r)eset", id="menu-reset")
+            yield Button("(t)asks", id="menu-tasks")
+            yield Button("sandbo(x)", id="menu-sandbox")
+            yield Button("(q)uit", id="menu-quit")
         with Vertical(id="panes"):
             with Horizontal(id="top"):
                 yield TasksPane(id="tasks")
                 yield GatesPane(id="gates")
             yield _activity_pane()
         yield Static("", id="status")
-        yield Footer()
 
     def on_mount(self) -> None:
         # After the first refresh, so the table has its columns before it gets rows.
@@ -326,8 +327,8 @@ class AlrApp(App[None]):
             _permissions_label(self.settings.permissions)
         )
         self._lock_dropdowns()
+        self._refresh_start()
         if self.state in (AppState.RUNNING, AppState.FINISHED):
-            self.query_one("#start", Button).disabled = True
             return
 
         reason = self._blocker()
@@ -335,14 +336,32 @@ class AlrApp(App[None]):
         self.query_one("#start", Button).disabled = reason is not None
         self.query_one("#reason", Static).update(reason or "")
 
+    def _refresh_start(self) -> None:
+        """While a run goes the Start button is the Stop button; afterwards it is spent."""
+        button = self.query_one("#start", Button)
+        running = self.state is AppState.RUNNING
+        button.label = "Stop (^c)" if running else "(s)tart"
+        if running:
+            button.disabled = False
+        elif self.state is AppState.FINISHED:
+            button.disabled = True
+
     def on_button_pressed(self, message: Button.Pressed) -> None:
         name = message.button.id or ""
         if name == "start":
-            self.action_start()
+            self._press_start()
             return
 
         if name.startswith("menu-"):
             self._menu(name.removeprefix("menu-"))
+
+    def _press_start(self) -> None:
+        """The one button starts a run when ready and stops it while it goes."""
+        if self.state is AppState.RUNNING:
+            self.action_stop()
+            return
+
+        self.action_start()
 
     def action_menu(self, item: str) -> None:
         self._menu(item)

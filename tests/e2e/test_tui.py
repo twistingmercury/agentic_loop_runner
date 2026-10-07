@@ -32,8 +32,8 @@ def _spawn(
     """Start alr on the folder and wait until the view is drawn and ready for keys.
 
     TERM lets Textual draw, --skip-permissions answers that step. Keys sent
-    before the first draw can be lost, so nothing is returned before "Start",
-    which the button and the footer both show, is on the screen.
+    before the first draw can be lost, so nothing is returned before "(s)tart",
+    which the Start button shows, is on the screen.
     """
     env = {**os.environ, "TERM": "xterm-256color", **extra_env}
     child = pexpect.spawn(
@@ -45,7 +45,7 @@ def _spawn(
         dimensions=(40, 140),
         cwd=None if cwd is None else str(cwd),
     )
-    child.expect("Start")
+    child.expect(r"\(s\)tart")
     return child
 
 

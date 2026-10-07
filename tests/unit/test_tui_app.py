@@ -18,7 +18,7 @@ from helpers import (
 )
 from textual.pilot import Pilot
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Select, Static, TextArea
+from textual.widgets import Button, Input, OptionList, Select, Static, TextArea
 
 from alr.errors import RunLogError
 from alr.record.runlog import RunLog
@@ -169,6 +169,42 @@ async def test_stop_ends_a_blocked_run_as_stopped(
         await _finished(app)
 
         assert app.outcome == "stopped"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_start_button_becomes_a_working_stop_button(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        button = app.query_one("#start", Button)
+        await _until(lambda: not button.disabled)
+        assert str(button.label) == "(s)tart"
+
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+        assert str(button.label) == "Stop (^c)"
+        assert not button.disabled
+
+        button.focus()
+        await pilot.press("enter")
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        assert button.disabled
+        assert str(button.label) == "(s)tart"
+
+
+async def test_ctrl_p_opens_nothing(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ModalScreen)
+        assert type(app.screen).__name__ != "CommandPalette"
 
 
 @pytest.mark.usefixtures("fake_claude")

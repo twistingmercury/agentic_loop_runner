@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from helpers import write_file
-from textual.widgets import Button, Select, Static
+from textual.widgets import Button, Footer, Select, Static
 
 from alr.tui.app import AlrApp
 from alr.tui.dialogs import SummaryDialog
@@ -229,3 +229,45 @@ async def test_the_columns_leave_room_for_the_scrollbar(
         table = app.query_one(TasksPane)
         used = sum(column.get_render_width(table) for column in table.columns.values())
         assert used <= table.size.width - 2
+
+
+MENU_LABELS = {
+    "folder": "(f)older",
+    "permissions": "(p)ermissions",
+    "gates": "(g)ates",
+    "reset": "(r)eset",
+    "tasks": "(t)asks",
+    "sandbox": "sandbo(x)",
+    "quit": "(q)uit",
+}
+
+
+@pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
+async def test_the_menu_buttons_carry_their_hotkeys(
+    git_repo: Path, size: tuple[int, int]
+) -> None:
+    app = _app(git_repo)
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+
+        for name, label in MENU_LABELS.items():
+            assert str(app.query_one(f"#menu-{name}", Button).label) == label
+        assert str(app.query_one("#start", Button).label) == "(s)tart"
+
+
+async def test_there_is_no_footer(git_repo: Path) -> None:
+    app = _app(git_repo)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        assert not app.query(Footer)
+
+
+async def test_the_menu_row_and_start_fit_inside_80_columns(git_repo: Path) -> None:
+    app = _app(git_repo)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        buttons = [app.query_one(f"#menu-{name}", Button) for name in MENU]
+        buttons.append(app.query_one("#start", Button))
+        assert max(button.region.right for button in buttons) <= 80
