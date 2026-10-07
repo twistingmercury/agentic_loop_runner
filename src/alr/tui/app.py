@@ -20,6 +20,7 @@ from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
     ErrorDialog,
     FolderDialog,
+    GatesDialog,
     PermissionsDialog,
     SummaryDialog,
 )
@@ -124,6 +125,23 @@ class AlrApp(App[None]):
         self.settings.permissions = choice.permissions
         self.settings.sandbox_file = choice.sandbox_file
         self._refresh()
+
+    def needs_gates(self) -> bool:
+        """True when the loaded file leaves the gates undecided and the user has not decided."""
+        if self._task_list is None or self.settings.gates is not None:
+            return False
+
+        return self._task_list.shared.gates is None
+
+    async def ask_gates(self) -> None:
+        """Show the gates dialog; nothing is saved until Start passes its checks."""
+        current = self.settings.gates
+        if current is None and self._task_list is not None:
+            current = self._task_list.gate_list()
+
+        gates = await self.push_screen_wait(GatesDialog(current or []))
+        if gates is not None:
+            self.settings.gates = gates
 
     def on_unmount(self) -> None:
         asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)

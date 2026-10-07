@@ -10,6 +10,7 @@ import pytest
 from helpers import git, write_file
 from textual.widgets import Button
 
+from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
 from alr.tui.dialogs import PermissionsDialog
 from alr.tui.settings import Permissions, RunSettings
@@ -199,3 +200,32 @@ async def test_permissions_button_shows_the_choice_and_applies_the_dialog() -> N
         await _until(lambda: app.settings.permissions is Permissions.SKIP)
 
         assert "skip" in str(button.label)
+
+
+@pytest.mark.parametrize(
+    ("gates_block", "want"),
+    [("", True), ("  gates: []\n", False), ("  gates:\n    - cmd: 'true'\n", False)],
+    ids=["absent key", "decided none", "has gates"],
+)
+async def test_needs_gates_only_for_an_absent_key(
+    git_repo: Path, gates_block: str, want: bool
+) -> None:
+    text = f"shared:\n  prompt: p\n{gates_block}tasks:\n  - id: 1\n    name: A\n    prompt: p\n"
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
+    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.needs_gates() is want
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_start_saves_the_edited_gates(git_repo: Path) -> None:
+    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+
+    saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
+    assert saved.gate_list() == [Gate(cmd="true")]

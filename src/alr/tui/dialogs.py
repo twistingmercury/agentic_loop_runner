@@ -12,12 +12,15 @@ from textual.widgets import (
     DirectoryTree,
     Input,
     Label,
+    ListItem,
+    ListView,
     RadioButton,
     RadioSet,
     Static,
 )
 
 from alr.errors import AlrError
+from alr.tasks import Gate, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
 from alr.tui.settings import Permissions
 
@@ -159,3 +162,76 @@ class PermissionsDialog(ModalScreen[PermissionChoice | None]):
             return
 
         self.dismiss(PermissionChoice(Permissions.SANDBOX, path))
+
+
+class GatesDialog(ModalScreen[list[Gate] | None]):
+    """Add and remove the file's shared gates; Done with none is a decision that there are none."""
+
+    def __init__(self, gates: list[Gate]) -> None:
+        super().__init__()
+        self._gates = list(gates)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Gates, run after each task's session")
+            yield ListView(*(self._item(gate) for gate in self._gates), id="list")
+            yield Input(placeholder="command", id="cmd")
+            yield Input(placeholder="timeout, such as 5m (optional)", id="timeout")
+            yield Static("", id="error")
+            with Horizontal():
+                yield Button("Add", id="add")
+                yield Button("Remove", id="remove")
+                yield Button("Done", id="done", variant="primary")
+                yield Button("Cancel", id="cancel")
+
+    async def on_button_pressed(self, message: Button.Pressed) -> None:
+        match message.button.id:
+            case "add":
+                await self._add()
+            case "remove":
+                await self._remove()
+            case "done":
+                self.dismiss(self._gates)
+            case "cancel":
+                self.dismiss(None)
+
+    async def _add(self) -> None:
+        cmd = self.query_one("#cmd", Input).value.strip()
+        timeout = self.query_one("#timeout", Input).value.strip()
+        error = _gate_error(cmd, timeout)
+        self.query_one("#error", Static).update(error or "")
+        if error:
+            return
+
+        gate = Gate(cmd=cmd, timeout=timeout)
+        self._gates.append(gate)
+        await self.query_one("#list", ListView).append(self._item(gate))
+
+    async def _remove(self) -> None:
+        index = self.query_one("#list", ListView).index
+        if index is None:
+            return
+
+        del self._gates[index]
+        await self.query_one("#list", ListView).pop(index)
+
+    @staticmethod
+    def _item(gate: Gate) -> ListItem:
+        suffix = f"  ({gate.timeout})" if gate.timeout else ""
+        return ListItem(Label(gate.cmd + suffix))
+
+
+def _gate_error(cmd: str, timeout: str) -> str | None:
+    """Why this gate cannot be added, or None when it can."""
+    if not cmd:
+        return "a gate needs a command"
+
+    if not timeout:
+        return None
+
+    try:
+        parse_timeout(timeout)
+    except ValueError as exc:
+        return f"timeout: {exc}"
+
+    return None

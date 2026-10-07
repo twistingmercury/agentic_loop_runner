@@ -4,10 +4,16 @@ from pathlib import Path
 
 from helpers import write_nested_file
 from textual.app import App
-from textual.widgets import Input
+from textual.widgets import Input, ListView
 
 from alr.tui.checks import FolderCheck
-from alr.tui.dialogs import FolderDialog, PermissionChoice, PermissionsDialog
+from alr.tasks import Gate
+from alr.tui.dialogs import (
+    FolderDialog,
+    GatesDialog,
+    PermissionChoice,
+    PermissionsDialog,
+)
 from alr.tui.settings import Permissions
 
 TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
@@ -120,3 +126,88 @@ async def test_permissions_dialog_preselects_nothing_without_a_default() -> None
 
         assert host.result == "unset"
         assert str(host.screen.query_one("#error").render()) != ""
+
+
+async def test_gates_dialog_adds_a_gate_and_returns_the_list() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([Gate(cmd="ruff check")]), host.record)
+        await pilot.pause()
+        host.screen.query_one("#cmd", Input).value = "pytest"
+        host.screen.query_one("#timeout", Input).value = "5m"
+
+        await pilot.click("#add")
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == [Gate(cmd="ruff check"), Gate(cmd="pytest", timeout="5m")]
+
+
+async def test_gates_dialog_rejects_a_bad_timeout() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([]), host.record)
+        await pilot.pause()
+        host.screen.query_one("#cmd", Input).value = "pytest"
+        host.screen.query_one("#timeout", Input).value = "soon"
+
+        await pilot.click("#add")
+        assert str(host.screen.query_one("#error").render()) != ""
+
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == []
+
+
+async def test_gates_dialog_rejects_an_empty_command() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([]), host.record)
+        await pilot.pause()
+
+        await pilot.click("#add")
+        assert "needs a command" in str(host.screen.query_one("#error").render())
+
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == []
+
+
+async def test_gates_dialog_removes_the_highlighted_gate() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([Gate(cmd="a"), Gate(cmd="b")]), host.record)
+        await pilot.pause()
+        host.screen.query_one("#list", ListView).index = 0
+
+        await pilot.click("#remove")
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == [Gate(cmd="b")]
+
+
+async def test_gates_dialog_done_with_no_gates_returns_an_empty_list() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([]), host.record)
+        await pilot.pause()
+
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == []
+
+
+async def test_gates_dialog_cancel_returns_none() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(GatesDialog([Gate(cmd="a")]), host.record)
+        await pilot.pause()
+
+        await pilot.click("#cancel")
+        await pilot.pause()
+
+        assert host.result is None
