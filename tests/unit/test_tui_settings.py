@@ -53,12 +53,7 @@ def test_session_args_for_sandbox_reads_the_settings_file(tmp_path: Path) -> Non
     assert settings.session_args()[:2] == ["--permission-mode", "acceptEdits"]
 
 
-@pytest.mark.parametrize(
-    ("log_dir", "want"),
-    [("", "run/logs"), ("elsewhere", "elsewhere")],
-    ids=["beside the task file", "explicit --log-dir"],
-)
-def test_log_folder(log_dir: str, want: str) -> None:
-    settings = RunSettings(tasks_file="run/tasks.yaml", log_dir=log_dir)
+def test_log_folder_is_beside_the_task_file() -> None:
+    settings = RunSettings(tasks_file="run/tasks.yaml")
 
-    assert settings.log_folder() == Path(want)
+    assert settings.log_folder() == Path("run/logs")

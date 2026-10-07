@@ -102,17 +102,6 @@ def test_check_gate_timeout_errors(value: str, want: str) -> None:
     assert want in str(caught.value)
 
 
-# Go's rows with plain false are not ported: alr has no full-screen view.
-@pytest.mark.parametrize(
-    ("log_dir", "dry_run"),
-    [
-        pytest.param("logs", True, id="dry run ignores it"),
-    ],
-)
-def test_check_log_dir_accepted(log_dir: str, dry_run: bool) -> None:
-    cli.check_log_dir(log_dir, dry_run)
-
-
 @pytest.fixture
 def folder(tmp_path: Path) -> Path:
     """A run folder holding only the task file."""
@@ -219,16 +208,14 @@ def test_a_real_run_needs_a_permission_flag(
     assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
 
 
-def test_log_dir_is_refused_on_a_real_run(
+def test_log_dir_flag_is_an_unknown_argument(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = cli.main(["-d", str(folder), "--skip-permissions", "--log-dir", "logs"])
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["-d", str(folder), "--skip-permissions", "--log-dir", "logs"])
 
-    assert code == 1
-    assert (
-        "error: --log-dir only works with the full-screen view"
-        in capsys.readouterr().err
-    )
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --log-dir" in capsys.readouterr().err
 
 
 def test_empty_gate_timeout_is_bad(
@@ -546,14 +533,13 @@ def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
     assert seen[0].commit_mode is CommitMode.PER_TASK
 
 
-def test_the_view_accepts_log_dir_and_asks_for_a_missing_dir_flag(
+def test_the_view_asks_for_a_missing_dir_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen = _capture_view(monkeypatch)
 
-    assert cli.main(["--log-dir", "logs"]) == 0
+    assert cli.main([]) == 0
     assert seen[0].tasks_file == ""
-    assert seen[0].log_dir == "logs"
     assert seen[0].permissions is Permissions.UNSET
 
 
@@ -675,7 +661,6 @@ def test_the_view_gets_the_reset_failed_flag(
         ("DIR", "[-d]", "-d, --dir "),
         ("GATE_TIMEOUT", "[--gate-timeout]", "--gate-timeout "),
         ("SANDBOX_SETTINGS", "[--sandbox-settings]", "--sandbox-settings "),
-        ("LOG_DIR", "[--log-dir]", "--log-dir "),
     ],
 )
 def test_value_flags_show_no_placeholder_in_the_help(

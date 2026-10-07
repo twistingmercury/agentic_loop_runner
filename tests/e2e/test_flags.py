@@ -29,7 +29,6 @@ def test_help_flag() -> None:
         "--skip-permissions",
         "--gate-timeout",
         "--commit",
-        "--log-dir",
         "--dry-run",
         "--plain",
         "--version",

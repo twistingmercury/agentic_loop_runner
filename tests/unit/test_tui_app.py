@@ -65,6 +65,18 @@ def _settings(repo: Path, tasks: str = TASKS, **fields: object) -> RunSettings:
     )
 
 
+def _visible_settings(repo: Path) -> RunSettings:
+    """Settings whose log folder, repo/visible/logs, git can see; only the task file is ignored."""
+    (repo / ".git" / "info" / "exclude").write_text(
+        "visible/tasks.yaml\n", encoding="utf-8"
+    )
+    (repo / "visible").mkdir()
+    tasks_file = write_file(repo / "visible" / "tasks.yaml", TASKS)
+    return RunSettings(
+        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False
+    )
+
+
 async def _until(condition: Callable[[], object]) -> None:
     for _ in range(300):
         if condition():
@@ -362,7 +374,7 @@ async def test_a_logged_run_leaves_a_ledger(git_repo: Path) -> None:
 async def test_logging_on_with_a_visible_log_folder_blocks_start(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo, log_dir=str(git_repo / "visible"))
+    settings = _visible_settings(git_repo)
     settings.logging = True
     app = AlrApp(settings)
     async with app.run_test() as pilot:
@@ -375,7 +387,7 @@ async def test_logging_on_with_a_visible_log_folder_blocks_start(
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_turning_logging_off_skips_the_log_folder(git_repo: Path) -> None:
-    settings = _settings(git_repo, log_dir=str(git_repo / "visible"))
+    settings = _visible_settings(git_repo)
     settings.logging = True
     app = AlrApp(settings)
     async with app.run_test() as pilot:
@@ -383,7 +395,7 @@ async def test_turning_logging_off_skips_the_log_folder(git_repo: Path) -> None:
         await pilot.press("s")
         await _finished(app)
 
-    assert not (git_repo / "visible").exists()
+    assert not (git_repo / "visible" / "logs").exists()
 
 
 @pytest.fixture

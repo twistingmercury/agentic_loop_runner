@@ -26,8 +26,6 @@ class RunSettings:
     permissions: Permissions = Permissions.UNSET
     commit_mode: CommitMode = CommitMode.PER_TASK
     logging: bool = True
-    log_dir: str = ""
-    """An explicit --log-dir; empty means a logs folder beside the task file."""
 
     reset_failed: bool = False
     """--reset-failed: failed tasks go back to pending when the file is first read."""
@@ -57,8 +55,5 @@ class RunSettings:
         return sandbox_args(self.sandbox_file)
 
     def log_folder(self) -> Path:
-        """Where the run's log folder goes."""
-        if self.log_dir:
-            return Path(self.log_dir)
-
+        """Where the run's log folder goes: beside the task file."""
         return Path(self.tasks_file).parent / "logs"

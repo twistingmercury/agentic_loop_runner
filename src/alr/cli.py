@@ -61,7 +61,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             _report_missing(parser, missing)
             return 1
 
-        check_log_dir(args.log_dir, args.dry_run)
         commit_mode = check_commit_flags(args.commit, args.commit_after_all)
         session = session_args(sandbox_settings, args.skip_permissions, args.dry_run)
     except AlrError as exc:
@@ -121,7 +120,6 @@ def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> 
         sandbox_file=sandbox_file,
         permissions=_permissions(sandbox_file, args.skip_permissions),
         commit_mode=commit_mode or CommitMode.PER_TASK,
-        log_dir=args.log_dir,
         gate_timeout=args.gate_timeout or "",
         reset_failed=args.reset_failed,
     )
@@ -208,12 +206,6 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Commit once, after the last task completes, instead of after each task; a failed or stopped run makes no commit",
     )
-    parser.add_argument(
-        "--log-dir",
-        metavar="",
-        default="",
-        help="Directory for a record of the run: a ledger and each task's activity, in a new folder per run; full-screen view only",
-    )
     return parser
 
 
@@ -250,20 +242,6 @@ def check_gate_timeout(value: str) -> None:
         parse_timeout(value)
     except ValueError as exc:
         raise UsageError(f"--gate-timeout: {exc}") from exc
-
-
-def check_log_dir(log_dir: str, dry_run: bool) -> None:
-    """Refuse --log-dir on a real run.
-
-    The record is built from events only the full-screen view's path produces,
-    and a run that was asked for a record must not quietly leave none. An
-    empty value counts as not passed. A dry run records nothing and ignores
-    the flag.
-    """
-    if not log_dir or dry_run:
-        return
-
-    raise UsageError("--log-dir only works with the full-screen view")
 
 
 def check_commit_flags(commit: bool, after_all: bool) -> CommitMode | None:

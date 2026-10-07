@@ -108,7 +108,15 @@ async def test_prepare_saves_edited_gates_once_every_check_passes(
 
 
 async def test_prepare_log_folder_git_can_see_is_an_error(git_repo: Path) -> None:
-    settings = _settings(git_repo, logging=True, log_dir=str(git_repo / "visible"))
+    # Only the task file is ignored, so the logs folder beside it stays visible.
+    (git_repo / ".git" / "info" / "exclude").write_text(
+        "visible/tasks.yaml\n", encoding="utf-8"
+    )
+    (git_repo / "visible").mkdir()
+    tasks_file = write_file(git_repo / "visible" / "tasks.yaml", TASKS)
+    settings = RunSettings(
+        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=True
+    )
 
     with pytest.raises(RepoError, match="add it to .gitignore"):
         await prepare(settings)
