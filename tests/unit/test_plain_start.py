@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from helpers import commit_subjects, write_file
 
+from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
@@ -38,7 +39,7 @@ def _calls(record: Path) -> int:
     return len(record.read_text(encoding="utf-8").splitlines())
 
 
-async def _start(tasks_file: str, commit: bool = False) -> None:
+async def _start(tasks_file: str, commit: CommitMode | None = None) -> None:
     await start(tasks_file, "", bypass_args(), commit)
 
 
@@ -123,7 +124,7 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     with pytest.raises(RepoError) as caught:
-        await _start(tasks_file, commit=True)
+        await _start(tasks_file, commit=CommitMode.PER_TASK)
 
     assert "--commit needs a clean work tree" in str(caught.value)
     assert _calls(record) == 0, "claude must not run"
@@ -140,7 +141,7 @@ async def test_start_commit_flag_commits_the_task(
         "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
-    await _start(tasks_file, commit=True)
+    await _start(tasks_file, commit=CommitMode.PER_TASK)
 
     assert commit_subjects(git_repo) == ["First", "init"]
 
@@ -154,3 +155,16 @@ async def test_start_without_commit_flag_ignores_a_dirty_tree(
     await _start(tasks_file)
 
     assert commit_subjects(git_repo) == ["init"]
+
+
+async def test_start_after_all_mode_makes_one_commit_for_the_run(
+    record: Path, git_repo: Path, outside: Path
+) -> None:
+    tasks_file = write_file(
+        outside / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+    )
+
+    await _start(tasks_file, commit=CommitMode.AFTER_ALL)
+
+    assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]

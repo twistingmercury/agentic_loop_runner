@@ -9,6 +9,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
 from alr.errors import AlrError, UsageError
 from alr.plain.dryrun import dry_run
@@ -51,6 +52,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             return 1
 
         check_log_dir(args.log_dir, args.dry_run)
+        commit_mode = check_commit_flags(args.commit, args.commit_after_all)
         session = session_args(sandbox_settings, args.skip_permissions, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -59,10 +61,16 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     gate_timeout = args.gate_timeout or ""
     if args.dry_run:
         return _run(
-            dry_run(sys.stdout, tasks_file, gate_timeout, sandbox_settings, args.commit)
+            dry_run(
+                sys.stdout,
+                tasks_file,
+                gate_timeout,
+                sandbox_settings,
+                commit_mode is not None,
+            )
         )
 
-    return _run(start(tasks_file, gate_timeout, session, args.commit))
+    return _run(start(tasks_file, gate_timeout, session, commit_mode))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -116,6 +124,11 @@ def _parser() -> argparse.ArgumentParser:
         "--commit",
         action="store_true",
         help="Commit each completed task with git after its gates pass, with the task name as the message; in a repository, the work tree must be clean",
+    )
+    parser.add_argument(
+        "--commit-after-all",
+        action="store_true",
+        help="Commit once, after the last task completes, instead of after each task; a failed or stopped run makes no commit",
     )
     parser.add_argument(
         "--log-dir",
@@ -172,6 +185,17 @@ def check_log_dir(log_dir: str, dry_run: bool) -> None:
         return
 
     raise UsageError("--log-dir only works with the full-screen view")
+
+
+def check_commit_flags(commit: bool, after_all: bool) -> CommitMode | None:
+    """Turn the two commit flags into the mode they ask for; asking for both is an error."""
+    if commit and after_all:
+        raise UsageError("--commit and --commit-after-all cannot be used together")
+
+    if after_all:
+        return CommitMode.AFTER_ALL
+
+    return CommitMode.PER_TASK if commit else None
 
 
 def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:

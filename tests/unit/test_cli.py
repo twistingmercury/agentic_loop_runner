@@ -12,6 +12,7 @@ from helpers import gone_within, start_alr, wait_for_file
 
 from alr import cli
 from alr.engine import proc
+from alr.engine.commit import CommitMode
 from alr.errors import AlrError, SandboxError, UsageError
 
 ONE_TASK_YAML = (
@@ -331,7 +332,10 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     seen: list[list[str]] = []
 
     async def fake_start(
-        tasks_file: str, gate_timeout: str, session: list[str], commit: bool
+        tasks_file: str,
+        gate_timeout: str,
+        session: list[str],
+        commit: CommitMode | None,
     ) -> None:
         seen.append(session)
 
@@ -438,3 +442,36 @@ def test_dry_run_names_the_folders_sandbox_json(
 
     assert cli.main(["-d", str(folder), "--dry-run"]) == 0
     assert f"sandbox settings: {folder}/sandbox.json" in capsys.readouterr().out
+
+
+def test_commit_and_commit_after_all_together_exit_1(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    tasks_file.write_text(ONE_TASK_YAML, encoding="utf-8")
+
+    code = cli.main(
+        ["-t", str(tasks_file), "--skip-permissions", "--commit", "--commit-after-all"]
+    )
+
+    assert code == 1
+    assert (
+        "--commit and --commit-after-all cannot be used together"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    ("flags", "want"),
+    [
+        ([], None),
+        (["--commit"], CommitMode.PER_TASK),
+        (["--commit-after-all"], CommitMode.AFTER_ALL),
+    ],
+)
+def test_check_commit_flags_maps_the_flags_to_a_mode(
+    flags: list[str], want: CommitMode | None
+) -> None:
+    args = cli._parser().parse_args(flags)
+
+    assert cli.check_commit_flags(args.commit, args.commit_after_all) is want

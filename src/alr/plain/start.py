@@ -3,6 +3,7 @@
 import sys
 from collections.abc import Sequence
 
+from alr.engine.commit import CommitMode
 from alr.engine.loop import RunOptions, run
 from alr.errors import (
     RunCancelledError,
@@ -17,7 +18,7 @@ async def start(
     tasks_file: str,
     gate_timeout: str,
     session_args: Sequence[str],
-    commit: bool,
+    commit: CommitMode | None,
 ) -> None:
     """Run the loop in plain mode: load, check, then run every pending task."""
     try:
@@ -26,12 +27,13 @@ async def start(
         # A FailedTasksError is not one, so it passes through without the prefix.
         raise type(exc)(f"failed to start loop runner: {exc}") from exc
 
-    repo = await repo_for(sys.stdout, tasks_file, commit)
+    repo = await repo_for(sys.stdout, tasks_file, commit is not None)
     options = RunOptions(
         tasks_file=tasks_file,
         gate_timeout=gate_timeout,
         session_args=session_args,
         repo=repo,
+        commit_mode=commit or CommitMode.PER_TASK,
     )
     try:
         await run(task_list, options, PlainFrontEnd())
