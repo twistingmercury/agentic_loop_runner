@@ -412,3 +412,14 @@ async def test_start_log_write_failure_stops_the_run_and_the_child(
 
     await wait_until_gone(int(await wait_for_text(ready)))
     assert closed == [1], "the log must be closed once"
+    ledger = _ledger(_run_folder(tasks_file))
+    assert [line["event"] for line in ledger] == [
+        "run_started",
+        "task_started",
+        "run_finished",
+    ]
+    assert ledger[1]["task"] == 1
+    assert ledger[-1]["result"] == "stopped", (
+        "a failed log write must not claim success"
+    )
+    assert ledger[-1]["error"] == "RunLogError: disk full"
