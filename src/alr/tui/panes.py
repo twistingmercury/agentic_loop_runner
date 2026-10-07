@@ -109,6 +109,11 @@ class TasksPane(DataTable[str]):
         if key is None:
             return
 
+        # The message queue can hold a highlight the cursor has since left, such as the
+        # table's first one arriving after a task start moved it; the cursor is the truth.
+        if message.cursor_row != self.cursor_row:
+            return
+
         self.post_message(self.Selected(int(key), self._names.get(key, "")))
 
     def _follow(self, task_id: int) -> None:

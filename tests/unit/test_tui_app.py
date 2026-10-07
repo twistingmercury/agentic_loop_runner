@@ -18,7 +18,16 @@ from helpers import (
 )
 from textual.pilot import Pilot
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, OptionList, Select, Static, TextArea
+from textual.coordinate import Coordinate
+from textual.widgets import (
+    Button,
+    DataTable,
+    Input,
+    OptionList,
+    Select,
+    Static,
+    TextArea,
+)
 
 from alr.errors import RunLogError
 from alr.record.runlog import RunLog
@@ -764,6 +773,76 @@ async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> Non
         app.post_message(RunEvent(TaskStarted(second)))
         await _until(lambda: _activity_lines(app) == ["two says hi", "two again"])
         assert tasks.cursor_row == 1
+
+
+THREE_TASKS = (
+    TASKS
+    + """  - id: 3
+    name: Third
+    prompt: p
+"""
+)
+
+
+async def test_browsing_another_task_gives_way_to_the_next_task_start(
+    git_repo: Path,
+) -> None:
+    first = Task(id=1, name="First", prompt="p")
+    second = Task(id=2, name="Second", prompt="p")
+    third = Task(id=3, name="Third", prompt="p")
+    app = AlrApp(_settings(git_repo, THREE_TASKS))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        tasks = app.query_one(TasksPane)
+        activity = app.query_one(ActivityPane)
+        await _until(lambda: tasks.row_count == 3)
+
+        app.post_message(RunEvent(TaskStarted(first)))
+        app.post_message(RunEvent(Activity(first, "one says hi")))
+        await _until(lambda: _activity_lines(app) == ["one says hi"])
+
+        tasks.focus()
+        await pilot.press("down")
+        await _until(lambda: activity.border_title == "Activity: 2 Second")
+        app.post_message(RunEvent(Activity(second, "two says hi")))
+        app.post_message(RunEvent(Activity(first, "one again")))
+        await _until(lambda: _activity_lines(app) == ["two says hi"])
+
+        app.post_message(RunEvent(TaskStarted(third)))
+        app.post_message(RunEvent(Activity(third, "three says hi")))
+        await _until(lambda: tasks.cursor_row == 2)
+        await _until(lambda: _activity_lines(app) == ["three says hi"])
+        assert activity.border_title == "Activity: 3 Third"
+
+        tasks.move_cursor(row=1)
+        await _until(lambda: _activity_lines(app) == ["two says hi"])
+
+
+async def test_a_late_row_zero_highlight_does_not_pull_the_activity_back(
+    git_repo: Path,
+) -> None:
+    second = Task(id=2, name="Second", prompt="p")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        tasks = app.query_one(TasksPane)
+        activity = app.query_one(ActivityPane)
+        await _until(lambda: tasks.row_count == 2)
+        await pilot.pause()
+
+        app.post_message(RunEvent(TaskStarted(second)))
+        app.post_message(RunEvent(Activity(second, "two says hi")))
+        await _until(lambda: tasks.cursor_row == 1)
+        await _until(lambda: _activity_lines(app) == ["two says hi"])
+
+        # The table's first highlight message, delivered after the start moved the cursor.
+        row_key = tasks.coordinate_to_cell_key(Coordinate(0, 0)).row_key
+        tasks.post_message(DataTable.RowHighlighted(tasks, 0, row_key))
+        await pilot.pause()
+
+        assert tasks.cursor_row == 1
+        assert activity.border_title == "Activity: 2 Second"
+        assert _activity_lines(app) == ["two says hi"]
 
 
 @pytest.fixture
