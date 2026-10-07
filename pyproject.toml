@@ -29,3 +29,6 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["F", "N"]
+
+[tool.setuptools.package-data]
+alr = ["skills/**/*"]

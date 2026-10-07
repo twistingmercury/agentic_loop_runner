@@ -228,13 +228,6 @@ def test_a_run_error_is_one_error_line(
     assert err.count("\n") == 1
 
 
-def test_install_skill_is_not_a_flag() -> None:
-    with pytest.raises(SystemExit) as exit_info:
-        cli.main(["--install-skill"])
-
-    assert exit_info.value.code == 2
-
-
 def test_flag_prefixes_are_not_expanded() -> None:
     with pytest.raises(SystemExit):
         cli.main(["--dry", "-t", "t.yaml"])
@@ -581,3 +574,28 @@ def test_the_view_still_checks_a_given_settings_file(
     assert code == 1
     assert capsys.readouterr().err.startswith("error: ")
     assert seen == []
+
+
+def test_install_skill_prints_the_path_and_exits_0(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    code = cli.main(["--install-skill"])
+
+    assert code == 0
+    assert capsys.readouterr().out.strip() == str(
+        tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+    )
+
+
+def test_install_skill_reports_a_folder_it_cannot_write(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".claude").write_text("a file, not a folder", encoding="utf-8")
+
+    code = cli.main(["--install-skill"])
+
+    assert code == 1
+    assert capsys.readouterr().err.startswith("error: ")

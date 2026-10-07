@@ -14,6 +14,7 @@ from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
 from alr.errors import AlrError, UsageError
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
+from alr.skillinstall import install
 from alr.tasks import parse_timeout
 from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
@@ -38,6 +39,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.version:
         print(f"alr version: {metadata.version('alr')}")
         return 0
+
+    if args.install_skill:
+        return _install_skill()
 
     try:
         tasks_file = resolve_dir(args.dir, args.tasks)
@@ -76,6 +80,17 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         )
 
     return _run(start(tasks_file, gate_timeout, session, commit_mode))
+
+
+def _install_skill() -> int:
+    """Install the bundled skill and print where it went."""
+    try:
+        print(install())
+    except AlrError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
 
 
 def wants_tui(args: argparse.Namespace) -> bool:
@@ -117,6 +132,11 @@ def _parser() -> argparse.ArgumentParser:
         "--version",
         action="store_true",
         help="Show the current version of alr",
+    )
+    parser.add_argument(
+        "--install-skill",
+        action="store_true",
+        help="Install the bundled gralph-docs-writer skill into ~/.claude/skills and exit",
     )
     parser.add_argument(
         "-d",
