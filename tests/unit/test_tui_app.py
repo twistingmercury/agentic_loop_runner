@@ -320,3 +320,46 @@ async def test_setup_dialogs_do_not_open_while_running(
 
         await pilot.press("ctrl+c")
         await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_logged_run_leaves_a_ledger(git_repo: Path) -> None:
+    settings = _settings(git_repo)
+    settings.logging = True
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+
+    ledgers = list((git_repo / "run" / "logs").glob("*/run.jsonl"))
+    assert len(ledgers) == 1
+    # The engine's run_done hook is what the runlog writes as run_finished.
+    ledger = ledgers[0].read_text(encoding="utf-8")
+    assert '"event":"run_finished","result":"completed"' in ledger
+
+
+async def test_logging_on_with_a_visible_log_folder_blocks_start(
+    git_repo: Path,
+) -> None:
+    settings = _settings(git_repo, log_dir=str(git_repo / "visible"))
+    settings.logging = True
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: app.screen.query("#close"))
+
+        assert app.state is AppState.READY
+        assert ".gitignore" in str(app.screen.query_one("#message").render())
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_turning_logging_off_skips_the_log_folder(git_repo: Path) -> None:
+    settings = _settings(git_repo, log_dir=str(git_repo / "visible"))
+    settings.logging = True
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.click("#logging")
+        await pilot.press("s")
+        await _finished(app)
+
+    assert not (git_repo / "visible").exists()
