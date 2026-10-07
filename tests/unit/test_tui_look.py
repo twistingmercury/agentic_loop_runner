@@ -104,3 +104,17 @@ async def test_buttons_are_flat_one_row_and_only_focus_changes_them(
         await pilot.pause()
 
         assert button.styles.background != plain
+
+
+async def test_a_greyed_out_button_looks_different_from_an_enabled_one(
+    app: AlrApp,
+) -> None:
+    async with app.run_test(size=(110, 32)) as pilot:
+        await pilot.pause()
+        button = _menu_button(app)
+        enabled = button.styles.text_opacity
+
+        button.disabled = True
+        await pilot.pause()
+
+        assert button.styles.text_opacity < enabled

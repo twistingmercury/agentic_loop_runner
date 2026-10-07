@@ -1177,3 +1177,84 @@ async def test_the_commit_dropdown_stays_disabled_outside_a_repository(
         await _finished(app)
 
         assert _dropdowns_disabled(app) == (True, True)
+
+
+MENU = ["folder", "permissions", "gates", "reset", "tasks", "sandbox", "quit"]
+# What each state greys out; gates, tasks and sandbox are never touched.
+GREYED = {
+    "ready": {"folder": False, "permissions": False, "reset": False, "quit": False},
+    "running": {"folder": True, "permissions": True, "reset": True, "quit": True},
+    "finished": {"folder": True, "permissions": True, "reset": True, "quit": False},
+}
+
+
+def _menu_disabled(app: AlrApp) -> dict[str, bool]:
+    return {item: app.query_one(f"#menu-{item}", Button).disabled for item in MENU}
+
+
+def _expected_menu(state: str) -> dict[str, bool]:
+    return {item: GREYED[state].get(item, False) for item in MENU}
+
+
+async def test_nothing_is_greyed_out_before_start() -> None:
+    app = AlrApp(RunSettings())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.state is AppState.SETUP
+        assert _menu_disabled(app) == _expected_menu("ready")
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_nothing_is_greyed_out_when_ready(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert _menu_disabled(app) == _expected_menu("ready")
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_run_greys_out_the_inert_buttons_and_quit_returns_after(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+        assert _menu_disabled(app) == _expected_menu("running")
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+        assert _menu_disabled(app) == _expected_menu("finished")
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_tab_skips_the_greyed_out_buttons(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+
+        reached: set[str] = set()
+        for _ in range(20):
+            await pilot.press("tab")
+            reached.add(getattr(app.focused, "id", None) or "")
+
+        assert {"menu-gates", "menu-tasks", "menu-sandbox"} <= reached
+        assert not reached & {
+            "menu-folder",
+            "menu-permissions",
+            "menu-reset",
+            "menu-quit",
+        }
+
+        await pilot.press("ctrl+c")
+        await _finished(app)

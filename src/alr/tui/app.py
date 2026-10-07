@@ -327,6 +327,7 @@ class AlrApp(App[None]):
             _permissions_label(self.settings.permissions)
         )
         self._lock_dropdowns()
+        self._grey_out_menu()
         self._refresh_start()
         if self.state in (AppState.RUNNING, AppState.FINISHED):
             return
@@ -335,6 +336,15 @@ class AlrApp(App[None]):
         self.state = AppState.SETUP if reason else AppState.READY
         self.query_one("#start", Button).disabled = reason is not None
         self.query_one("#reason", Static).update(reason or "")
+
+    def _grey_out_menu(self) -> None:
+        """Grey out what a run makes inert; Gates, Tasks and Sandbox are left as they are."""
+        running = self.state is AppState.RUNNING
+        spent = self.state is AppState.FINISHED
+        # The setup dialogs stay shut once a run has started; Quit only waits for the run.
+        for item in ("folder", "permissions", "reset"):
+            self.query_one(f"#menu-{item}", Button).disabled = running or spent
+        self.query_one("#menu-quit", Button).disabled = running
 
     def _refresh_start(self) -> None:
         """While a run goes the Start button is the Stop button; afterwards it is spent."""
