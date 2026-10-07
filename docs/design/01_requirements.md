@@ -1,7 +1,7 @@
 ---
-version: 7
+version: 9
 date: 2026-10-07
-notes: "Goal 20 and a success criterion: the view is keyboard-only and never captures the mouse."
+notes: "Goal 21 and the --reset-failed flag: failed tasks reset from the view's menu or silently with the flag (ADR-018); the dialog-rules criterion no longer mentions a non-git folder."
 ---
 
 # alr — Requirements
@@ -59,6 +59,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 18. Offer a logging toggle, on by default, writing to `<folder>/logs` and, inside a git work tree, blocking Start when that folder is not git-ignored
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
 20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
+21. Open a task file that holds failed tasks in the view and reset them to pending from the menu after a confirmation, or silently with `--reset-failed` in either mode
 
 ### Secondary Goals
 
@@ -87,14 +88,14 @@ The flags below are accepted, with gralph's meaning and startup order.
 | Flag                        | Short | Notes                                                                                   |
 | --------------------------- | ----- | --------------------------------------------------------------------------------------- |
 | `--version`                 | `-v`  | Prints the version                                                                      |
-| `--dir <folder>`            | `-d`  | Run folder holding `tasks.yaml` and, optionally, `sandbox.json`; `--tasks` and `--sandbox-settings` override |
-| `--tasks <path>`            | `-t`  | Required unless `--dir` gives it                                                        |
+| `--dir <folder>`            | `-d`  | Run folder holding `tasks.yaml` and, optionally, `sandbox.json`; required in plain mode, and the view asks when it is missing; `--sandbox-settings` overrides the settings file |
 | `--dry-run`                 |       | Validate and report only. The old alr short form `-d` now means `--dir`, as in gralph   |
 | `--gate-timeout <duration>` |       | Duration such as `90s`, `10m`, or `1h30m`; overrides every gate's own timeout            |
 | `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
 | `--skip-permissions`        |       | Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
 | `--commit`                  |       | Commit each completed task after its gates pass; pre-selects per task in the view        |
+| `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
 | `--commit-after-all`        |       | New in alr. One commit after the last task completes; none on a failed or stopped run; pre-selects after all in the view; with `--commit` is a usage error |
 | `--log-dir <folder>`        |       | Plain mode on a real run exits 1 with gralph's error; the view accepts it and turns logging on |
 | `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
@@ -103,6 +104,7 @@ Known differences from gralph in this step:
 
 - The command is `alr`, and messages that name the command say `alr`
 - `--commit-after-all` and `--plain` exist only in `alr`
+- `-t/--tasks` is not accepted: it is an unknown-flag error, and the task file is always `<folder>/tasks.yaml` (ADR-017). Gralph command lines that use `-t` must use `-d`
 - `--no-tui`, gralph's flag for plain output, is not accepted: it is an unknown-flag error, and `--plain` replaces it
 - `-p/--prompt` is not accepted. It is an unknown-flag error, as in gralph v0.11.0 and later
 - Inside a git work tree the view always commits, and offers per task or after all tasks as its two choices; outside one it runs without commits and says so; plain mode still commits only with a flag
@@ -128,7 +130,8 @@ Known differences from gralph in this step:
 | Run log                | Same ledger lines and detail files as gralph for the same events; `run_started` has no `prompt_file` | Ported `runlog_test.go` cases                                          |
 | Path separation        | `engine` imports neither `plain` nor `stream`; `plain` and `stream` do not import each other    | A test that inspects the imports                                            |
 | View states            | Start disabled with a reason while something is missing; Running locks the settings; Finished shows a summary and stays open | TUI unit tests under Textual's `run_test` and `Pilot`          |
-| Dialog rules           | A dialog opens only for an open step; a non-git folder is blocked; nothing is written before Start | TUI unit tests                                                     |
+| Dialog rules           | A dialog opens only for an open step; nothing is written before Start except a confirmed reset | TUI unit tests                                                     |
+| Reset                  | A file with failed tasks opens with Start disabled and the reason shown; a confirmed reset saves them pending with no error text; `--reset-failed` does it silently and exits 1 with `--dry-run` | Engine, CLI, and TUI unit tests; e2e                |
 | Commit modes           | One commit per task, or one commit after the last task; none after a failed or stopped run; both flags together exit 1 | Unit tests against real git repositories; e2e                  |
 | Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
 | View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |

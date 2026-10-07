@@ -1,7 +1,7 @@
 ---
-version: 10
+version: 13
 date: 2026-10-07
-notes: "ADR-013 makes the view keyboard-only: the mouse is not captured, and every action has a key."
+notes: "ADR-017 and ADR-018 are Accepted and match what was built; ADR-013 describes the labelled strip, the Reset item in the menu, and the titled panes."
 ---
 
 # alr — Architectural Decisions
@@ -45,6 +45,8 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [014](#adr-014-commits-in-the-tui-per-task-or-after-all-tasks-when-there-is-a-work-tree) | Commits in the TUI: per task or after all tasks, when there is a work tree | Accepted | 2026-10-07 |
 | [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)   | Logging is a toggle, on by default; the gate timeout has no dialog  | Accepted | 2026-10-07 |
 | [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Accepted | 2026-10-07 |
+| [017](#adr-017-the-task-file-is-always-the-run-folders-tasksyaml)    | The task file is always the run folder's tasks.yaml                | Accepted | 2026-10-07 |
+| [018](#adr-018-failed-tasks-are-reset-from-the-menu-or-with---reset-failed)    | Failed tasks are reset from the menu or with --reset-failed         | Accepted | 2026-10-07 |
 
 ## Inherited Decisions
 
@@ -372,8 +374,8 @@ tasks:
   task-level `gates`. Any other top-level key, and any `shared` key other than `prompt` and `gates`, is rejected too.
   Quietly ignoring an old top-level `gates` list would leave a run with no checks.
 - **`-p/--prompt` is removed** with no compatibility path. Passing it is the unknown-flag error.
-- **`-d <folder>` means `<folder>/tasks.yaml`.** The "no prompt.md" error goes. `-t` stays as the override for a folder
-  holding two task files. A dry run needs nothing the real run does not, so the prompt carve-out goes.
+- **`-d <folder>` means `<folder>/tasks.yaml`.** The "no prompt.md" error goes. `-t` stayed as the override for a folder
+  holding two task files (it is gone: ADR-017). A dry run needs nothing the real run does not, so the prompt carve-out goes.
 - **The run log drops `prompt_file`** from `run_started`. `tasks_file` stays.
 - **The wire contract is unchanged.** Claude gets `shared.prompt`, a blank line, the task text, then a newline. Gates
   and `error` are never sent.
@@ -417,8 +419,7 @@ A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`.
 
 - **When it applies.** `-d <folder>` was given, `<folder>/sandbox.json` is a regular file, and neither
   `--sandbox-settings` nor `--skip-permissions` was passed. A directory of that name is ignored. The path is
-  `<folder>/sandbox.json` as `-d` was given, not made absolute. Only `-d` looks; `-t` alone never does, and `-d` with
-  `-t` still uses the folder's file.
+  `<folder>/sandbox.json` as `-d` was given, not made absolute. Only `-d` looks (there is no `-t` any more: ADR-017).
 - **Precedence.** An explicit `--sandbox-settings` wins. An explicit `--skip-permissions` also wins, with no error: it
   is how a run opts out of a folder's sandbox. The "both flags" error is for the two explicit flags only.
 - **It never leads to an unsandboxed run.** It only supplies the sandboxed choice. With no file, nothing changes: a real
@@ -596,9 +597,10 @@ window that is always there, with the setup as pop-ups, and a run that begins on
 
 One main window and modal dialogs on top of it.
 
-- **Layout.** A settings strip (commit mode dropdown, a permissions label, a logging switch, the Start button, and the
-  reason Start is disabled), a menu (Folder, Permissions, Gates, Tasks, Sandbox, and Quit buttons, since Textual has no
-  menu-bar widget), three panes (tasks, activity for the selected task, and gates and commits), and a status bar.
+- **Layout.** A labelled settings strip (a Commit dropdown, a permissions label, a Logging switch, and the Start button,
+  with the reason Start is disabled on its own row beneath), a menu (Folder, Permissions, Gates, Reset, Tasks, Sandbox, and Quit buttons, since Textual has no
+  menu-bar widget), three titled panes (Tasks, Activity for the selected task, and Gates & commits, the tasks pane widest, with long task
+  names ending in an ellipsis), and a status bar.
 - **Keyboard only.** The view is driven entirely from the keyboard and never captures the mouse (`App.run(mouse=False)`),
   so the terminal's own selection, copy, and scroll work. `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers. Esc cancels any dialog, and Enter in a text
   field submits it. The menu buttons are a visual menu: Tab and Enter work on them too.
@@ -619,7 +621,8 @@ One main window and modal dialogs on top of it.
 - **File viewer.** The menu opens `tasks.yaml` or `sandbox.json` read-only, at any time. Once Start is pressed the
   Folder, Permissions, and Gates buttons do nothing.
 - **Nothing is written before Start.** Gate edits stay in memory. Start runs the usual startup checks, and the gates are
-  saved to `tasks.yaml` only if they pass. The dialogs fill the same values the flags fill, and the startup checks run
+  saved to `tasks.yaml` only if they pass. The one exception is resetting failed tasks, which the user asks for
+  (ADR-018). The dialogs fill the same values the flags fill, and the startup checks run
   again on those values.
 - **When the view is used.** `alr` opens the TUI when stdin and stdout are terminals, `--plain` is absent, and the run
   is not a `--dry-run`. Otherwise, it runs plain mode, as before.
@@ -747,5 +750,87 @@ no longer checks the install afterward (gralph ADR-022). `alr` reads the same `t
 
 - The bundled copy has to be refreshed by hand when gralph's skill changes
 - An installed skill can go stale without any warning
+
+### ADR-017: The task file is always the run folder's tasks.yaml
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+`-t/--tasks` named a task file anywhere, while `-d/--dir` already names the run folder that holds `tasks.yaml`, an
+optional `sandbox.json`, and now the run log. Two ways to name one input let a task file and its siblings drift apart,
+and the full-screen view already asks for a folder rather than a file.
+
+**Decision:**
+
+Remove `-t/--tasks`. The task file is always `<folder>/tasks.yaml`, and `-d/--dir` is the only way to name it on the
+command line.
+
+- **Plain mode and the dry run** require `--dir`: without it the command prints `error: required flag --dir not set`
+  and exits 1.
+- **The full-screen view** asks for the folder in its folder dialog when `--dir` is absent.
+- **`-t` and `--tasks`** are unknown-flag errors, with no alias.
+- **The folder's `sandbox.json`** is always considered when no permission flag is passed, and the log folder default
+  `<folder>/logs` always sits beside the task file.
+
+This amends gralph's ADR-018 and ADR-020 (`-t` as the override) as carried by ADR-008, and ADR-009's "only `-d`
+looks".
+
+**Consequences:**
+
+*Positive:*
+
+- One way to name the task file, and its sandbox settings and logs always sit beside it
+- Less to explain and to test
+
+*Negative:*
+
+- Gralph command lines that use `-t` stop working, which relaxes the drop-in goal of ADR-007 for this one flag; it is
+  listed in the requirements' known differences
+- A folder holding two task files needs two folders
+
+### ADR-018: Failed tasks are reset from the menu or with --reset-failed
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+A run refuses to start while the task file holds a failed task (gralph ADR-002 as carried here). The way out is to fix
+the cause and set the task's `state` back to `pending` by hand in the file. The full-screen view could not even open
+such a file: the folder dialog rejected it and the tasks pane stayed empty. The wanted behavior is a reset the user can
+do from the view, and a flag that does it without asking.
+
+**Decision:**
+
+- **Engine.** `read_tasks` reads and validates the task file without refusing failed tasks; `load_tasks` is
+  `read_tasks` plus the refusal, so a run behaves as before. `reset_failed` sets every failed task back to `pending`,
+  clears its `error`, saves the file atomically only when something changed, and returns how many it reset. Completed and
+  pending tasks are left alone.
+- **The view opens a file with failed tasks.** The tasks pane shows them with a cross, and Start stays disabled with the
+  reason "N failed tasks: press r to reset".
+- **Reset menu item.** `r` (and a Reset item in the menu) opens a pop-up that lists the failed tasks and asks to reset
+  them: Enter confirms, Esc cancels. On confirm the file is saved with the tasks reset and the view refreshes. It does
+  nothing when no task has failed, and while a run is going or finished.
+- **`--reset-failed`.** The same reset without asking, in plain mode and in the view: it runs when the task file is first
+  read, before the failed-task check, and prints nothing. It cannot be combined with `--dry-run`, which writes nothing.
+- **An exception to "nothing is written before Start" (ADR-013).** A confirmed Reset and `--reset-failed` write
+  `tasks.yaml` at once. Gate edits stay in memory until Start.
+
+**Consequences:**
+
+*Positive:*
+
+- A failed run is recoverable from the view without editing the file by hand
+- The flag makes scripted retries a one-liner
+
+*Negative:*
+
+- The reset discards the failed task's error text, so the reason for the failure is gone from the file
+- A task that fails for the same reason each time is reset each time without a word when `--reset-failed` is used
+- Reset writes the task file before Start, which is the one exception to ADR-013's rule
 
 **Next:** [System Architecture](03_system_architecture.md)

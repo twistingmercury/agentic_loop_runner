@@ -42,10 +42,10 @@ tasks:
 
 ```sh
 # Validate the task file only; launches no agent and changes no files.
-alr -t tasks.yaml --dry-run
+alr -d .local/feature --dry-run
 
 # Run the tasks, with Claude in its sandbox.
-alr -t tasks.yaml --sandbox-settings sandbox.json
+alr -d .local/feature --sandbox-settings ~/sandbox.json
 
 # Run a folder that holds tasks.yaml and sandbox.json, and commit each task.
 alr -d .local/feature --commit
@@ -59,20 +59,20 @@ activity, and gates and commits), and dialogs that ask for whatever the flags an
 task file leave open (run folder, permissions, gates). Nothing runs, and nothing is
 written, until you press Start. It is keyboard-driven and never captures the mouse:
 `s` starts a run, Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
-and gates dialogs, `t` and `x` show `tasks.yaml` and `sandbox.json`, and Esc closes a
-dialog. Inside a git work tree the
+and gates dialogs, `r` resets failed tasks to pending (after you confirm), `t` and `x`
+show `tasks.yaml` and `sandbox.json`, and Esc closes a dialog. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
 | --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
-| `--tasks <path>`            | `-t`  | The task file. Required unless `--dir` gives it                                          |
-| `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`          |
+| `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
 | `--dry-run`                 |       | Validate and report only                                                                 |
 | `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--skip-permissions`        |       | Run sessions with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json`  |
 | `--commit`                  |       | Commit each completed task after its gates pass                                          |
+| `--reset-failed`            |       | Set every failed task back to pending before the run, without asking                     |
 | `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
 | `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
 | `--plain`                   |       | Use plain output instead of the full-screen view                                         |
@@ -118,7 +118,7 @@ Requires Python >= 3.12 and [uv](https://docs.astral.sh/uv/). The e2e tests need
 
 ```sh
 uv sync
-uv run alr -t path/to/tasks.yaml --dry-run
+uv run alr -d path/to/run-folder --dry-run
 ```
 
 ### Testing

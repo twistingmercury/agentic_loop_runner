@@ -1,7 +1,7 @@
 ---
-version: 11
+version: 13
 date: 2026-10-07
-notes: "The TUI component is keyboard-only: it captures no mouse, and every action has a key (ADR-013)."
+notes: "Failed tasks can be reset from the view's menu or silently with --reset-failed: the TUI component and the startup order say so (ADR-018)."
 ---
 
 # alr — System Architecture
@@ -289,6 +289,8 @@ How gralph's packages map onto this:
 - Bind Stop and Ctrl-C to cancelling the worker; show a run that ends with `RunDone` carrying `None` as done, a run the
   user stopped (the app's stop flag) as stopped, and any other error as failed; the error text of a cancelled run
   varies, so it is not matched
+- Open a task file that holds failed tasks (`read_tasks`), show them with a cross, keep Start disabled with the reason
+  "press r to reset", and reset them to pending (`reset_failed`) after a confirming pop-up (ADR-018)
 - Open `tasks.yaml` and `sandbox.json` in a read-only viewer from the menu
 - Capture no mouse and take every action from the keyboard: `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers; Esc cancels a dialog (ADR-013)
 
@@ -338,7 +340,7 @@ sequenceDiagram
     participant Tasks as alr.tasks
     participant Claude as claude
     participant FS as Filesystem
-    User ->> CLI: alr -t tasks.yaml --sandbox-settings sandbox.json
+    User ->> CLI: alr -d feat --sandbox-settings sandbox.json
     CLI ->> Engine: build session flags
     CLI ->> Engine: run(tasks path, options, plain front end)
     Engine ->> FS: read tasks.yaml
@@ -399,18 +401,20 @@ sequenceDiagram
 ### Startup Order
 
 1. With `--install-skill`: copy the bundled skill, print its path, and exit 0
-2. Resolve `--dir`: fill an unset `--tasks` with `<folder>/tasks.yaml`, then fill an unset `--sandbox-settings` with
+2. Resolve `--dir`: the task file is `<folder>/tasks.yaml`, then fill an unset `--sandbox-settings` with
    `<folder>/sandbox.json` when that is a regular file and `--skip-permissions` was not passed. A folder with no
-   `tasks.yaml` and no `--tasks` exits 1
+   `tasks.yaml` exits 1
 3. Check `--gate-timeout` if passed
 4. Pick the front end: full-screen when stdin and stdout are terminals, `--plain` is absent, and the run is not a
    `--dry-run`; otherwise plain
-5. Check plain mode's required flag, `--tasks`. The full-screen view asks for a missing one in a dialog instead
+5. Check plain mode's required flag, `--dir`. The full-screen view asks for a missing one in a dialog instead
 6. Check `--log-dir`: in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; ignored
    on `--dry-run`. `--commit` together with `--commit-after-all` is a usage error
 7. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or
    `--skip-permissions` on a real run; a dry run needs neither but still checks a settings file it is given
-8. Dry run, plain real run, or the full-screen view. The view repeats steps 1 to 6 on Start with the dialogs' values
+8. Dry run, plain real run, or the full-screen view. With `--reset-failed`, a real run sets failed tasks back to pending
+   silently before it loads the file (the view does it when it first reads the file); `--reset-failed` with `--dry-run`
+   is a usage error (ADR-018). The view repeats steps 1 to 6 on Start with the dialogs' values
 
 ### Stopping
 
