@@ -365,6 +365,7 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         gate_timeout: str,
         session: list[str],
         commit: CommitMode | None,
+        reset_failed: bool,
     ) -> None:
         seen.append(session)
 
@@ -612,3 +613,56 @@ def test_install_skill_reports_a_folder_it_cannot_write(
 
     assert code == 1
     assert capsys.readouterr().err.startswith("error: ")
+
+
+@pytest.mark.parametrize("extra", [[], ["--plain"]], ids=["view", "plain"])
+def test_reset_failed_with_dry_run_is_a_usage_error(
+    folder: Path, capsys: pytest.CaptureFixture[str], extra: list[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--dry-run", "--reset-failed", *extra])
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "error: --reset-failed cannot be used with --dry-run (a dry run writes nothing)\n"
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_plain_run_with_reset_failed_runs_a_failed_task(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tasks = folder / "tasks.yaml"
+    tasks.write_text(
+        ONE_TASK_YAML.replace("prompt: p\n", "prompt: p\n    state: failed\n"),
+        encoding="utf-8",
+    )
+
+    code = cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
+
+    assert code == 0
+    assert "failed" not in capsys.readouterr().out
+    assert "state: completed" in tasks.read_text(encoding="utf-8")
+
+
+def test_a_plain_run_without_reset_failed_still_refuses_a_failed_task(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folder / "tasks.yaml").write_text(
+        ONE_TASK_YAML.replace("prompt: p\n", "prompt: p\n    state: failed\n"),
+        encoding="utf-8",
+    )
+
+    code = cli.main(["-d", str(folder), "--skip-permissions"])
+
+    assert code == 1
+    assert "Some tasks failed previous runs:" in capsys.readouterr().out
+
+
+def test_the_view_gets_the_reset_failed_flag(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
+
+    assert seen[0].reset_failed is True

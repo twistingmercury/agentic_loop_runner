@@ -18,7 +18,16 @@ from alr.errors import (
     TaskFileError,
     quote,
 )
-from alr.tasks import COMPLETED, FAILED, Gate, Task, TaskList, parse_tasks, save_tasks
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    Gate,
+    Task,
+    TaskList,
+    parse_tasks,
+    save_tasks,
+)
 
 __all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_tasks", "run"]
 
@@ -46,8 +55,8 @@ class RunOptions:
     """When the repo is committed into: after each task, or once after the last."""
 
 
-def load_tasks(path: str) -> TaskList:
-    """Read and validate the task file; a file holding a failed task is refused."""
+def read_tasks(path: str) -> TaskList:
+    """Read and validate the task file, failed tasks and all."""
     try:
         # Strict: the file is saved back, and a replacement character would
         # overwrite the user's byte on the first save.
@@ -64,10 +73,34 @@ def load_tasks(path: str) -> TaskList:
     except TaskFileError as exc:
         raise TaskFileError(f"failed to parse tasks yaml: {exc}") from exc
 
+    return task_list
+
+
+def load_tasks(path: str) -> TaskList:
+    """Read the task file for a run; a file holding a failed task is refused."""
+    task_list = read_tasks(path)
     if any(task.state == FAILED for task in task_list.tasks):
         raise FailedTasksError(task_list)
 
     return task_list
+
+
+def reset_failed(tasks_file: str) -> int:
+    """Set every failed task back to pending and return how many there were.
+
+    The file is rewritten only when something was reset, so a file with
+    nothing failed stays exactly as the user left it.
+    """
+    task_list = read_tasks(tasks_file)
+    failed = [task for task in task_list.tasks if task.state == FAILED]
+    if not failed:
+        return 0
+
+    for task in failed:
+        task.state, task.error = PENDING, ""
+
+    save_tasks(tasks_file, task_list)
+    return len(failed)
 
 
 async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> None:

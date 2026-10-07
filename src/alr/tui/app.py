@@ -13,7 +13,7 @@ from textual.widgets import Button, Footer, Header, Select, Static, Switch
 from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
-from alr.engine.loop import load_tasks, run
+from alr.engine.loop import load_tasks, reset_failed, run
 from alr.errors import AlrError
 from alr.stream.events import RunDone
 from alr.stream.frontend import StreamFrontEnd
@@ -156,9 +156,16 @@ class AlrApp(App[None]):
             return
 
         try:
-            self._task_list = load_tasks(self.settings.tasks_file)
+            self._task_list = self._open_file(self.settings.tasks_file)
         except AlrError:
             return
+
+    def _open_file(self, tasks_file: str) -> TaskList:
+        """Read a task file, first resetting its failed tasks when --reset-failed asked."""
+        if self.settings.reset_failed:
+            reset_failed(tasks_file)
+
+        return load_tasks(tasks_file)
 
     def _show_tasks(self) -> None:
         """Show the tasks before Start."""

@@ -29,6 +29,9 @@ class RunSettings:
     log_dir: str = ""
     """An explicit --log-dir; empty means a logs folder beside the task file."""
 
+    reset_failed: bool = False
+    """--reset-failed: failed tasks go back to pending when the file is first read."""
+
     gate_timeout: str = ""
     gates: list[Gate] | None = None
     """Gates edited in the view; None when they were not touched."""

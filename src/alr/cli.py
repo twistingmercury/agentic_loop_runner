@@ -52,6 +52,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if args.gate_timeout is not None:
             check_gate_timeout(args.gate_timeout)
 
+        check_reset_flag(args.reset_failed, args.dry_run)
         if wants_tui(args):
             return _open_view(args, tasks_file, sandbox_settings)
 
@@ -79,7 +80,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             )
         )
 
-    return _run(start(tasks_file, gate_timeout, session, commit_mode))
+    return _run(
+        start(tasks_file, gate_timeout, session, commit_mode, args.reset_failed)
+    )
 
 
 def _install_skill() -> int:
@@ -113,6 +116,7 @@ def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> 
         commit_mode=commit_mode or CommitMode.PER_TASK,
         log_dir=args.log_dir,
         gate_timeout=args.gate_timeout or "",
+        reset_failed=args.reset_failed,
     )
     return run_app(settings)
 
@@ -159,6 +163,11 @@ def _parser() -> argparse.ArgumentParser:
         "--plain",
         action="store_true",
         help="Use plain output instead of the full-screen view",
+    )
+    parser.add_argument(
+        "--reset-failed",
+        action="store_true",
+        help="Set every failed task back to pending before the run, without asking",
     )
     parser.add_argument(
         "--sandbox-settings",
@@ -246,6 +255,14 @@ def check_commit_flags(commit: bool, after_all: bool) -> CommitMode | None:
         return CommitMode.AFTER_ALL
 
     return CommitMode.PER_TASK if commit else None
+
+
+def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:
+    """Refuse --reset-failed with --dry-run, which must write nothing."""
+    if reset_failed and dry_run:
+        raise UsageError(
+            "--reset-failed cannot be used with --dry-run (a dry run writes nothing)"
+        )
 
 
 def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:

@@ -830,3 +830,22 @@ async def _tab_to(app: AlrApp, pilot: Pilot, widget_id: str) -> None:
         await pilot.press("tab")
 
     pytest.fail(f"Tab never reached #{widget_id}")
+
+
+FAILED_TASKS = TASKS.replace(
+    "    name: First\n    prompt: p\n",
+    "    name: First\n    prompt: p\n    state: failed\n    error: boom\n",
+)
+
+
+async def test_reset_failed_flag_resets_the_file_at_launch(git_repo: Path) -> None:
+    settings = _settings(git_repo, FAILED_TASKS, reset_failed=True)
+    app = AlrApp(settings)
+    async with app.run_test():
+        await _until(lambda: app.state is AppState.READY)
+        await _until(
+            lambda: saved_tasks(Path(settings.tasks_file)).tasks[0].state == "pending"
+        )
+
+        assert not isinstance(app.screen, ModalScreen)
+        assert saved_tasks(Path(settings.tasks_file)).tasks[0].error == ""

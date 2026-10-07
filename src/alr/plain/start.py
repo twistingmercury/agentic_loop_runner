@@ -4,7 +4,7 @@ import sys
 from collections.abc import Sequence
 
 from alr.engine.commit import CommitMode
-from alr.engine.loop import RunOptions, run
+from alr.engine.loop import RunOptions, reset_failed, run
 from alr.errors import (
     RunCancelledError,
     RunError,
@@ -19,9 +19,16 @@ async def start(
     gate_timeout: str,
     session_args: Sequence[str],
     commit: CommitMode | None,
+    reset: bool = False,
 ) -> None:
-    """Run the loop in plain mode: load, check, then run every pending task."""
+    """Run the loop in plain mode: load, check, then run every pending task.
+
+    With reset, failed tasks go back to pending first, without a word.
+    """
     try:
+        if reset:
+            reset_failed(tasks_file)
+
         task_list = load_tasks_report(sys.stdout, tasks_file)
     except TaskFileError as exc:
         # A FailedTasksError is not one, so it passes through without the prefix.

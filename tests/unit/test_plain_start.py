@@ -39,8 +39,10 @@ def _calls(record: Path) -> int:
     return len(record.read_text(encoding="utf-8").splitlines())
 
 
-async def _start(tasks_file: str, commit: CommitMode | None = None) -> None:
-    await start(tasks_file, "", bypass_args(), commit)
+async def _start(
+    tasks_file: str, commit: CommitMode | None = None, reset_failed: bool = False
+) -> None:
+    await start(tasks_file, "", bypass_args(), commit, reset_failed)
 
 
 async def test_start_missing_tasks_file(tmp_path: Path) -> None:
@@ -115,6 +117,25 @@ tasks:
     assert Path(tasks_file).read_text(encoding="utf-8") == content, (
         "the tasks file must be unchanged"
     )
+
+
+async def test_start_reset_failed_runs_the_failed_task_without_a_word(
+    record: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    content = ONE_TASK_YAML.replace("p1}", "p1, state: failed, error: boom}")
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
+
+    await _start(tasks_file, reset_failed=True)
+
+    assert _calls(record) == 1
+    printed = capsys.readouterr().out.lower()
+    assert "reset" not in printed
+    assert "failed" not in printed
+
+
+async def test_start_reset_failed_still_wraps_a_bad_file(tmp_path: Path) -> None:
+    with pytest.raises(TaskFileError, match="failed to start loop runner"):
+        await _start(str(tmp_path / "missing.yaml"), reset_failed=True)
 
 
 async def test_start_commit_refuses_dirty_tree_before_any_session(
