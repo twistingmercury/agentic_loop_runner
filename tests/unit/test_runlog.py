@@ -143,19 +143,17 @@ def test_open_existing_run_folder_gets_a_suffixed_folder(
 
 
 def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None:
-    parent = tmp_path / "logs"
-    parent.mkdir()
-    parent.chmod(0o500)
-    path = parent / "20261001T140211"
+    # A file where a folder should be fails the same way for every user, root
+    # included, which a read-only folder does not.
+    blocker = tmp_path / "logs"
+    blocker.write_text("a file, not a folder", encoding="utf-8")
+    path = blocker / "nested" / "20261001T140211"
 
-    try:
-        with pytest.raises(RunLogError) as raised:
-            RunLog.open(path, INFO, now=fixed_now)
-    finally:
-        parent.chmod(0o700)
+    with pytest.raises(RunLogError) as raised:
+        RunLog.open(path, INFO, now=fixed_now)
 
     assert str(raised.value) == (
-        f"cannot create the run log folder {path}: Permission denied"
+        f"cannot create the run log folder {path}: Not a directory"
     )
 
 

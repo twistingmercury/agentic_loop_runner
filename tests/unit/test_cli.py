@@ -7,6 +7,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from helpers import gone_within, start_alr, wait_for_file
@@ -412,11 +413,22 @@ def test_a_bad_folder_file_fails_and_never_runs_unsandboxed(
 
 
 def test_an_unreadable_folder_file_fails(
-    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _add_sandbox(folder).chmod(0)
-    if os.access(folder / "sandbox.json", os.R_OK):
-        pytest.skip("permissions are not enforced for this user")
+    _add_sandbox(folder)
+    read_text = Path.read_text
+
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> str:
+        # chmod 0 would not stop root, so the refusal is made here instead.
+        if self.name == "sandbox.json":
+            raise PermissionError(13, "Permission denied")
+
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", refuse)
 
     assert cli.main(["-d", str(folder)]) == 1
     assert sessions == []
