@@ -4,11 +4,12 @@ from pathlib import Path
 
 from helpers import write_nested_file
 from textual.app import App
-from textual.widgets import Input, ListView
+from textual.widgets import Input, ListView, TextArea
 
 from alr.tui.checks import FolderCheck
 from alr.tasks import Gate
 from alr.tui.dialogs import (
+    FileViewer,
     FolderDialog,
     GatesDialog,
     PermissionChoice,
@@ -208,6 +209,40 @@ async def test_gates_dialog_cancel_returns_none() -> None:
         await pilot.pause()
 
         await pilot.click("#cancel")
+        await pilot.pause()
+
+        assert host.result is None
+
+
+async def test_file_viewer_shows_the_file_read_only(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.yaml"
+    path.write_text("a: 1\n", encoding="utf-8")
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(FileViewer(str(path)))
+        await pilot.pause()
+
+        text = host.screen.query_one("#text", TextArea)
+        assert text.read_only
+        assert text.text == "a: 1\n"
+
+
+async def test_file_viewer_says_when_the_file_is_missing(tmp_path: Path) -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(FileViewer(str(tmp_path / "gone.json")))
+        await pilot.pause()
+
+        assert "not accessible" in host.screen.query_one("#text", TextArea).text
+
+
+async def test_file_viewer_closes(tmp_path: Path) -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(FileViewer(""), host.record)
+        await pilot.pause()
+
+        await pilot.click("#close")
         await pilot.pause()
 
         assert host.result is None

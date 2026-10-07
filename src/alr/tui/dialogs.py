@@ -17,6 +17,7 @@ from textual.widgets import (
     RadioButton,
     RadioSet,
     Static,
+    TextArea,
 )
 
 from alr.errors import AlrError
@@ -59,6 +60,34 @@ class SummaryDialog(ModalScreen[None]):
 
     def on_button_pressed(self) -> None:
         self.dismiss(None)
+
+
+class FileViewer(ModalScreen[None]):
+    """A file shown as it is on disk, read-only."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self._path = path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(self._path or "no file")
+            yield TextArea(_read(self._path), read_only=True, id="text")
+            yield Button("Close", id="close")
+
+    def on_button_pressed(self) -> None:
+        self.dismiss(None)
+
+
+def _read(path: str) -> str:
+    """The file's text, or a line saying why there is none."""
+    if not path:
+        return "(no file chosen yet)"
+
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"({path} is not accessible: {exc.strerror})"
 
 
 class _Directories(DirectoryTree):

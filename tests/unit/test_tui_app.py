@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pytest
 from helpers import git, write_file
-from textual.widgets import Button
+from textual.screen import ModalScreen
+from textual.widgets import TextArea
 
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
-from alr.tui.dialogs import PermissionsDialog
+from alr.tui.dialogs import FolderDialog, GatesDialog, PermissionsDialog
 from alr.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
@@ -186,20 +187,21 @@ async def test_a_run_of_completed_tasks_finishes_done_at_once(git_repo: Path) ->
         assert app.outcome == "done"
 
 
-async def test_permissions_button_shows_the_choice_and_applies_the_dialog() -> None:
-    app = AlrApp(RunSettings())
+async def test_permissions_label_shows_the_choice_and_applies_the_dialog(
+    git_repo: Path,
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", TASKS)
+    app = AlrApp(RunSettings(tasks_file=tasks_file))
     async with app.run_test() as pilot:
-        await pilot.pause()
-        button = app.query_one("#permissions", Button)
-        assert "not chosen" in str(button.label)
-
-        await pilot.click("#permissions")
         await _until(lambda: isinstance(app.screen, PermissionsDialog))
+        label = app.query_one("#permissions")
+        assert "not chosen" in str(label.render())
+
         await pilot.click("#skip")
         await pilot.click("#ok")
         await _until(lambda: app.settings.permissions is Permissions.SKIP)
 
-        assert "skip" in str(button.label)
+        assert "skip" in str(label.render())
 
 
 @pytest.mark.parametrize(
@@ -229,3 +231,92 @@ async def test_start_saves_the_edited_gates(git_repo: Path) -> None:
 
     saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
     assert saved.gate_list() == [Gate(cmd="true")]
+
+
+async def test_launch_opens_the_folder_dialog_when_no_folder_is_known() -> None:
+    app = AlrApp(RunSettings())
+    async with app.run_test():
+        await _until(lambda: isinstance(app.screen, FolderDialog))
+
+
+async def test_launch_skips_every_step_the_inputs_answer(git_repo: Path) -> None:
+    text = "shared:\n  prompt: p\n  gates: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
+    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.state is AppState.READY
+        assert not isinstance(app.screen, ModalScreen)
+
+
+async def test_launch_asks_for_permissions_then_gates_in_order(git_repo: Path) -> None:
+    text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
+    app = AlrApp(RunSettings(tasks_file=tasks_file))
+    async with app.run_test() as pilot:
+        await _until(lambda: isinstance(app.screen, PermissionsDialog))
+
+        await pilot.click("#skip")
+        await pilot.click("#ok")
+        await _until(lambda: isinstance(app.screen, GatesDialog))
+
+        await pilot.click("#done")
+        await _until(lambda: app.state is AppState.READY)
+
+
+async def test_the_menu_reopens_a_dialog_before_start(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await pilot.click("#menu-gates")
+        await _until(lambda: isinstance(app.screen, GatesDialog))
+
+        await pilot.click("#cancel")
+        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        assert app.state is AppState.READY
+
+
+async def test_the_menu_opens_the_task_file_read_only(git_repo: Path) -> None:
+    settings = _settings(git_repo)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await pilot.click("#menu-tasks")
+        await _until(lambda: isinstance(app.screen, ModalScreen))
+
+        viewer = app.screen.query_one("#text", TextArea)
+        assert viewer.read_only
+        assert viewer.text == Path(settings.tasks_file).read_text(encoding="utf-8")
+
+
+async def test_the_viewer_says_when_there_is_no_sandbox_file(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await pilot.click("#menu-sandbox")
+        await _until(lambda: isinstance(app.screen, ModalScreen))
+
+        assert "no file chosen yet" in app.screen.query_one("#text", TextArea).text
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("item", ["folder", "permissions", "gates"])
+async def test_setup_dialogs_do_not_open_while_running(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, item: str
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+
+        await pilot.click(f"#menu-{item}")
+        await pilot.pause()
+        assert not isinstance(app.screen, ModalScreen)
+
+        await pilot.press("ctrl+c")
+        await _finished(app)

@@ -19,6 +19,7 @@ from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
     ErrorDialog,
+    FileViewer,
     FolderDialog,
     GatesDialog,
     PermissionsDialog,
@@ -41,6 +42,11 @@ class AlrApp(App[None]):
     """Setup, then one run, then the result on screen until the user quits."""
 
     TITLE = "alr"
+    # Horizontal fills the screen by default; the bars should take one row each.
+    CSS = """
+    #strip, #menu { height: auto; }
+    #permissions { width: auto; padding: 1 2; }
+    """
     BINDINGS = [
         Binding("s", "start", "Start"),
         # Textual receives Ctrl-C as a key press, so it must be taken here or it quits.
@@ -69,10 +75,17 @@ class AlrApp(App[None]):
                 allow_blank=False,
                 id="commit",
             )
-            yield Button("", id="permissions")
+            yield Static("", id="permissions")
             yield Switch(value=self.settings.logging, id="logging")
             yield Button("Start", id="start", variant="success")
             yield Static("", id="reason")
+        with Horizontal(id="menu"):
+            yield Button("Folder", id="menu-folder")
+            yield Button("Permissions", id="menu-permissions")
+            yield Button("Gates", id="menu-gates")
+            yield Button("Tasks", id="menu-tasks")
+            yield Button("Sandbox", id="menu-sandbox")
+            yield Button("Quit", id="menu-quit")
         with Horizontal(id="panes"):
             yield TasksPane(id="tasks")
             yield _activity_pane()
@@ -86,6 +99,7 @@ class AlrApp(App[None]):
         self._refresh()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.action_stop)
+        self.run_worker(self.launch_sequence(), exit_on_error=False)
 
     def _load_tasks(self) -> None:
         """Show the tasks before Start; an unreadable file is reported by the dialogs."""
@@ -98,6 +112,20 @@ class AlrApp(App[None]):
             return
 
         self.query_one(TasksPane).load(self._task_list)
+
+    async def launch_sequence(self) -> None:
+        """Ask, in order, only for what the flags and the task file leave open."""
+        if not self.settings.tasks_file:
+            await self.ask_folder()
+
+        if not self.settings.tasks_file:
+            return
+
+        if self.settings.permissions is Permissions.UNSET:
+            await self.ask_permissions()
+
+        if self.needs_gates():
+            await self.ask_gates()
 
     async def ask_folder(self) -> None:
         """Show the folder dialog and apply an accepted answer to the settings."""
@@ -148,8 +176,8 @@ class AlrApp(App[None]):
 
     def _refresh(self) -> None:
         """Bring the Start button and the reason line in line with the state."""
-        self.query_one("#permissions", Button).label = _permissions_label(
-            self.settings.permissions
+        self.query_one("#permissions", Static).update(
+            _permissions_label(self.settings.permissions)
         )
         if self.state in (AppState.RUNNING, AppState.FINISHED):
             self.query_one("#start", Button).disabled = True
@@ -161,12 +189,38 @@ class AlrApp(App[None]):
         self.query_one("#reason", Static).update(reason or "")
 
     def on_button_pressed(self, message: Button.Pressed) -> None:
-        if message.button.id == "start":
+        name = message.button.id or ""
+        if name == "start":
             self.action_start()
             return
 
-        if message.button.id == "permissions" and self.state is not AppState.RUNNING:
-            self.run_worker(self.ask_permissions())
+        if name.startswith("menu-"):
+            self._menu(name.removeprefix("menu-"))
+
+    def _menu(self, item: str) -> None:
+        """Route a menu button; the viewers work any time, the setup dialogs only before Start."""
+        if item == "quit":
+            self.action_quit_if_idle()
+            return
+
+        if item == "tasks":
+            self.push_screen(FileViewer(self.settings.tasks_file))
+            return
+
+        if item == "sandbox":
+            self.push_screen(FileViewer(self.settings.sandbox_file))
+            return
+
+        # The setup dialogs change the settings, which are locked once a run starts.
+        if self.state in (AppState.RUNNING, AppState.FINISHED):
+            return
+
+        action = {
+            "folder": self.ask_folder,
+            "permissions": self.ask_permissions,
+            "gates": self.ask_gates,
+        }
+        self.run_worker(action[item](), exit_on_error=False)
 
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "commit" and isinstance(message.value, CommitMode):
