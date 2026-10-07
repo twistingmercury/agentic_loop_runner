@@ -128,9 +128,18 @@ def _permissions(sandbox_file: str, skip: bool) -> Permissions:
     return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
 
 
+class _BareMetavarFormatter(argparse.HelpFormatter):
+    """Drop the stray space argparse leaves after a flag whose metavar is empty."""
+
+    def _format_action_invocation(self, action: argparse.Action) -> str:
+        return super()._format_action_invocation(action).replace(" ,", ",").rstrip()
+
+
 def _parser() -> argparse.ArgumentParser:
     # Abbreviations are off because gralph does not expand a flag prefix.
-    parser = argparse.ArgumentParser(prog="alr", allow_abbrev=False)
+    parser = argparse.ArgumentParser(
+        prog="alr", allow_abbrev=False, formatter_class=_BareMetavarFormatter
+    )
     parser.add_argument(
         "-v",
         "--version",
@@ -145,6 +154,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-d",
         "--dir",
+        metavar="",
         default="",
         help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings overrides the folder's sandbox.json",
     )
@@ -156,6 +166,7 @@ def _parser() -> argparse.ArgumentParser:
     # None, not "", so an empty value given on purpose can be told apart.
     parser.add_argument(
         "--gate-timeout",
+        metavar="",
         default=None,
         help="Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)",
     )
@@ -171,6 +182,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--sandbox-settings",
+        metavar="",
         default="",
         help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --skip-permissions",
     )
@@ -191,6 +203,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--log-dir",
+        metavar="",
         default="",
         help="Directory for a record of the run: a ledger and each task's activity, in a new folder per run; full-screen view only",
     )

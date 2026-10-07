@@ -666,3 +666,26 @@ def test_the_view_gets_the_reset_failed_flag(
     cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
 
     assert seen[0].reset_failed is True
+
+
+@pytest.mark.parametrize(
+    ("placeholder", "usage_token", "help_option"),
+    [
+        ("DIR", "[-d]", "-d, --dir "),
+        ("GATE_TIMEOUT", "[--gate-timeout]", "--gate-timeout "),
+        ("SANDBOX_SETTINGS", "[--sandbox-settings]", "--sandbox-settings "),
+        ("LOG_DIR", "[--log-dir]", "--log-dir "),
+    ],
+)
+def test_value_flags_show_no_placeholder_in_the_help(
+    placeholder: str, usage_token: str, help_option: str
+) -> None:
+    parser = cli._parser()
+
+    usage = parser.format_usage()
+    help_text = parser.format_help()
+
+    assert placeholder not in usage
+    assert placeholder not in help_text
+    assert usage_token in usage
+    assert help_option in help_text
