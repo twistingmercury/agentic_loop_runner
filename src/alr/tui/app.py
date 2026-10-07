@@ -50,6 +50,19 @@ class AlrApp(App[None]):
     # Horizontal fills the screen by default; the bars should take one row each.
     CSS = """
     #strip, #menu { height: auto; }
+    /* Flat buttons: plain words, and only keyboard focus lights one up. */
+    Button {
+        border: none;
+        height: 1;
+        min-width: 0;
+        width: auto;
+        padding: 0 2;
+        background: transparent;
+        color: $text;
+        text-style: none;
+    }
+    Button:focus { background: $accent; text-style: bold; }
+    #start { margin: 1 0; }
     #commit-box { width: 28; height: auto; }
     #commit-note { height: auto; padding: 0 1; }
     #permissions { width: auto; padding: 1 2; }
@@ -103,7 +116,7 @@ class AlrApp(App[None]):
                 yield note
             yield Static("", id="permissions")
             yield Switch(value=self.settings.logging, id="logging")
-            yield Button("Start", id="start", variant="success")
+            yield Button("Start", id="start")
             yield Static("", id="reason")
         with Horizontal(id="menu"):
             yield Button("Folder", id="menu-folder")

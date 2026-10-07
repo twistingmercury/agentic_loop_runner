@@ -32,6 +32,21 @@ class _Dialog[R](ModalScreen[R | None]):
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
+    # A box floating over the main window, which shows through the modal's dimmed background.
+    DEFAULT_CSS = """
+    _Dialog { align: center middle; }
+    _Dialog #dialog {
+        width: 60;
+        height: auto;
+        max-height: 90%;
+        border: round $primary;
+        background: $panel;
+        padding: 1 2;
+    }
+    _Dialog Horizontal { height: auto; }
+    _Dialog #error { height: auto; }
+    """
+
     def action_cancel(self) -> None:
         self.dismiss(None)
 
@@ -75,6 +90,11 @@ class SummaryDialog(_Dialog[None]):
 class FileViewer(_Dialog[None]):
     """A file shown as it is on disk, read-only."""
 
+    DEFAULT_CSS = """
+    FileViewer #dialog { width: 80%; height: 80%; }
+    FileViewer #text { height: 1fr; }
+    """
+
     def __init__(self, path: str) -> None:
         super().__init__()
         self._path = path
@@ -110,6 +130,11 @@ class _Directories(DirectoryTree):
 class FolderDialog(_Dialog[FolderCheck]):
     """Pick the run folder; the answer is checked here, so an error keeps the user on this step."""
 
+    DEFAULT_CSS = """
+    FolderDialog #dialog { width: 80%; max-width: 90; }
+    FolderDialog #tree { height: 10; }
+    """
+
     def __init__(self, start: str) -> None:
         super().__init__()
         self._start = start
@@ -121,7 +146,7 @@ class FolderDialog(_Dialog[FolderCheck]):
             yield _Directories(self._start, id="tree")
             yield Static("", id="error")
             with Horizontal():
-                yield Button("OK", id="ok", variant="primary")
+                yield Button("OK", id="ok")
                 yield Button("Cancel", id="cancel")
 
     def on_directory_tree_directory_selected(
@@ -160,6 +185,10 @@ class PermissionChoice:
 class PermissionsDialog(_Dialog[PermissionChoice]):
     """Sandbox settings file, or skip permissions; nothing is pre-selected without a folder file."""
 
+    DEFAULT_CSS = """
+    PermissionsDialog #dialog { width: 80%; max-width: 90; }
+    """
+
     def __init__(self, default_file: str) -> None:
         super().__init__()
         self._default_file = default_file
@@ -177,7 +206,7 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
             yield Input(value=self._default_file, placeholder="sandbox.json", id="file")
             yield Static("", id="error")
             with Horizontal():
-                yield Button("OK", id="ok", variant="primary")
+                yield Button("OK", id="ok")
                 yield Button("Cancel", id="cancel")
 
     def on_button_pressed(self, message: Button.Pressed) -> None:
@@ -212,6 +241,11 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
 class GatesDialog(_Dialog[list[Gate]]):
     """Add and remove the file's shared gates; Done with none is a decision that there are none."""
 
+    DEFAULT_CSS = """
+    GatesDialog #dialog { width: 80%; max-width: 90; }
+    GatesDialog #list { height: auto; max-height: 6; }
+    """
+
     # Typing a gate is the first thing to do; the list is reached with Tab.
     AUTO_FOCUS = "#cmd"
 
@@ -229,7 +263,7 @@ class GatesDialog(_Dialog[list[Gate]]):
             with Horizontal():
                 yield Button("Add", id="add")
                 yield Button("Remove", id="remove")
-                yield Button("Done", id="done", variant="primary")
+                yield Button("Done", id="done")
                 yield Button("Cancel", id="cancel")
 
     async def on_button_pressed(self, message: Button.Pressed) -> None:
