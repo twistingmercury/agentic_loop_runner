@@ -542,6 +542,46 @@ async def test_stop_during_prepare_finishes_stopped(
         assert app.outcome == "stopped"
 
 
+async def test_pressing_the_stop_button_twice_leaves_the_app_open(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_to_stop(settings: RunSettings) -> Prepared:
+        entered.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            await release.wait()
+            raise
+
+    monkeypatch.setattr(app_module, "prepare", slow_to_stop)
+    app = AlrApp(_settings(git_repo))
+    exits: list[object] = []
+    # exit() only queues the shutdown, so record the call instead of racing it.
+    monkeypatch.setattr(app, "exit", lambda *args, **kwargs: exits.append(args))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(entered.is_set)
+        button = app.query_one("#start", Button)
+        button.focus()
+
+        await pilot.press("enter")
+        await _until(lambda: app._stopping)
+        # A button ignores presses while its press flash shows.
+        await _until(lambda: not button.has_class("-active"))
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not exits
+        release.set()
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        assert not exits
+
+
 async def test_a_second_stop_while_stopping_quits(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

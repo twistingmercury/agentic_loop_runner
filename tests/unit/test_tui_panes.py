@@ -1,5 +1,8 @@
 """The three panes, each fed events directly."""
 
+import asyncio
+from collections.abc import Callable
+
 import pytest
 from textual.app import App, ComposeResult
 from textual.events import Resize
@@ -78,6 +81,16 @@ async def test_activity_pane_shows_only_the_selected_task() -> None:
         assert shown_text(pane) == ["→ edit b.py"]
 
 
+async def _until(condition: Callable[[], object]) -> None:
+    for _ in range(300):
+        if condition():
+            return
+
+        await asyncio.sleep(0.02)
+
+    pytest.fail("timed out waiting for the condition")
+
+
 def shown_text(pane: ActivityPane) -> list[str]:
     """The rows on screen, without the padding that fills each to the pane's width."""
     return [strip.text.rstrip() for strip in pane.lines]
@@ -117,7 +130,7 @@ async def test_activity_pane_rewraps_when_it_is_resized() -> None:
         narrow = len(shown_text(pane))
 
         await pilot.resize_terminal(120, 20)
-        await pilot.pause()
+        await _until(lambda: len(shown_text(pane)) < narrow)
 
         assert len(shown_text(pane)) < narrow
         assert " ".join(shown_text(pane)).split() == line.split()

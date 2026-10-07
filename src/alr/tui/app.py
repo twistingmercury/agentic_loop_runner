@@ -368,7 +368,10 @@ class AlrApp(App[None]):
     def _press_start(self) -> None:
         """The one button starts a run when ready and stops it while it goes."""
         if self.state is AppState.RUNNING:
-            self.action_stop()
+            # A double click must not throw away the clean shutdown; only Ctrl-C quits.
+            if not self._stopping:
+                self.action_stop()
+
             return
 
         self.action_start()
