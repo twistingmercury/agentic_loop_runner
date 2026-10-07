@@ -5,7 +5,7 @@ from pathlib import Path
 
 from alr.engine.commit import work_tree_root
 from alr.engine.loop import load_tasks
-from alr.engine.sandbox import folder_sandbox
+from alr.engine.sandbox import folder_sandbox, sandbox_args
 from alr.errors import RepoError, UsageError
 from alr.tasks import TaskList
 
@@ -36,3 +36,8 @@ async def check_folder(folder: str) -> FolderCheck:
         )
 
     return FolderCheck(str(tasks_file), task_list, folder_sandbox(folder) or "")
+
+
+def check_sandbox(path: str) -> None:
+    """Accept a sandbox settings file, or raise why not; the run reads it the same way."""
+    sandbox_args(path)

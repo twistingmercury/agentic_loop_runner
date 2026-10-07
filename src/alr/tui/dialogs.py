@@ -1,15 +1,25 @@
 """The modal dialogs over the main window."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DirectoryTree, Input, Label, Static
+from textual.widgets import (
+    Button,
+    DirectoryTree,
+    Input,
+    Label,
+    RadioButton,
+    RadioSet,
+    Static,
+)
 
 from alr.errors import AlrError
-from alr.tui.checks import FolderCheck, check_folder
+from alr.tui.checks import FolderCheck, check_folder, check_sandbox
+from alr.tui.settings import Permissions
 
 
 class ErrorDialog(ModalScreen[None]):
@@ -92,3 +102,60 @@ class FolderDialog(ModalScreen[FolderCheck | None]):
             return
 
         self.dismiss(check)
+
+
+@dataclass(frozen=True)
+class PermissionChoice:
+    """How sessions run, and the settings file when sandboxed."""
+
+    permissions: Permissions
+    sandbox_file: str
+
+
+class PermissionsDialog(ModalScreen[PermissionChoice | None]):
+    """Sandbox settings file, or skip permissions; nothing is pre-selected without a folder file."""
+
+    def __init__(self, default_file: str) -> None:
+        super().__init__()
+        self._default_file = default_file
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("How should sessions run?")
+            with RadioSet():
+                yield RadioButton(
+                    "Sandbox, with a settings file",
+                    id="sandbox",
+                    value=bool(self._default_file),
+                )
+                yield RadioButton("Skip permissions (no sandbox)", id="skip")
+            yield Input(value=self._default_file, placeholder="sandbox.json", id="file")
+            yield Static("", id="error")
+            with Horizontal():
+                yield Button("OK", id="ok", variant="primary")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, message: Button.Pressed) -> None:
+        if message.button.id == "cancel":
+            self.dismiss(None)
+            return
+
+        self._accept()
+
+    def _accept(self) -> None:
+        if self.query_one("#skip", RadioButton).value:
+            self.dismiss(PermissionChoice(Permissions.SKIP, ""))
+            return
+
+        if not self.query_one("#sandbox", RadioButton).value:
+            self.query_one("#error", Static).update("choose sandbox or skip")
+            return
+
+        path = self.query_one("#file", Input).value
+        try:
+            check_sandbox(path)
+        except AlrError as exc:
+            self.query_one("#error", Static).update(str(exc))
+            return
+
+        self.dismiss(PermissionChoice(Permissions.SANDBOX, path))

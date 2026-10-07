@@ -17,7 +17,12 @@ from alr.errors import AlrError
 from alr.stream.events import RunDone
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
-from alr.tui.dialogs import ErrorDialog, FolderDialog, SummaryDialog
+from alr.tui.dialogs import (
+    ErrorDialog,
+    FolderDialog,
+    PermissionsDialog,
+    SummaryDialog,
+)
 from alr.tui.panes import ActivityPane, GatesPane, TasksPane
 from alr.tui.prepare import prepare
 from alr.tasks import TaskList
@@ -63,6 +68,7 @@ class AlrApp(App[None]):
                 allow_blank=False,
                 id="commit",
             )
+            yield Button("", id="permissions")
             yield Switch(value=self.settings.logging, id="logging")
             yield Button("Start", id="start", variant="success")
             yield Static("", id="reason")
@@ -107,11 +113,26 @@ class AlrApp(App[None]):
         self.query_one(TasksPane).load(check.task_list)
         self._refresh()
 
+    async def ask_permissions(self) -> None:
+        """Show the permissions dialog and apply an accepted answer to the settings."""
+        choice = await self.push_screen_wait(
+            PermissionsDialog(self.settings.sandbox_file)
+        )
+        if choice is None:
+            return
+
+        self.settings.permissions = choice.permissions
+        self.settings.sandbox_file = choice.sandbox_file
+        self._refresh()
+
     def on_unmount(self) -> None:
         asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
 
     def _refresh(self) -> None:
         """Bring the Start button and the reason line in line with the state."""
+        self.query_one("#permissions", Button).label = _permissions_label(
+            self.settings.permissions
+        )
         if self.state in (AppState.RUNNING, AppState.FINISHED):
             self.query_one("#start", Button).disabled = True
             return
@@ -124,6 +145,10 @@ class AlrApp(App[None]):
     def on_button_pressed(self, message: Button.Pressed) -> None:
         if message.button.id == "start":
             self.action_start()
+            return
+
+        if message.button.id == "permissions" and self.state is not AppState.RUNNING:
+            self.run_worker(self.ask_permissions())
 
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "commit" and isinstance(message.value, CommitMode):
@@ -201,6 +226,14 @@ def _activity_pane() -> ActivityPane:
     pane = ActivityPane()
     pane.id = "activity"
     return pane
+
+
+def _permissions_label(permissions: Permissions) -> str:
+    """Name the current permission choice for the strip's button."""
+    if permissions is Permissions.UNSET:
+        return "Permissions: not chosen"
+
+    return f"Permissions: {permissions.value}"
 
 
 def _outcome(event: RunDone, stopping: bool) -> str:

@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 from helpers import git, write_file
+from textual.widgets import Button
 
 from alr.tui.app import AlrApp, AppState
+from alr.tui.dialogs import PermissionsDialog
 from alr.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
@@ -181,3 +183,19 @@ async def test_a_run_of_completed_tasks_finishes_done_at_once(git_repo: Path) ->
         await _finished(app)
 
         assert app.outcome == "done"
+
+
+async def test_permissions_button_shows_the_choice_and_applies_the_dialog() -> None:
+    app = AlrApp(RunSettings())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        button = app.query_one("#permissions", Button)
+        assert "not chosen" in str(button.label)
+
+        await pilot.click("#permissions")
+        await _until(lambda: isinstance(app.screen, PermissionsDialog))
+        await pilot.click("#skip")
+        await pilot.click("#ok")
+        await _until(lambda: app.settings.permissions is Permissions.SKIP)
+
+        assert "skip" in str(button.label)

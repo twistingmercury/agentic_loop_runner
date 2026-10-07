@@ -5,8 +5,14 @@ from pathlib import Path
 import pytest
 from helpers import write_nested_file
 
-from alr.errors import FailedTasksError, RepoError, TaskFileError, UsageError
-from alr.tui.checks import check_folder
+from alr.errors import (
+    FailedTasksError,
+    RepoError,
+    SandboxError,
+    TaskFileError,
+    UsageError,
+)
+from alr.tui.checks import check_folder, check_sandbox
 
 TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 
@@ -62,3 +68,24 @@ async def test_check_folder_outside_a_repository_is_a_repo_error(
 
     with pytest.raises(RepoError, match="not a git repository"):
         await check_folder(str(outside))
+
+
+def test_check_sandbox_accepts_a_json_object(tmp_path: Path) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_text("{}", encoding="utf-8")
+
+    check_sandbox(str(path))
+
+
+@pytest.mark.parametrize("text", ["not json", "[]"], ids=["not json", "not an object"])
+def test_check_sandbox_rejects_a_bad_settings_file(tmp_path: Path, text: str) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(SandboxError):
+        check_sandbox(str(path))
+
+
+def test_check_sandbox_rejects_a_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(SandboxError):
+        check_sandbox(str(tmp_path / "nope.json"))
