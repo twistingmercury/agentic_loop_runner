@@ -3,7 +3,12 @@ requires = ["setuptools>=62.3"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist>=3.8.0",
+    "ruff",
+]
 
 [project]
 name = "alr"
