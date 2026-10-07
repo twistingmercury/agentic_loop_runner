@@ -18,7 +18,7 @@ from helpers import (
 )
 from textual.pilot import Pilot
 from textual.screen import ModalScreen
-from textual.widgets import Input, Select, Static, TextArea
+from textual.widgets import Input, OptionList, Select, Static, TextArea
 
 from alr.errors import RunLogError
 from alr.record.runlog import RunLog
@@ -391,11 +391,33 @@ async def test_turning_logging_off_skips_the_log_folder(git_repo: Path) -> None:
     settings.logging = True
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await pilot.click("#logging")
+        await _tab_to(app, pilot, "logging")
+        await pilot.press("enter", "down", "enter")
+        await _until(lambda: app.settings.logging is False)
         await pilot.press("s")
         await _finished(app)
 
     assert not (git_repo / "visible" / "logs").exists()
+
+
+async def test_logging_is_a_dropdown_with_on_and_off(git_repo: Path) -> None:
+    settings = _settings(git_repo)
+    settings.logging = True
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        dropdown = app.query_one("#logging", Select)
+
+        assert dropdown.value is True
+        await _tab_to(app, pilot, "logging")
+        await pilot.press("enter")
+        options = app.query_one("#logging SelectOverlay", OptionList)
+
+        assert [str(options.get_option_at_index(i).prompt) for i in range(2)] == [
+            "on",
+            "off",
+        ]
+        assert options.option_count == 2
 
 
 @pytest.fixture
@@ -823,7 +845,9 @@ async def test_the_whole_setup_runs_from_the_keyboard_alone(git_repo: Path) -> N
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> None:
-    app = AlrApp(_settings(git_repo))
+    settings = _settings(git_repo)
+    settings.logging = True
+    app = AlrApp(settings)
     async with app.run_test() as pilot:
         await _until(lambda: app.state is AppState.READY)
 
@@ -832,8 +856,8 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
         await _until(lambda: app.settings.commit_mode is CommitMode.AFTER_ALL)
 
         await _tab_to(app, pilot, "logging")
-        await pilot.press("space")
-        await _until(lambda: app.settings.logging is True)
+        await pilot.press("enter", "down", "enter")
+        await _until(lambda: app.settings.logging is False)
 
         await _tab_to(app, pilot, "start")
         await pilot.press("enter")

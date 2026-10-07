@@ -63,7 +63,7 @@ def _name_cell(app: AlrApp, row: int = 0) -> str:
 
 
 @pytest.mark.parametrize(
-    ("widget", "text"), [("#commit-label", "Commit"), ("#logging-label", "Logging")]
+    ("widget", "text"), [("#commit-label", "Commit:"), ("#logging-label", "Logging:")]
 )
 async def test_the_settings_in_the_strip_are_labelled(
     git_repo: Path, widget: str, text: str

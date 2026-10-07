@@ -9,7 +9,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Select, Static, Switch
+from textual.widgets import Button, Footer, Header, Select, Static
 from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
@@ -69,6 +69,7 @@ class AlrApp(App[None]):
     #commit-row, #logging-row { width: auto; height: auto; }
     .field { width: auto; height: 3; padding: 0 1; content-align: left middle; }
     #commit { width: 18; }
+    #logging { width: 12; }
     #commit-note { height: auto; padding: 0 1; }
     #permissions { width: auto; padding: 1 2; }
     #reason { height: auto; padding: 0 1; color: $warning; }
@@ -108,7 +109,7 @@ class AlrApp(App[None]):
         with Horizontal(id="strip"):
             with Vertical(id="commit-box"):
                 with Horizontal(id="commit-row"):
-                    yield Static("Commit", id="commit-label", classes="field")
+                    yield Static("Commit:", id="commit-label", classes="field")
                     yield Select(
                         [
                             ("per task", CommitMode.PER_TASK),
@@ -125,8 +126,13 @@ class AlrApp(App[None]):
                 yield note
             yield Static("", id="permissions")
             with Horizontal(id="logging-row"):
-                yield Static("Logging", id="logging-label", classes="field")
-                yield Switch(value=self.settings.logging, id="logging")
+                yield Static("Logging:", id="logging-label", classes="field")
+                yield Select(
+                    [("on", True), ("off", False)],
+                    value=self.settings.logging,
+                    allow_blank=False,
+                    id="logging",
+                )
             yield Button("Start", id="start")
         yield Static("", id="reason")
         with Horizontal(id="menu"):
@@ -358,8 +364,7 @@ class AlrApp(App[None]):
         if message.select.id == "commit" and isinstance(message.value, CommitMode):
             self.settings.commit_mode = message.value
 
-    def on_switch_changed(self, message: Switch.Changed) -> None:
-        if message.switch.id == "logging":
+        if message.select.id == "logging" and isinstance(message.value, bool):
             self.settings.logging = message.value
 
     def action_start(self) -> None:
