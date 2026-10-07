@@ -70,6 +70,33 @@ def _io_error(path: Path, exc: OSError) -> RunLogError:
     return RunLogError(f"{path}: {exc.strerror}")
 
 
+def _create_run_dir(path: Path) -> Path:
+    """Make the run's folder, taking the first free suffixed name when path
+    exists: an existing run folder holds another run's record."""
+    try:
+        path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _create_error(path, exc) from exc
+
+    candidate = path
+    attempt = 0
+    while True:
+        try:
+            candidate.mkdir(mode=_DIR_MODE)
+        except FileExistsError:
+            attempt += 1
+            candidate = path.with_name(f"{path.name}-{attempt}")
+            continue
+        except OSError as exc:
+            raise _create_error(candidate, exc) from exc
+
+        return candidate
+
+
+def _create_error(path: Path, exc: OSError) -> RunLogError:
+    return RunLogError(f"cannot create the run log folder {path}: {exc.strerror}")
+
+
 def _not_open(path: Path) -> RunLogError:
     return RunLogError(f"{path}: the run log is not open")
 
@@ -119,14 +146,9 @@ class RunLog:
         info: Info,
         now: Callable[[], datetime] = _local_now,
     ) -> "RunLog":
-        """Create path, which must not exist, and start the ledger with the
-        run_started line."""
-        try:
-            path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
-            # Not exist_ok: an existing run folder holds another run's record.
-            path.mkdir(mode=_DIR_MODE)
-        except OSError as exc:
-            raise _io_error(path, exc) from exc
+        """Create path, or path-1, path-2 and so on when it exists, and start the
+        ledger with the run_started line."""
+        path = _create_run_dir(path)
 
         log = cls(path, now)
         try:

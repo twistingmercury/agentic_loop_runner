@@ -120,14 +120,43 @@ def test_time_with_a_zero_offset_is_written_as_z(tmp_path: Path) -> None:
 
 
 # Two runs started in the same second get the same folder name; the second
-# must not write into the first one's record.
-def test_open_existing_run_folder_is_an_error(opened: tuple[RunLog, Path]) -> None:
-    _, path = opened
+# takes a suffixed folder and never writes into the first one's record.
+def test_open_existing_run_folder_gets_a_suffixed_folder(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    before = ledger_lines(path)
 
-    with pytest.raises(RunLogError):
-        RunLog.open(path, INFO, now=fixed_now)
+    second = RunLog.open(path, INFO, now=fixed_now)
+    third = RunLog.open(path, INFO, now=fixed_now)
+    second.close()
+    third.close()
 
-    assert len(ledger_lines(path)) == 1
+    assert ledger_lines(path) == before, "the first run's folder is untouched"
+    assert len(ledger_lines(path.with_name(path.name + "-1"))) == 1
+    assert len(ledger_lines(path.with_name(path.name + "-2"))) == 1
+    assert sorted(p.name for p in path.parent.iterdir()) == [
+        path.name,
+        path.name + "-1",
+        path.name + "-2",
+    ]
+
+
+def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None:
+    parent = tmp_path / "logs"
+    parent.mkdir()
+    parent.chmod(0o500)
+    path = parent / "20261001T140211"
+
+    try:
+        with pytest.raises(RunLogError) as raised:
+            RunLog.open(path, INFO, now=fixed_now)
+    finally:
+        parent.chmod(0o700)
+
+    assert str(raised.value) == (
+        f"cannot create the run log folder {path}: Permission denied"
+    )
 
 
 def test_open_log_dir_under_a_file_is_an_error(tmp_path: Path) -> None:

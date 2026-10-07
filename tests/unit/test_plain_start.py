@@ -1,6 +1,7 @@
 """The plain real run: load, check the repository, then run the loop."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from alr.errors import (
     TaskFileError,
 )
 from alr.plain.start import start
+from alr.record.runlog import run_dir
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -317,3 +319,24 @@ async def test_start_log_failure_stops_the_run(record: Path, tmp_path: Path) -> 
         await _start(tasks_file)
 
     assert _calls(record) == 0, "claude must not run"
+
+
+async def test_start_twice_in_the_same_second_keeps_two_run_folders(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+    same_second = datetime(2026, 10, 7, 15, 56, 18, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "alr.plain.start.run_dir",
+        lambda log_dir, _start: run_dir(log_dir, same_second),
+    )
+
+    await _start(tasks_file)
+    (tmp_path / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+    await _start(tasks_file)
+
+    folders = sorted(p.name for p in (tmp_path / "logs").iterdir())
+    assert folders == ["20261007T155618", "20261007T155618-1"]
+    for name in folders:
+        events = _ledger(tmp_path / "logs" / name)
+        assert events[0]["event"] == "run_started"
