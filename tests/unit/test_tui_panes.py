@@ -64,15 +64,56 @@ async def test_tasks_pane_marks_a_failed_task() -> None:
 async def test_activity_pane_shows_only_the_selected_task() -> None:
     pane = ActivityPane()
     async with Host(pane).run_test():
-        pane.show(1)
+        pane.show(1, "First")
         pane.apply(Activity(FIRST, "→ read a.py"))
         pane.apply(Activity(SECOND, "→ edit b.py"))
 
         assert list(pane.lines) == ["→ read a.py"]
 
-        pane.show(2)
+        pane.show(2, "Second")
 
         assert list(pane.lines) == ["→ edit b.py"]
+
+
+async def test_activity_pane_title_names_the_task_it_shows() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test():
+        assert pane.border_title == "Activity"
+
+        pane.show(2, "Second")
+
+        assert pane.border_title == "Activity: 2 Second"
+
+
+async def test_tasks_pane_moves_its_highlight_to_the_started_task() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test() as pilot:
+        pane.load(TASK_LIST)
+        await pilot.pause()
+        assert pane.cursor_row == 0
+
+        pane.apply(TaskStarted(SECOND))
+        await pilot.pause()
+
+        assert pane.cursor_row == 1
+
+
+async def test_tasks_pane_announces_the_highlighted_task_with_its_name() -> None:
+    pane = TasksPane()
+    seen: list[tuple[int, str]] = []
+
+    class Listening(Host):
+        def on_tasks_pane_selected(self, message: TasksPane.Selected) -> None:
+            seen.append((message.task_id, message.name))
+
+    async with Listening(pane).run_test() as pilot:
+        pane.load(TASK_LIST)
+        await pilot.pause()
+
+        pane.apply(TaskStarted(SECOND))
+        await pilot.pause()
+
+        assert seen[-1] == (2, "Second")
 
 
 async def test_gates_pane_lists_gate_results_and_commit_hashes() -> None:

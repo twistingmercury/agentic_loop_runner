@@ -37,9 +37,10 @@ class TasksPane(DataTable[str]):
     class Selected(Message):
         """The user moved to a task; the activity pane follows."""
 
-        def __init__(self, task_id: int) -> None:
+        def __init__(self, task_id: int, name: str) -> None:
             super().__init__()
             self.task_id = task_id
+            self.name = name
 
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
@@ -94,13 +95,21 @@ class TasksPane(DataTable[str]):
     def apply(self, event: Event) -> None:
         if isinstance(event, TaskStarted):
             self._set_state(event.task.id, _RUNNING)
+            self._follow(event.task.id)
 
         if isinstance(event, TaskFinished):
             self._set_state(event.task.id, _SYMBOLS.get(event.task.state, _PENDING))
 
     def on_data_table_row_highlighted(self, message: DataTable.RowHighlighted) -> None:
-        if message.row_key.value is not None:
-            self.post_message(self.Selected(int(message.row_key.value)))
+        key = message.row_key.value
+        if key is None:
+            return
+
+        self.post_message(self.Selected(int(key), self._names.get(key, "")))
+
+    def _follow(self, task_id: int) -> None:
+        """Move the highlight to the running task, which also keeps its row on screen."""
+        self.move_cursor(row=self.get_row_index(str(task_id)))
 
     def _set_state(self, task_id: int, symbol: str) -> None:
         self.update_cell(str(task_id), "state", symbol)
@@ -117,9 +126,13 @@ class ActivityPane(Log):
         self._by_task: dict[int, list[str]] = {}
         self._shown: int | None = None
 
-    def show(self, task_id: int) -> None:
+    def show(self, task_id: int, name: str) -> None:
         """Switch to a task and redraw what it has said so far."""
+        if task_id == self._shown:
+            return
+
         self._shown = task_id
+        self.border_title = f"Activity: {task_id} {name}"
         self.clear()
         self.write_lines(self._by_task.get(task_id, []))
 

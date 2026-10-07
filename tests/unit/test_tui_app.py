@@ -25,7 +25,10 @@ from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
-from alr.tui.panes import TasksPane
+from alr.record.events import Activity, TaskStarted
+from alr.tasks import Task
+from alr.tui.adapter import RunEvent
+from alr.tui.panes import ActivityPane, TasksPane
 from alr.tui.prepare import Prepared
 from alr.tui import app as app_module
 from alr.tui.dialogs import (
@@ -618,6 +621,47 @@ async def test_the_tasks_pane_keeps_room_at_common_terminal_sizes(
         region = app.query_one("#tasks").region
         assert region.height > 3
         assert region.width >= 30
+
+
+def _activity_lines(app: AlrApp) -> list[str]:
+    return list(app.query_one(ActivityPane).lines)
+
+
+async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> None:
+    first = Task(id=1, name="First", prompt="p")
+    second = Task(id=2, name="Second", prompt="p")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        tasks = app.query_one(TasksPane)
+        activity = app.query_one(ActivityPane)
+        await _until(lambda: tasks.row_count == 2)
+
+        app.post_message(RunEvent(TaskStarted(first)))
+        app.post_message(RunEvent(Activity(first, "one says hi")))
+        await _until(lambda: _activity_lines(app) == ["one says hi"])
+        assert activity.border_title == "Activity: 1 First"
+
+        app.post_message(RunEvent(TaskStarted(second)))
+        await _until(lambda: tasks.cursor_row == 1)
+        await _until(lambda: _activity_lines(app) == [])
+        assert activity.border_title == "Activity: 2 Second"
+
+        app.post_message(RunEvent(Activity(second, "two says hi")))
+        await _until(lambda: _activity_lines(app) == ["two says hi"])
+
+        tasks.focus()
+        await pilot.press("up")
+        await _until(lambda: _activity_lines(app) == ["one says hi"])
+        assert activity.border_title == "Activity: 1 First"
+
+        app.post_message(RunEvent(Activity(second, "two again")))
+        await pilot.pause()
+        assert _activity_lines(app) == ["one says hi"]
+
+        app.post_message(RunEvent(TaskStarted(second)))
+        await _until(lambda: _activity_lines(app) == ["two says hi", "two again"])
+        assert tasks.cursor_row == 1
 
 
 @pytest.fixture

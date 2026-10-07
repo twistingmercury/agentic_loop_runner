@@ -16,7 +16,7 @@ from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
-from alr.record.events import RunDone
+from alr.record.events import RunDone, TaskStarted
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
@@ -458,13 +458,17 @@ class AlrApp(App[None]):
     def on_run_event(self, message: RunEvent) -> None:
         event = message.event
         self.query_one(TasksPane).apply(event)
+        if isinstance(event, TaskStarted):
+            # Not left to the highlight message: it is silent when the row was already highlighted.
+            self.query_one(ActivityPane).show(event.task.id, event.task.name)
+
         self.query_one(ActivityPane).apply(event)
         self.query_one(GatesPane).apply(event)
         if isinstance(event, RunDone):
             self._finish(event)
 
     def on_tasks_pane_selected(self, message: TasksPane.Selected) -> None:
-        self.query_one(ActivityPane).show(message.task_id)
+        self.query_one(ActivityPane).show(message.task_id, message.name)
 
     def _finish(self, event: RunDone) -> None:
         self.state = AppState.FINISHED

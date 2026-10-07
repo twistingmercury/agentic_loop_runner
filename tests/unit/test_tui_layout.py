@@ -77,7 +77,11 @@ async def test_the_settings_in_the_strip_are_labelled(
 
 @pytest.mark.parametrize(
     ("pane", "title"),
-    [("#tasks", "Tasks"), ("#activity", "Activity"), ("#gates", "Gates & commits")],
+    [
+        ("#tasks", "Tasks"),
+        ("#activity", "Activity: 1 A"),
+        ("#gates", "Gates & commits"),
+    ],
 )
 async def test_the_panes_have_titles(git_repo: Path, pane: str, title: str) -> None:
     app = _app(git_repo)
