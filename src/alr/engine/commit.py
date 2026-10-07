@@ -1,7 +1,9 @@
 """--commit: check the repository before a run, and commit each completed task's work."""
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from alr.engine import proc
@@ -13,6 +15,13 @@ from alr.tasks import COMPLETED, FAILED, Task
 # What git says when the working directory has no work tree: no repository at
 # all, or a bare repository or .git directory.
 _NOT_A_REPO = ("not a git repository", "must be run in a work tree")
+
+
+class CommitMode(StrEnum):
+    """When a run commits: after each completed task, or once after the last one."""
+
+    PER_TASK = "per_task"
+    AFTER_ALL = "after_all"
 
 
 @dataclass(frozen=True)
@@ -65,14 +74,33 @@ async def check_log_dir(repo: Repo | None, run_dir: str) -> None:
 
 async def commit(repo: Repo, task: Task, front_end: FrontEnd) -> tuple[str, str]:
     """Commit what the task left in the work tree, named after the task; return its final outcome."""
-    error = await _commit_changes(repo, task, front_end)
+    error = await _commit_changes(repo, task, front_end, [task.name])
     if error is None:
         return COMPLETED, ""
 
     return FAILED, f"commit failed: {error}"
 
 
-async def _commit_changes(repo: Repo, task: Task, front_end: FrontEnd) -> str | None:
+async def commit_all(
+    repo: Repo, tasks: Sequence[Task], front_end: FrontEnd
+) -> str | None:
+    """Commit everything the run left in the work tree, once; return why git refused, or None.
+
+    The front end's calls each name a task, so the last one carries the git steps.
+    """
+    title = f"alr: {len(tasks)} tasks completed"
+    body = "\n".join(f"{task.id}: {task.name}" for task in tasks)
+    return await _commit_changes(repo, tasks[-1], front_end, [title, body])
+
+
+async def work_tree_root() -> str | None:
+    """Return the root of the work tree around the working directory, or None when there is none."""
+    return await _find_root()
+
+
+async def _commit_changes(
+    repo: Repo, task: Task, front_end: FrontEnd, messages: Sequence[str]
+) -> str | None:
     """Stage everything and commit it; return why git refused, or None.
 
     A task that changed nothing is not an error and gets no empty commit; that
@@ -88,7 +116,11 @@ async def _commit_changes(repo: Repo, task: Task, front_end: FrontEnd) -> str | 
         return proc.exit_text(returncode)
 
     front_end.commit_started(task)
-    error = await front_end.run_git(task, ["git", "commit", "-m", task.name], repo.root)
+    argv = ["git", "commit"]
+    for message in messages:
+        argv += ["-m", message]
+
+    error = await front_end.run_git(task, argv, repo.root)
     if error is not None:
         return error
 
