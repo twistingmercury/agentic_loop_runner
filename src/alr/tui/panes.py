@@ -1,7 +1,10 @@
 """The three panes of the main window; each knows events, never the engine."""
 
+from collections import deque
+
 from textual.events import Resize
 from textual.message import Message
+from textual.timer import Timer
 from textual.widgets import DataTable, Log, RichLog
 from textual.widgets.data_table import ColumnKey
 
@@ -116,6 +119,13 @@ class TasksPane(DataTable[str]):
         self.update_cell(str(task_id), "state", symbol)
 
 
+# A task that prints tens of thousands of lines would freeze every redraw; the run log keeps them all.
+ACTIVITY_LINE_CAP = 5_000
+
+# Quiet time after the last resize before the lines are written again at the new width.
+RESIZE_SETTLE_SECONDS = 0.05
+
+
 class ActivityPane(RichLog):
     """The selected task's activity lines, wrapped to the pane's width."""
 
@@ -128,9 +138,10 @@ class ActivityPane(RichLog):
         super().__init__(
             wrap=True, markup=False, highlight=False, auto_scroll=False, min_width=10
         )
-        self._by_task: dict[int, list[str]] = {}
+        self._by_task: dict[int, deque[str]] = {}
         self._shown: int | None = None
         self._width = 0
+        self._settle_timer: Timer | None = None
 
     def show(self, task_id: int, name: str) -> None:
         """Switch to a task and redraw what it has said so far."""
@@ -146,8 +157,17 @@ class ActivityPane(RichLog):
         if event.size.width == self._width:
             return
 
+        first_width = self._width == 0
         self._width = event.size.width
-        self._redraw()
+        if first_width:
+            self._redraw()
+            return
+
+        # A drag fires a resize per column; redraw once the width has stopped changing.
+        if self._settle_timer is not None:
+            self._settle_timer.stop()
+
+        self._settle_timer = self.set_timer(RESIZE_SETTLE_SECONDS, self._redraw)
 
     def _redraw(self) -> None:
         self.clear()
@@ -158,7 +178,9 @@ class ActivityPane(RichLog):
         if not isinstance(event, Activity):
             return
 
-        self._by_task.setdefault(event.task.id, []).append(event.line)
+        self._by_task.setdefault(event.task.id, deque(maxlen=ACTIVITY_LINE_CAP)).append(
+            event.line
+        )
         if event.task.id == self._shown:
             # Decided before the write: a line that makes the pane taller must not
             # count as the reader having scrolled up.

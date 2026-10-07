@@ -1,6 +1,9 @@
 """The three panes, each fed events directly."""
 
+import pytest
 from textual.app import App, ComposeResult
+from textual.events import Resize
+from textual.geometry import Size
 
 from alr.record.events import (
     Activity,
@@ -10,7 +13,7 @@ from alr.record.events import (
     TaskStarted,
 )
 from alr.tasks import COMPLETED, FAILED, Gate, Shared, Task, TaskList
-from alr.tui.panes import ActivityPane, GatesPane, TasksPane
+from alr.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, GatesPane, TasksPane
 
 FIRST = Task(id=1, name="First", prompt="p")
 SECOND = Task(id=2, name="Second", prompt="p")
@@ -123,6 +126,78 @@ async def test_activity_pane_rewraps_when_it_is_resized() -> None:
 def fill(pane: ActivityPane, count: int) -> None:
     for i in range(count):
         pane.apply(Activity(FIRST, f"line {i}"))
+
+
+async def test_activity_pane_keeps_only_the_last_lines_of_a_task() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)) as pilot:
+        fill(pane, 20_000)
+        pane.show(1, "First")
+        await pilot.pause()
+
+        stored = pane._by_task[1]
+        assert len(stored) == ACTIVITY_LINE_CAP == 5_000
+        assert stored[0] == "line 15000"
+        assert stored[-1] == "line 19999"
+        assert len(pane.lines) == ACTIVITY_LINE_CAP
+
+
+async def test_activity_pane_caps_each_task_separately() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)):
+        fill(pane, ACTIVITY_LINE_CAP + 10)
+        for i in range(3):
+            pane.apply(Activity(SECOND, f"other {i}"))
+
+        assert len(pane._by_task[1]) == ACTIVITY_LINE_CAP
+        assert list(pane._by_task[2]) == ["other 0", "other 1", "other 2"]
+
+
+async def test_activity_pane_shows_only_the_capped_lines_after_a_redraw() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)) as pilot:
+        fill(pane, ACTIVITY_LINE_CAP + 100)
+        pane.show(1, "First")
+        await pilot.pause()
+
+        assert len(pane.lines) == ACTIVITY_LINE_CAP
+        assert shown_text(pane)[0] == "line 100"
+
+
+async def test_activity_pane_leaves_a_short_task_untouched() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)):
+        fill(pane, 30)
+
+        assert list(pane._by_task[1]) == [f"line {i}" for i in range(30)]
+
+
+async def test_activity_pane_redraws_once_for_a_burst_of_resizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pane = ActivityPane()
+    redraws: list[int] = []
+    original = ActivityPane._redraw
+
+    def counting(self: ActivityPane) -> None:
+        redraws.append(1)
+        original(self)
+
+    async with Host(pane).run_test(size=(40, 20)) as pilot:
+        pane.show(1, "First")
+        await pilot.pause()
+        monkeypatch.setattr(ActivityPane, "_redraw", counting)
+
+        # Posted in one go: awaiting between events would let the timer fire mid-burst.
+        for width in (50, 60, 70, 80):
+            size = Size(width, 20)
+            pane.on_resize(Resize(size, size))
+        await pilot.pause()
+        while not redraws:
+            await pilot.pause()
+
+        assert redraws == [1]
+        assert pane._width == 80
 
 
 async def test_activity_pane_stays_put_when_scrolled_up() -> None:
