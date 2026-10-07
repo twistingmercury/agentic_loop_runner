@@ -8,7 +8,7 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Select, Static, Switch
 from textual.worker import Worker, WorkerState
 
@@ -50,7 +50,14 @@ class AlrApp(App[None]):
     # Horizontal fills the screen by default; the bars should take one row each.
     CSS = """
     #strip, #menu { height: auto; }
+    #commit-box { width: 28; height: auto; }
+    #commit-note { height: auto; padding: 0 1; }
     #permissions { width: auto; padding: 1 2; }
+    #reason { width: 1fr; padding: 1 2; }
+    #panes { height: 1fr; }
+    #tasks { height: 1fr; width: 1fr; min-width: 30; }
+    #activity { height: 1fr; width: 2fr; }
+    #gates { height: 1fr; width: 1fr; }
     """
     BINDINGS = [
         Binding("s", "start", "Start"),
@@ -74,20 +81,21 @@ class AlrApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="strip"):
-            yield Select(
-                [
-                    ("per task", CommitMode.PER_TASK),
-                    ("after all", CommitMode.AFTER_ALL),
-                ],
-                value=self.settings.commit_mode,
-                allow_blank=False,
-                id="commit",
-            )
-            note = Static(
-                "no git repository: nothing will be committed", id="commit-note"
-            )
-            note.display = False
-            yield note
+            with Vertical(id="commit-box"):
+                yield Select(
+                    [
+                        ("per task", CommitMode.PER_TASK),
+                        ("after all", CommitMode.AFTER_ALL),
+                    ],
+                    value=self.settings.commit_mode,
+                    allow_blank=False,
+                    id="commit",
+                )
+                note = Static(
+                    "no git repository: nothing will be committed", id="commit-note"
+                )
+                note.display = False
+                yield note
             yield Static("", id="permissions")
             yield Switch(value=self.settings.logging, id="logging")
             yield Button("Start", id="start", variant="success")

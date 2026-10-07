@@ -25,17 +25,27 @@ TASKS = (
 CTRL_C = "\x03"
 
 
-def _spawn(folder: Path, extra_env: dict[str, str]) -> pexpect.spawn:
-    """Start alr on the folder; TERM lets Textual draw, --skip-permissions answers that step."""
+def _spawn(
+    folder: Path, extra_env: dict[str, str], cwd: Path | None = None
+) -> pexpect.spawn:
+    """Start alr on the folder and wait until the view is drawn and ready for keys.
+
+    TERM lets Textual draw, --skip-permissions answers that step. Keys sent
+    before the first draw can be lost, so nothing is returned before "Start",
+    which the button and the footer both show, is on the screen.
+    """
     env = {**os.environ, "TERM": "xterm-256color", **extra_env}
-    return pexpect.spawn(
+    child = pexpect.spawn(
         find_alr(),
         ["-d", str(folder), "--skip-permissions"],
         env=env,
         encoding="utf-8",
         timeout=30,
         dimensions=(40, 140),
+        cwd=None if cwd is None else str(cwd),
     )
+    child.expect("Start")
+    return child
 
 
 def test_view_runs_a_task_to_done(git_repo: Path, fake_claude: Path) -> None:
@@ -67,6 +77,8 @@ def test_view_stop_ends_a_blocked_run_as_stopped(
     try:
         child.send("s")
         wait_for_file(ready_file, 20)
+        # The running mark, so the screen is drained and the app has seen the task start.
+        child.expect("▶")
         child.send(CTRL_C)
         child.expect("Run stopped")
         child.send(CTRL_C)
@@ -76,3 +88,30 @@ def test_view_stop_ends_a_blocked_run_as_stopped(
 
     assert child.exitstatus == 1
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "pending"}
+
+
+def test_view_runs_to_done_outside_a_git_repository(
+    outside: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(outside, TASKS)
+    child = _spawn(
+        outside,
+        {
+            # Stops git from finding a repository above the folder.
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CEILING_DIRECTORIES": str(outside.parent),
+        },
+        cwd=outside,
+    )
+    try:
+        child.send("s")
+        child.expect("Run done")
+        child.send(CTRL_C)
+        child.expect(pexpect.EOF)
+    finally:
+        child.close(force=True)
+
+    assert child.exitstatus == 0
+    assert not (outside / ".git").exists()
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}

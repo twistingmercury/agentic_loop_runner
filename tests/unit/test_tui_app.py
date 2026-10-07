@@ -7,7 +7,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from helpers import git, write_file
+from helpers import (
+    fake_claude_records,
+    git,
+    saved_tasks,
+    wait_for_text,
+    wait_until_gone,
+    write_file,
+    write_nested_file,
+)
 from textual.pilot import Pilot
 from textual.screen import ModalScreen
 from textual.widgets import Input, Select, Static, TextArea
@@ -554,3 +562,114 @@ async def test_picking_the_same_folder_keeps_the_gates(git_repo: Path) -> None:
         await _pick_folder(app, pilot, git_repo / "run")
 
         assert settings.gates == [Gate(cmd="true")]
+
+
+@pytest.mark.parametrize("size", [(80, 24), (140, 40)], ids=["80x24", "140x40"])
+async def test_the_tasks_pane_keeps_room_at_common_terminal_sizes(
+    git_repo: Path, size: tuple[int, int]
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test(size=size) as pilot:
+        await _until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        region = app.query_one("#tasks").region
+        assert region.height > 3
+        assert region.width >= 30
+
+
+@pytest.fixture
+def closed_logs(monkeypatch: pytest.MonkeyPatch) -> list[RunLog]:
+    """Every run log closed so far, so a test can tell Prepared.close ran."""
+    closed: list[RunLog] = []
+    close = RunLog.close
+
+    def spy(self: RunLog) -> None:
+        closed.append(self)
+        close(self)
+
+    monkeypatch.setattr(RunLog, "close", spy)
+    return closed
+
+
+def _logged_settings(repo: Path, tasks: str) -> RunSettings:
+    settings = _settings(repo, tasks)
+    settings.logging = True
+    return settings
+
+
+def _ledger(repo: Path) -> str:
+    (path,) = (repo / "run" / "logs").glob("*/run.jsonl")
+    return path.read_text(encoding="utf-8")
+
+
+def _gated(cmd: str) -> str:
+    return TASKS.replace("gates: []", f"gates:\n    - cmd: '{cmd}'")
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_stop_during_a_gate_kills_the_gate_and_ends_stopped(
+    git_repo: Path, tmp_path: Path, closed_logs: list[RunLog]
+) -> None:
+    pid_file = tmp_path / "gate.pid"
+    settings = _logged_settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30"))
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        pid = int(await wait_for_text(pid_file))
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        await wait_until_gone(pid)
+        assert len(closed_logs) == 1
+        assert '"event":"run_finished","result":"stopped"' in _ledger(git_repo)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_stop_during_the_commit_ends_stopped_with_nothing_committed(
+    git_repo: Path, tmp_path: Path, closed_logs: list[RunLog]
+) -> None:
+    ready = tmp_path / "hook.ready"
+    hook = write_nested_file(
+        git_repo / ".git" / "hooks" / "pre-commit",
+        f"#!/bin/sh\necho ready > {ready}\nsleep 60\n",
+    )
+    hook.chmod(0o700)
+    app = AlrApp(_logged_settings(git_repo, WORKING_TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await wait_for_text(ready)
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        assert git(git_repo, "log", "--format=%s").split() == ["init"]
+        assert len(closed_logs) == 1
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_stop_in_the_second_task_keeps_the_first_completed(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    closed_logs: list[RunLog],
+) -> None:
+    record = tmp_path / "record.log"
+    monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(record))
+    monkeypatch.setenv("FAKECLAUDE_BLOCK_ON", "Second")
+    settings = _logged_settings(git_repo, WORKING_TASKS)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: len(fake_claude_records(record)) == 2)
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        states = [task.state for task in saved_tasks(Path(settings.tasks_file)).tasks]
+        assert states == ["completed", "pending"]
+        assert len(closed_logs) == 1
