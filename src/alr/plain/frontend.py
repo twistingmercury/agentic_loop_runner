@@ -144,14 +144,20 @@ async def _tee(
     Each line also goes to on_line as it completes, and a last line with no
     newline goes when the stream ends.
     """
-    pending = b""
+    # Pieces of the partial line, joined only when it completes, so a very
+    # long line is not copied again for every chunk.
+    pieces: list[bytes] = []
     while chunk := await reader.read(_READ_SIZE):
         sys.stdout.buffer.write(chunk)
         sys.stdout.buffer.flush()
         chunks.append(chunk)
-        *ends, pending = (pending + chunk).split(b"\n")
+        *ends, rest = chunk.split(b"\n")
         for end in ends:
-            on_line(end)
+            on_line(b"".join([*pieces, end]))
+            pieces.clear()
 
-    if pending:
-        on_line(pending)
+        if rest:
+            pieces.append(rest)
+
+    if pieces:
+        on_line(b"".join(pieces))

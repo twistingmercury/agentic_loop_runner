@@ -1,12 +1,13 @@
 """The plain front end reports run events to an optional recorder, and prints what it always did."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
 from helpers import git, run_loop
 
 from alr.engine.commit import open_repo
-from alr.plain.frontend import PlainFrontEnd
+from alr.plain.frontend import PlainFrontEnd, _tee
 from alr.record.events import (
     Activity,
     Committed,
@@ -119,3 +120,22 @@ async def test_no_recorder_prints_the_same_output(
     recorded = capfd.readouterr().out
 
     assert recorded == plain
+
+
+async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_the_terminal(
+    capsysbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    line = b"x" * (8 * 1024 * 1024 - 1) + b"\xff"
+    reader = asyncio.StreamReader(limit=len(line) * 2)
+    reader.feed_data(line)
+    reader.feed_eof()
+    chunks: list[bytes] = []
+    events: list[Event] = []
+    task = Task(id=1, name="First", prompt="p1")
+    recorder = PlainFrontEnd(events.append)._raw_line(task)
+
+    await _tee(reader, chunks, recorder)
+
+    assert events == [Activity(task, line.decode("utf-8", errors="replace"))]
+    assert capsysbinary.readouterr().out == line
+    assert b"".join(chunks) == line
