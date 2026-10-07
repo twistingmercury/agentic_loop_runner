@@ -21,6 +21,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from alr.durations import format_elapsed
 from alr.errors import AlrError
 from alr.tasks import Gate, Task, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
@@ -106,7 +107,7 @@ class SummaryDialog(_Dialog[None]):
 
     def __init__(self, outcome: str, seconds: float, error: str | None) -> None:
         super().__init__()
-        self._text = f"Run {outcome} in {seconds:.1f}s"
+        self._text = f"Run {outcome} in {format_elapsed(seconds)}"
         if error and outcome != "done":
             self._text += f"\n{error}"
 

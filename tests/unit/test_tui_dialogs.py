@@ -391,3 +391,7 @@ async def test_enter_confirms_the_reset() -> None:
         await pilot.pause()
 
         assert host.result is True
+
+
+def test_summary_dialog_shows_the_run_time_in_minutes_and_seconds() -> None:
+    assert SummaryDialog("done", 1230.0, None)._text == "Run done in 20m 30s"

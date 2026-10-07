@@ -90,3 +90,12 @@ async def test_gates_pane_lists_gate_results_and_commit_hashes() -> None:
             "1. ⏱ ruff check 1.0s",
             "1. commit a1b2c3d",
         ]
+
+
+async def test_gates_pane_shows_long_gate_times_in_hours_minutes_seconds() -> None:
+    pane = GatesPane()
+    gate = Gate(cmd="make test")
+    async with Host(pane).run_test():
+        pane.apply(GateFinished(FIRST, gate, "2h", None, False, 3725.5))
+
+        assert list(pane.lines) == ["1. ✔ make test 1h 2m 6s"]

@@ -12,6 +12,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
+from alr.durations import format_elapsed
 from alr.tasks import COMPLETED, FAILED, TaskList
 
 _SYMBOLS = {COMPLETED: "✔", FAILED: "✖"}
@@ -152,4 +153,4 @@ def _gate_line(event: GateFinished) -> str:
     elif event.error is not None:
         symbol = "✖"
 
-    return f"{event.task.id}. {symbol} {event.gate.cmd} {event.seconds:.1f}s"
+    return f"{event.task.id}. {symbol} {event.gate.cmd} {format_elapsed(event.seconds)}"

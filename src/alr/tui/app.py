@@ -14,6 +14,7 @@ from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, run
+from alr.durations import format_elapsed
 from alr.errors import AlrError
 from alr.record.events import RunDone
 from alr.stream.frontend import StreamFrontEnd
@@ -454,7 +455,7 @@ class AlrApp(App[None]):
         self.state = AppState.FINISHED
         self.outcome = _outcome(event, self._stopping)
         self.query_one("#status", Static).update(
-            f"{self.outcome} in {event.seconds:.1f}s"
+            f"{self.outcome} in {format_elapsed(event.seconds)}"
         )
         self._refresh()
         self.push_screen(SummaryDialog(self.outcome, event.seconds, event.error))

@@ -1,6 +1,6 @@
 import pytest
 
-from alr.durations import format_duration, parse_duration
+from alr.durations import format_duration, format_elapsed, parse_duration
 
 
 @pytest.mark.parametrize(
@@ -53,3 +53,24 @@ def test_parse_duration_rejects(text: str) -> None:
 )
 def test_format_duration(seconds: float, text: str) -> None:
     assert format_duration(seconds) == text
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (0.0, "0.0s"),
+        (0.4, "0.4s"),
+        (12.3, "12.3s"),
+        (59.9, "59.9s"),
+        (59.96, "1m 0s"),
+        (60.0, "1m 0s"),
+        (90.0, "1m 30s"),
+        (2703.0, "45m 3s"),
+        (3599.6, "1h 0m 0s"),
+        (3725.5, "1h 2m 6s"),
+        (7200.0, "2h 0m 0s"),
+        (3605.0, "1h 0m 5s"),
+    ],
+)
+def test_format_elapsed(seconds: float, text: str) -> None:
+    assert format_elapsed(seconds) == text

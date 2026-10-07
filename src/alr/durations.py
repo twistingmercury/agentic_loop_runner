@@ -61,3 +61,19 @@ def format_duration(seconds: float) -> str:
         return f"{minutes}m{secs}s"
 
     return f"{secs}s"
+
+
+def format_elapsed(seconds: float) -> str:
+    """Format seconds for the view: 12.3s under a minute, else 1h 2m 3s with whole seconds."""
+    tenths = int(seconds * 10 + 0.5)
+    # Compared in tenths so 59.96 carries into a minute and never prints 60.0s.
+    if tenths < 600:
+        return f"{tenths / 10:.1f}s"
+
+    whole = int(seconds + 0.5)
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+
+    return f"{minutes}m {secs}s"
