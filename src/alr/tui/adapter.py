@@ -23,14 +23,16 @@ def make_report(
 
     It holds only the function that posts messages, never the app or a widget,
     so the front end cannot pin them. The run log's writer, when there is one,
-    sees each event first: a record that failed to write must stop the run
-    before the screen shows an event the record lacks.
+    sees each event first, and a record that failed to write stops the run. The
+    event is posted either way: the final one must always reach the app, or the
+    app would wait for a run that is already over.
     """
 
     def report(event: Event) -> None:
-        if record is not None:
-            record(event)
-
-        post(RunEvent(event))
+        try:
+            if record is not None:
+                record(event)
+        finally:
+            post(RunEvent(event))
 
     return report

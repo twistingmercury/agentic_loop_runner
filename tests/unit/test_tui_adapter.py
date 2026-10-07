@@ -1,5 +1,7 @@
 """The adapter: each engine event becomes one Textual message."""
 
+import pytest
+
 from alr.stream.events import Activity, RunDone
 from alr.tasks import Task
 from alr.tui.adapter import RunEvent, make_report
@@ -27,3 +29,17 @@ def test_report_records_before_it_posts() -> None:
     report(RunDone(None, 1.0))
 
     assert order == ["record", "post"]
+
+
+def test_report_posts_even_when_the_record_fails() -> None:
+    posted: list[RunEvent] = []
+
+    def broken(event: object) -> None:
+        raise OSError("disk full")
+
+    report = make_report(lambda message: bool(posted.append(message)) or True, broken)
+
+    with pytest.raises(OSError, match="disk full"):
+        report(RunDone(None, 1.0))
+
+    assert len(posted) == 1

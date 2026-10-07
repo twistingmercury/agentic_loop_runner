@@ -11,8 +11,12 @@ from helpers import git, write_file
 from textual.screen import ModalScreen
 from textual.widgets import Select, Static, TextArea
 
+from alr.errors import RunLogError
+from alr.stream.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
+from alr.tui.prepare import Prepared
+from alr.tui import app as app_module
 from alr.tui.dialogs import FolderDialog, GatesDialog, PermissionsDialog
 from alr.tui.settings import Permissions, RunSettings
 
@@ -407,3 +411,99 @@ async def test_a_run_inside_a_repository_keeps_the_commit_choice(
 
         assert not app.query_one("#commit", Select).disabled
         assert not app.query_one("#commit-note", Static).display
+
+
+def _hold_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+    entered: asyncio.Event,
+    *,
+    refuse_first_cancel: bool,
+) -> None:
+    """Make prepare block, optionally ignoring the first cancel like a stuck check."""
+
+    async def held(settings: RunSettings) -> Prepared:
+        entered.set()
+        refusals = 1 if refuse_first_cancel else 0
+        while True:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                if refusals == 0:
+                    raise
+
+                refusals -= 1
+
+    monkeypatch.setattr(app_module, "prepare", held)
+
+
+async def test_stop_during_prepare_finishes_stopped(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(entered.is_set)
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+
+
+async def test_a_second_stop_while_stopping_quits(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(entered.is_set)
+
+        await pilot.press("ctrl+c")
+        await pilot.press("ctrl+c")
+        await _until(lambda: not app.is_running)
+
+
+@pytest.mark.parametrize(
+    ("error", "shown"),
+    [
+        (PermissionError("denied"), "PermissionError: denied"),
+        (OSError(), "OSError"),
+    ],
+    ids=["with a message", "without a message"],
+)
+async def test_an_unexpected_error_in_prepare_returns_to_ready_with_a_dialog(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, error: OSError, shown: str
+) -> None:
+    async def failing(settings: RunSettings) -> Prepared:
+        raise error
+
+    monkeypatch.setattr(app_module, "prepare", failing)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: app.screen.query("#close"))
+
+        assert app.state is AppState.READY
+        assert str(app.screen.query_one("#message").render()) == shown
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_run_log_that_cannot_write_still_ends_the_run(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(self: RunLog, event: object) -> None:
+        raise RunLogError("disk full")
+
+    monkeypatch.setattr(RunLog, "record", broken)
+    settings = _settings(git_repo)
+    settings.logging = True
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "failed"

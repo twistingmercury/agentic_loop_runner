@@ -2,6 +2,7 @@
 
 import asyncio
 import signal
+import time
 from enum import StrEnum
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Select, Static, Switch
-from textual.worker import Worker
+from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import load_tasks, run
@@ -29,6 +30,10 @@ from alr.tui.panes import ActivityPane, GatesPane, TasksPane
 from alr.tui.prepare import prepare
 from alr.tasks import TaskList
 from alr.tui.settings import Permissions, RunSettings
+
+
+_STOPPED = "stopped"
+_NO_RESULT = "the run ended without a result"
 
 
 class AppState(StrEnum):
@@ -61,6 +66,7 @@ class AlrApp(App[None]):
         self.outcome = ""
         self._stopping = False
         self._worker: Worker[None] | None = None
+        self._started = 0.0
         self._task_list: TaskList | None = None
         self.in_work_tree: bool | None = None
         """None until the launch check has answered."""
@@ -253,11 +259,13 @@ class AlrApp(App[None]):
 
         # RUNNING at once, so a second press before prepare returns starts nothing.
         self.state = AppState.RUNNING
+        self._started = time.monotonic()
         self._refresh()
         self._worker = self.run_worker(self._run(), name="run", exit_on_error=False)
 
     def action_stop(self) -> None:
-        if self.state is not AppState.RUNNING:
+        # A second Stop quits whatever the run is doing, so nobody is ever trapped.
+        if self.state is not AppState.RUNNING or self._stopping:
             self.exit()
             return
 
@@ -272,11 +280,12 @@ class AlrApp(App[None]):
     async def _run(self) -> None:
         try:
             prepared = await prepare(self.settings)
-        except AlrError as exc:
-            # READY lets the refresh recompute the state from the settings.
-            self.state = AppState.READY
-            self._refresh()
-            self.push_screen(ErrorDialog(str(exc)))
+        except asyncio.CancelledError:
+            # Stop before the engine started: it never posts a RunDone, so this does.
+            self._finish_or_fail(_STOPPED)
+            raise
+        except Exception as exc:
+            self._back_to_ready(exc)
             return
 
         self.query_one(TasksPane).load(prepared.task_list)
@@ -288,6 +297,39 @@ class AlrApp(App[None]):
             pass
         finally:
             prepared.close()
+
+    def _back_to_ready(self, exc: Exception) -> None:
+        """A check failed before the run began; show why and let the user try again."""
+        # READY lets the refresh recompute the state from the settings.
+        self.state = AppState.READY
+        self._refresh()
+        self.push_screen(ErrorDialog(_error_text(exc)))
+
+    def on_worker_state_changed(self, message: Worker.StateChanged) -> None:
+        """The safety net: a run worker that ends without a RunDone must not leave RUNNING."""
+        if message.worker is not self._worker:
+            return
+
+        if message.state not in (
+            WorkerState.SUCCESS,
+            WorkerState.ERROR,
+            WorkerState.CANCELLED,
+        ):
+            return
+
+        error = message.worker.error
+        if error is None:
+            self._finish_or_fail(_STOPPED if self._stopping else _NO_RESULT)
+            return
+
+        self._finish_or_fail(_error_text(error))
+
+    def _finish_or_fail(self, error: str) -> None:
+        """The one way out of RUNNING when the engine's RunDone did not arrive."""
+        if self.state is not AppState.RUNNING:
+            return
+
+        self._finish(RunDone(error, time.monotonic() - self._started))
 
     def on_run_event(self, message: RunEvent) -> None:
         event = message.event
@@ -323,6 +365,15 @@ def _permissions_label(permissions: Permissions) -> str:
         return "Permissions: not chosen"
 
     return f"Permissions: {permissions.value}"
+
+
+def _error_text(exc: BaseException) -> str:
+    """Say what went wrong; only a domain error's own text is enough without its type."""
+    if isinstance(exc, AlrError):
+        return str(exc)
+
+    name = type(exc).__name__
+    return f"{name}: {exc}" if str(exc) else name
 
 
 def _outcome(event: RunDone, stopping: bool) -> str:
