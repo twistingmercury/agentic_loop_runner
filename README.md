@@ -54,12 +54,14 @@ alr -d .local/feature --commit
 alr --install-skill
 ```
 
-In a terminal, `alr` opens a full-screen view: a settings strip, three panes (tasks,
-activity, and gates and commits), and dialogs that ask for whatever the flags and the
+In a terminal, `alr` opens a full-screen view: a settings strip (Commit and
+Logging dropdowns, which lock once a run starts), a menu row, three panes (tasks and gates
+and commits on top, activity across the full width below), and dialogs that ask for whatever the flags and the
 task file leave open (run folder, permissions, gates). Nothing runs, and nothing is
 written, until you press Start. It is keyboard-driven and never captures the mouse:
-`s` starts a run, Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
-and gates dialogs, `r` resets failed tasks to pending (after you confirm), `t` and `x`
+the menu button names show their keys (there is no footer): `s` starts a run (the button
+then reads `Stop (^c)`), Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
+and gates dialogs (Folder, Permissions, Reset, and Quit grey out during a run), `r` resets failed tasks to pending (after you confirm), `t` and `x`
 show `tasks.yaml` and `sandbox.json`, and Esc closes a dialog. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
@@ -84,7 +86,7 @@ A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 `--commit` and `--commit-after-all` cannot be used together.
 
 A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
-Plain mode always logs; the full-screen view has a Logging toggle, on by default. When the
+Plain mode always logs; the full-screen view has a Logging dropdown, on by default. When the
 run commits, git must ignore `logs/`, or the run will not start.
 
 ## How it works

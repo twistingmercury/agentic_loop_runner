@@ -1,7 +1,7 @@
 ---
-version: 14
+version: 15
 date: 2026-10-07
-notes: "ADR-019: the run log always goes in the run folder's logs folder in both modes, --log-dir is removed, and the run events and run log writer move to alr.record; ADR-004 and ADR-015 point to it."
+notes: "ADR-013 describes the view as built: Commit and Logging dropdowns that lock at Start, the menu row with hotkeys in the names and no footer, Stop (^c) and greyed-out buttons during a run, the Tasks and Gates over a full-width Activity layout, the following and wrapping activity pane, elapsed times as 1h 2m 3s, and the command palette off; the inherited table shows ADR-019 amending gralph ADR-016."
 ---
 
 # alr — Architectural Decisions
@@ -67,7 +67,7 @@ column says which `alr` ADR carries the change.
 | ADR-013    | The runner runs the gates after a completed session           |                                  |
 | ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request | ADR-009: found in the run folder |
 | ADR-015    | The runner commits a completed task on request                |                                  |
-| ADR-016    | The runner logs a run on request                              | ADR-008: no `prompt_file`        |
+| ADR-016    | The runner logs a run on request                              | ADR-008: no `prompt_file`; ADR-019: the ledger and the run folder |
 | ADR-019    | One gate list per task file                                   | ADR-008: `shared.gates`          |
 | ADR-020    | The shared prompt and gates live in the task file             | ADR-008 is `alr`'s version       |
 | ADR-021    | The run folder's sandbox.json answers the permission choice   | ADR-009 is `alr`'s version       |
@@ -601,16 +601,31 @@ window that is always there, with the setup as pop-ups, and a run that begins on
 
 One main window and modal dialogs on top of it.
 
-- **Layout.** A labelled settings strip (a Commit dropdown, a permissions label, a Logging switch, and the Start button,
-  with the reason Start is disabled on its own row beneath), a menu (Folder, Permissions, Gates, Reset, Tasks, Sandbox, and Quit buttons, since Textual has no
-  menu-bar widget), three titled panes (Tasks, Activity for the selected task, and Gates & commits, the tasks pane widest, with long task
-  names ending in an ellipsis), and a status bar.
+- **Layout.** A labelled settings strip reading `Commit: [per task ▾]  Permissions: skip  Logging: [on ▾]  (s)tart`:
+  the Commit and Logging controls are dropdowns, and both lock once Start is pressed and stay locked after the run
+  (the Commit dropdown is also disabled, with its note, outside a git work tree). The reason Start is disabled has its
+  own row beneath. Under it is a menu row of flat, one-row buttons that carry their hotkeys in their names, `(f)older
+  (p)ermissions (g)ates (r)eset (t)asks sandbo(x) (q)uit`, since Textual has no menu-bar widget; there is no footer. Then
+  come three titled panes: Tasks (3fr) and Gates & commits (2fr) side by side in a top row of about 40% of the height,
+  and Activity across the full width below, about 60%. Long task names end in an ellipsis, and the tasks pane scrolls
+  and keeps the running task visible. A status bar closes the screen. The layout fits 80x24 and 110x32.
+- **Activity pane.** It shows the lines of one task and follows the running task: when a task starts, the tasks pane
+  moves its highlight to that row and the activity pane clears and shows that task's lines. The arrow keys can
+  highlight another task to read its lines (every task's lines are kept); the next task start moves the highlight
+  again. The title names the task, `Activity: 3 Add the folder dialog`. Long lines wrap, print raw (no markup), and are
+  redrawn from the kept raw lines when the pane is resized.
+- **Elapsed times.** The summary pop-up, the status line, and the gate times show elapsed time with
+  `format_elapsed`: one decimal under a minute (`12.3s`), then whole seconds with the leading zero units dropped
+  (`1m 30s`, `1h 2m 3s`, `2h 0m 0s`). The run log's ledger keeps its own format.
 - **Keyboard only.** The view is driven entirely from the keyboard and never captures the mouse (`App.run(mouse=False)`),
   so the terminal's own selection, copy, and scroll work. `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers. Esc cancels any dialog, and Enter in a text
-  field submits it. The menu buttons are a visual menu: Tab and Enter work on them too.
-- **States.** Setup (something is missing, Start disabled with the reason shown), Ready, Running (Start becomes Stop,
-  the settings are locked), and Finished (a summary pop-up with the outcome and time, then the app stays open until
-  quit). There is no second run in the same session.
+  field submits it. The menu buttons are a visual menu: Tab and Enter work on them too. The command palette is turned
+  off, so Ctrl-P does nothing.
+- **States.** Setup (something is missing, Start disabled with the reason shown), Ready, Running (the Start button
+  reads `Stop (^c)` and does what Ctrl-C does; the dropdowns are locked; the Folder, Permissions, Reset, and Quit
+  buttons are greyed out and cannot take focus), and Finished (a summary pop-up with the outcome and time, then
+  the app stays open until quit; Start is disabled again, Quit is enabled, and Folder, Permissions, and Reset stay
+  disabled). The Gates, Tasks, and Sandbox buttons are never changed by a run. There is no second run in the same session.
 - **When dialogs open.** At launch, only for a step the flags and the task file leave open: folder, permissions, then
   gates. A folder given on the command line, a folder `sandbox.json`, or a task file with `shared.gates` each hides its
   step. If nothing is open, the app starts in Ready. Until Start, any dialog can be reopened from the menu.
@@ -644,7 +659,7 @@ One main window and modal dialogs on top of it.
 - A new third-party dependency, Textual, to track and scan
 - A second run needs a relaunch
 - A folder that holds a `sandbox.json` can still be run unsandboxed from the permissions setting, by an explicit choice
-- Nothing in the view can be clicked: every action needs its key, so the footer has to keep showing them
+- Nothing in the view can be clicked: every action needs its key, so the menu names have to keep showing them
 
 ### ADR-014: Commits in the TUI: per task or after all tasks, when there is a work tree
 

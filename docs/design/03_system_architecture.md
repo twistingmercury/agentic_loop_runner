@@ -1,7 +1,7 @@
 ---
-version: 14
+version: 15
 date: 2026-10-07
-notes: "alr.record holds the run events and run log writer; both front ends log to <dir>/logs, --log-dir is gone, and the startup order drops the --log-dir check (ADR-019)."
+notes: "The TUI component describes the strip with Commit and Logging dropdowns, the hotkey-named menu row without a footer, the Tasks and Gates over full-width Activity layout, the following activity pane, the Stop (^c) button and greyed-out buttons during a run, and elapsed times as 1h 2m 3s."
 ---
 
 # alr — System Architecture
@@ -287,8 +287,14 @@ How gralph's packages map onto this:
 
 **Responsibilities:**
 
-- Show one main window: a menu bar, a settings strip (folder, commit mode, permissions, logging, Start or Stop), three
-  panes (tasks, the selected task's activity, gates and commits), and a status bar
+- Show one main window: a settings strip (`Commit:` and `Logging:` dropdowns, the permissions label, and the Start
+  button), a menu row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and
+  commits side by side on top, the activity pane across the full width below, then a status bar
+- Let the activity pane follow the running task: a task start moves the tasks highlight and shows only that task's
+  lines, wrapped and redrawn on resize; the arrow keys can show another task's lines
+- Show elapsed times with `format_elapsed` (`1h 2m 3s`) in the summary pop-up, the status line, and the gate times
+- Lock the dropdowns at Start for good; while a run goes, make the Start button `Stop (^c)` and grey out Folder,
+  Permissions, Reset, and Quit; at the end disable Start again and re-enable Quit (Folder, Permissions, and Reset stay off)
 - Keep the four states and what each allows: Setup (Start disabled, the reason shown), Ready, Running (settings locked,
   dialogs read-only), and Finished (a summary pop-up with the outcome and time, then the app stays open until quit)
 - At launch open the folder, permissions, and gates dialogs in that order, each only when the flags and the task file
@@ -307,7 +313,7 @@ How gralph's packages map onto this:
 - Open a task file that holds failed tasks (`read_tasks`), show them with a cross, keep Start disabled with the reason
   "press r to reset", and reset them to pending (`reset_failed`) after a confirming pop-up (ADR-018)
 - Open `tasks.yaml` and `sandbox.json` in a read-only viewer from the menu
-- Capture no mouse and take every action from the keyboard: `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers; Esc cancels a dialog (ADR-013)
+- Capture no mouse and take every action from the keyboard: `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `g`, `t`, `x` open the Folder, Permissions, and Gates dialogs and the `tasks.yaml` and `sandbox.json` viewers; Esc cancels a dialog; the command palette is off (ADR-013)
 
 **Key Characteristics:**
 
@@ -316,7 +322,7 @@ How gralph's packages map onto this:
 | Library        | Textual                                                       |
 | Runtime        | The app's own `asyncio` loop; the engine is one worker in it  |
 | State          | The run settings, the app state, and the events seen so far   |
-| Controls       | Keys only, no mouse; no pause, skip, or retry                  |
+| Controls       | Keys only, no mouse, no footer, no command palette; Start becomes Stop (^c); no pause, skip, or retry |
 | Imports        | `alr.stream`, `alr.record`, `alr.engine`, `alr.tasks`; never `alr.plain` |
 
 ## The Front End Interface
