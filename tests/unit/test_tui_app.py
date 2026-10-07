@@ -1057,3 +1057,43 @@ async def test_the_flag_resets_a_file_picked_in_the_folder_dialog(
 
         assert _states(settings) == ["pending", "pending"]
         assert app.query_one(TasksPane).get_row("1")[0] != "✖"
+
+
+def _dropdowns_disabled(app: AlrApp) -> tuple[bool, bool]:
+    return (
+        app.query_one("#commit", Select).disabled,
+        app.query_one("#logging", Select).disabled,
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert _dropdowns_disabled(app) == (False, False)
+
+        await pilot.press("s")
+        await _until(lambda: _dropdowns_disabled(app) == (True, True))
+        await _finished(app)
+
+        assert _dropdowns_disabled(app) == (True, True)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_commit_dropdown_stays_disabled_outside_a_repository(
+    outside_settings: RunSettings,
+) -> None:
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.in_work_tree is not None)
+        await _until(lambda: app.state is AppState.READY)
+
+        assert _dropdowns_disabled(app) == (True, False)
+
+        await pilot.press("s")
+        await _finished(app)
+
+        assert _dropdowns_disabled(app) == (True, True)

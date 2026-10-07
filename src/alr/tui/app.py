@@ -308,11 +308,21 @@ class AlrApp(App[None]):
     def on_unmount(self) -> None:
         asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
 
+    def _lock_dropdowns(self) -> None:
+        """A run copies the settings at Start, so later changes would only mislead."""
+        locked = self.state in (AppState.RUNNING, AppState.FINISHED)
+        # Without a work tree the commit choice stays off in every state.
+        self.query_one("#commit", Select).disabled = (
+            locked or self.in_work_tree is False
+        )
+        self.query_one("#logging", Select).disabled = locked
+
     def _refresh(self) -> None:
         """Bring the Start button and the reason line in line with the state."""
         self.query_one("#permissions", Static).update(
             _permissions_label(self.settings.permissions)
         )
+        self._lock_dropdowns()
         if self.state in (AppState.RUNNING, AppState.FINISHED):
             self.query_one("#start", Button).disabled = True
             return
