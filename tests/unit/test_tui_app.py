@@ -597,6 +597,32 @@ async def test_a_second_stop_while_stopping_quits(
         await _until(lambda: not app.is_running)
 
 
+async def test_a_second_stop_button_press_while_stopping_does_nothing(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(entered.is_set)
+        button = app.query_one("#start", Button)
+        button.focus()
+
+        await pilot.press("enter")
+        await _until(lambda: app._stopping)
+        # A button ignores presses while its pressed flash shows, so wait that out.
+        await _until(lambda: not button.has_class("-active"))
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.is_running
+        assert app.state is AppState.RUNNING
+
+        await pilot.press("ctrl+c")
+        await _until(lambda: not app.is_running)
+
+
 @pytest.mark.parametrize(
     ("error", "shown"),
     [
