@@ -41,11 +41,6 @@ async def prepare(settings: RunSettings) -> Prepared:
     """
     task_list = load_tasks(settings.tasks_file)
     repo = await open_repo(settings.tasks_file)
-    if repo is None:
-        raise RepoError(
-            "not a git repository: start alr inside the project's work tree"
-        )
-
     session_args = settings.session_args()
     log_path = await _check_log_folder(settings, repo)
     _save_gates(settings, task_list)
@@ -56,11 +51,11 @@ async def prepare(settings: RunSettings) -> Prepared:
         repo=repo,
         commit_mode=settings.commit_mode,
     )
-    log = None if log_path is None else _open_log(settings, log_path)
+    log = None if log_path is None else _open_log(settings, log_path, repo)
     return Prepared(task_list, options, log)
 
 
-async def _check_log_folder(settings: RunSettings, repo: Repo) -> Path | None:
+async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | None:
     """Return the new run's log folder, or None with logging off; refuse one git can see."""
     if not settings.logging:
         return None
@@ -85,7 +80,7 @@ def _save_gates(settings: RunSettings, task_list: TaskList) -> None:
     save_tasks(settings.tasks_file, task_list)
 
 
-def _open_log(settings: RunSettings, path: Path) -> RunLog:
+def _open_log(settings: RunSettings, path: Path, repo: Repo | None) -> RunLog:
     skip = settings.permissions is Permissions.SKIP
     info = Info(
         version=metadata.version("alr"),
@@ -93,7 +88,6 @@ def _open_log(settings: RunSettings, path: Path) -> RunLog:
         permissions="skip" if skip else "sandbox",
         sandbox_settings="" if skip else settings.sandbox_file,
         gate_timeout=settings.gate_timeout,
-        # The view always commits.
-        commit=True,
+        commit=repo is not None,
     )
     return RunLog.open(path, info)

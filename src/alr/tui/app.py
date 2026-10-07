@@ -11,7 +11,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Select, Static, Switch
 from textual.worker import Worker
 
-from alr.engine.commit import CommitMode
+from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import load_tasks, run
 from alr.errors import AlrError
 from alr.stream.events import RunDone
@@ -62,6 +62,8 @@ class AlrApp(App[None]):
         self._stopping = False
         self._worker: Worker[None] | None = None
         self._task_list: TaskList | None = None
+        self.in_work_tree: bool | None = None
+        """None until the launch check has answered."""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -75,6 +77,11 @@ class AlrApp(App[None]):
                 allow_blank=False,
                 id="commit",
             )
+            note = Static(
+                "no git repository: nothing will be committed", id="commit-note"
+            )
+            note.display = False
+            yield note
             yield Static("", id="permissions")
             yield Switch(value=self.settings.logging, id="logging")
             yield Button("Start", id="start", variant="success")
@@ -99,7 +106,17 @@ class AlrApp(App[None]):
         self._refresh()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.action_stop)
+        self.run_worker(self._check_work_tree(), exit_on_error=False)
         self.run_worker(self.launch_sequence(), exit_on_error=False)
+
+    async def _check_work_tree(self) -> None:
+        """Without a work tree nothing can be committed, so the commit choice is moot."""
+        self.in_work_tree = await work_tree_root() is not None
+        if self.in_work_tree:
+            return
+
+        self.query_one("#commit", Select).disabled = True
+        self.query_one("#commit-note", Static).display = True
 
     def _load_tasks(self) -> None:
         """Show the tasks before Start; an unreadable file is reported by the dialogs."""

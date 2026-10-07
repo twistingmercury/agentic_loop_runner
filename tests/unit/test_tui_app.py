@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from helpers import git, write_file
 from textual.screen import ModalScreen
-from textual.widgets import TextArea
+from textual.widgets import Select, Static, TextArea
 
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
@@ -363,3 +363,47 @@ async def test_turning_logging_off_skips_the_log_folder(git_repo: Path) -> None:
         await _finished(app)
 
     assert not (git_repo / "visible").exists()
+
+
+@pytest.fixture
+def outside_settings(outside: Path, monkeypatch: pytest.MonkeyPatch) -> RunSettings:
+    """Settings for a run in a folder with no git repository around it."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
+    monkeypatch.chdir(outside)
+    tasks_file = write_file(outside / "tasks.yaml", WORKING_TASKS)
+    return RunSettings(
+        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_run_outside_a_repository_finishes_done_without_commits(
+    outside: Path, outside_settings: RunSettings
+) -> None:
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.in_work_tree is not None)
+
+        assert app.query_one("#commit", Select).disabled
+        assert app.query_one("#commit-note", Static).display
+        assert "no git repository: nothing will be committed" in str(
+            app.query_one("#commit-note", Static).render()
+        )
+
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "done"
+        assert not (outside / ".git").exists()
+
+
+async def test_a_run_inside_a_repository_keeps_the_commit_choice(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert not app.query_one("#commit", Select).disabled
+        assert not app.query_one("#commit-note", Static).display

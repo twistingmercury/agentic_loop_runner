@@ -7,7 +7,6 @@ from helpers import write_nested_file
 
 from alr.errors import (
     FailedTasksError,
-    RepoError,
     SandboxError,
     TaskFileError,
     UsageError,
@@ -59,15 +58,16 @@ async def test_check_folder_with_a_failed_task_is_an_error(git_repo: Path) -> No
         await check_folder(str(git_repo / "run"))
 
 
-async def test_check_folder_outside_a_repository_is_a_repo_error(
+async def test_check_folder_outside_a_repository_is_accepted(
     outside: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
     monkeypatch.chdir(outside)
     write_nested_file(outside / "tasks.yaml", TASKS)
 
-    with pytest.raises(RepoError, match="not a git repository"):
-        await check_folder(str(outside))
+    check = await check_folder(str(outside))
+
+    assert check.tasks_file == str(outside / "tasks.yaml")
 
 
 def test_check_sandbox_accepts_a_json_object(tmp_path: Path) -> None:

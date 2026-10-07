@@ -37,9 +37,9 @@ async def test_prepare_returns_the_options_for_a_valid_setup(git_repo: Path) -> 
     assert prepared.log is None
 
 
-async def test_prepare_outside_a_repository_is_an_error(
-    outside: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _outside_settings(
+    outside: Path, monkeypatch: pytest.MonkeyPatch, **changes: object
+) -> RunSettings:
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
     monkeypatch.chdir(outside)
     settings = RunSettings(
@@ -47,9 +47,37 @@ async def test_prepare_outside_a_repository_is_an_error(
         permissions=Permissions.SKIP,
         logging=False,
     )
+    return replace(settings, **changes)
 
-    with pytest.raises(RepoError, match="not a git repository"):
-        await prepare(settings)
+
+async def test_prepare_outside_a_repository_runs_without_commits(
+    outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = await prepare(_outside_settings(outside, monkeypatch))
+
+    assert prepared.options.repo is None
+
+
+async def test_prepare_outside_a_repository_records_that_nothing_commits(
+    outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _outside_settings(outside, monkeypatch, logging=True)
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    ledger = next((outside / "logs").glob("*/run.jsonl"))
+    assert '"commit":false' in ledger.read_text(encoding="utf-8")
+
+
+async def test_prepare_in_a_repository_records_that_commits_happen(
+    git_repo: Path,
+) -> None:
+    prepared = await prepare(_settings(git_repo, logging=True))
+    prepared.close()
+
+    ledger = next((git_repo / "run" / "logs").glob("*/run.jsonl"))
+    assert '"commit":true' in ledger.read_text(encoding="utf-8")
 
 
 async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
