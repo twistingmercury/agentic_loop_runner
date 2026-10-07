@@ -126,7 +126,7 @@ class ActivityPane(RichLog):
         # Markup and highlight off, so a line with square brackets prints raw; the default
         # minimum width of 78 would keep a narrow pane from wrapping at its own edge.
         super().__init__(
-            wrap=True, markup=False, highlight=False, auto_scroll=True, min_width=10
+            wrap=True, markup=False, highlight=False, auto_scroll=False, min_width=10
         )
         self._by_task: dict[int, list[str]] = {}
         self._shown: int | None = None
@@ -152,7 +152,7 @@ class ActivityPane(RichLog):
     def _redraw(self) -> None:
         self.clear()
         for line in self._by_task.get(self._shown, []):
-            self.write(line)
+            self.write(line, scroll_end=True)
 
     def apply(self, event: Event) -> None:
         if not isinstance(event, Activity):
@@ -160,7 +160,9 @@ class ActivityPane(RichLog):
 
         self._by_task.setdefault(event.task.id, []).append(event.line)
         if event.task.id == self._shown:
-            self.write(event.line)
+            # Decided before the write: a line that makes the pane taller must not
+            # count as the reader having scrolled up.
+            self.write(event.line, scroll_end=self.is_vertical_scroll_end)
 
 
 class GatesPane(Log):

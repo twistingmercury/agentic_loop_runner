@@ -120,6 +120,59 @@ async def test_activity_pane_rewraps_when_it_is_resized() -> None:
         assert " ".join(shown_text(pane)).split() == line.split()
 
 
+def fill(pane: ActivityPane, count: int) -> None:
+    for i in range(count):
+        pane.apply(Activity(FIRST, f"line {i}"))
+
+
+async def test_activity_pane_stays_put_when_scrolled_up() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)) as pilot:
+        pane.show(1, "First")
+        fill(pane, 50)
+        await pilot.pause()
+        pane.scroll_to(y=0, animate=False)
+        await pilot.pause()
+
+        pane.apply(Activity(FIRST, "one more"))
+        await pilot.pause()
+
+        assert pane.scroll_y == 0
+
+
+async def test_activity_pane_follows_new_lines_at_the_bottom() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)) as pilot:
+        pane.show(1, "First")
+        fill(pane, 50)
+        await pilot.pause()
+        assert pane.is_vertical_scroll_end
+
+        pane.apply(Activity(FIRST, "one more"))
+        await pilot.pause()
+
+        assert pane.is_vertical_scroll_end
+        assert pane.scroll_y > 0
+
+
+async def test_activity_pane_lands_at_the_bottom_on_a_task_switch() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test(size=(40, 10)) as pilot:
+        pane.show(1, "First")
+        fill(pane, 50)
+        for i in range(50):
+            pane.apply(Activity(SECOND, f"other {i}"))
+        await pilot.pause()
+        pane.scroll_to(y=0, animate=False)
+        await pilot.pause()
+
+        pane.show(2, "Second")
+        await pilot.pause()
+
+        assert pane.is_vertical_scroll_end
+        assert pane.scroll_y > 0
+
+
 async def test_activity_pane_title_names_the_task_it_shows() -> None:
     pane = ActivityPane()
     async with Host(pane).run_test():
