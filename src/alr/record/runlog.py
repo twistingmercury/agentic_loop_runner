@@ -12,9 +12,8 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from alr.durations import format_duration
-from alr.engine.gates import first_line
 from alr.errors import RunLogError
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,
@@ -224,7 +223,8 @@ class RunLog:
             "gate_finished",
             {
                 "task": event.task.id,
-                "cmd": first_line(event.gate.cmd),
+                # First line only, as the engine quotes it; record cannot import the engine.
+                "cmd": event.gate.cmd.split("\n", 1)[0],
                 "result": _gate_result(event),
                 "timeout": event.limit,
                 "duration": format_duration(event.seconds),

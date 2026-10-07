@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from alr.engine import proc
 from alr.engine.frontend import SessionResult
 from alr.engine.gates import first_line
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,

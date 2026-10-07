@@ -2,7 +2,7 @@
 
 from textual.app import App, ComposeResult
 
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     GateFinished,

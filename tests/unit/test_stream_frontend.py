@@ -17,7 +17,7 @@ from alr.engine import loop
 from alr.engine.commit import Repo, open_repo
 from alr.engine.sandbox import bypass_args
 from alr.errors import RunError
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,

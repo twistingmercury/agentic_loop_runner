@@ -4,7 +4,7 @@ from textual.message import Message
 from textual.widgets import DataTable, Log
 from textual.widgets.data_table import ColumnKey
 
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,

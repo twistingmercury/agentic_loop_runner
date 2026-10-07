@@ -21,7 +21,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Select, Static, TextArea
 
 from alr.errors import RunLogError
-from alr.stream.runlog import RunLog
+from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState

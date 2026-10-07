@@ -1,4 +1,4 @@
-"""engine, plain, and stream stay apart, so each path can be read on its own."""
+"""engine, plain, record, and stream stay apart, so each path can be read on its own."""
 
 import ast
 from pathlib import Path
@@ -8,8 +8,9 @@ import pytest
 SRC = Path(__file__).parents[2] / "src" / "alr"
 
 FORBIDDEN = {
-    "engine": ("alr.plain", "alr.stream", "alr.tui"),
+    "engine": ("alr.plain", "alr.stream", "alr.tui", "alr.record"),
     "plain": ("alr.stream", "alr.tui"),
+    "record": ("alr.engine", "alr.plain", "alr.stream", "alr.tui", "alr.cli"),
     "stream": ("alr.plain", "alr.tui"),
     "tui": ("alr.plain", "alr.cli"),
 }

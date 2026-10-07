@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from textual.message import Message
 
-from alr.stream.events import Event
+from alr.record.events import Event
 
 
 class RunEvent(Message):

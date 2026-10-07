@@ -8,7 +8,7 @@ from helpers import write_file
 
 from alr.engine.commit import CommitMode
 from alr.errors import RepoError, RunLogError, TaskFileError
-from alr.stream.runlog import RunLog
+from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
 from alr.tui import prepare as prepare_module
 from alr.tui.prepare import prepare

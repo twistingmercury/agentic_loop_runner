@@ -9,8 +9,8 @@ from pathlib import Path
 from alr.engine.commit import Repo, check_log_dir, open_repo
 from alr.engine.loop import RunOptions, load_tasks
 from alr.errors import RepoError, TaskFileError
-from alr.stream.events import Event
-from alr.stream.runlog import Info, RunLog, run_dir
+from alr.record.events import Event
+from alr.record.runlog import Info, RunLog, run_dir
 from alr.tasks import TaskList, save_tasks
 from alr.tui.settings import Permissions, RunSettings
 

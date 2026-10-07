@@ -2,7 +2,7 @@
 
 import pytest
 
-from alr.stream.events import Activity, RunDone
+from alr.record.events import Activity, RunDone
 from alr.tasks import Task
 from alr.tui.adapter import RunEvent, make_report
 

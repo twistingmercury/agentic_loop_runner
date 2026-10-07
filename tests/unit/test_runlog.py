@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from alr.errors import RunLogError
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,
@@ -21,7 +21,7 @@ from alr.stream.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.stream.runlog import Info, RunLog, run_dir
+from alr.record.runlog import Info, RunLog, run_dir
 from alr.tasks import COMPLETED, FAILED, Gate, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'

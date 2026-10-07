@@ -15,7 +15,7 @@ from textual.worker import Worker, WorkerState
 from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, run
 from alr.errors import AlrError
-from alr.stream.events import RunDone
+from alr.record.events import RunDone
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
