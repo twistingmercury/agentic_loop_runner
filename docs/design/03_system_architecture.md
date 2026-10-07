@@ -1,7 +1,7 @@
 ---
-version: 9
+version: 10
 date: 2026-10-07
-notes: "The view no longer requires a git repository: the folder dialog does not check for a work tree, and the TUI component says what happens outside one."
+notes: "The flag that keeps a terminal run in plain mode is --plain (ADR-013)."
 ---
 
 # alr — System Architecture
@@ -78,7 +78,7 @@ flowchart TD
     classDef gray fill: #c4cbd3, stroke: #6e7781, color: #000000
 ```
 
-`alr.cli` picks the stream front end, inside `alr.tui`, when stdin and stdout are terminals, `--no-tui` is absent, and
+`alr.cli` picks the stream front end, inside `alr.tui`, when stdin and stdout are terminals, `--plain` is absent, and
 the run is not a `--dry-run` (ADR-013). Every other run uses the plain front end.
 
 ## Package Layout
@@ -242,7 +242,7 @@ How gralph's packages map onto this:
 
 | Characteristic | Value                                                             |
 |----------------|-------------------------------------------------------------------|
-| Used when      | A run is not full-screen: no terminal, `--no-tui`, or `--dry-run` |
+| Used when      | A run is not full-screen: no terminal, `--plain`, or `--dry-run`  |
 | Output         | Plain text on stdout and stderr, same as gralph                   |
 | Imports        | `alr.engine`, `alr.tasks`; never `alr.stream`                     |
 
@@ -402,7 +402,7 @@ sequenceDiagram
    `<folder>/sandbox.json` when that is a regular file and `--skip-permissions` was not passed. A folder with no
    `tasks.yaml` and no `--tasks` exits 1
 3. Check `--gate-timeout` if passed
-4. Pick the front end: full-screen when stdin and stdout are terminals, `--no-tui` is absent, and the run is not a
+4. Pick the front end: full-screen when stdin and stdout are terminals, `--plain` is absent, and the run is not a
    `--dry-run`; otherwise plain
 5. Check plain mode's required flag, `--tasks`. The full-screen view asks for a missing one in a dialog instead
 6. Check `--log-dir`: in plain mode on a real run, exit 1 with `--log-dir only works with the full-screen view`; ignored
@@ -459,7 +459,7 @@ Tests are ported from gralph before the code they cover is written. There are tw
 |-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | Unit            | Task validation tables, the result rule, stream-json parsing, the sandbox merge, gate limits, commit rules against real git, run log output                                               | `task_test.go`, `internal/looper/*_test.go`, `runlog_test.go`    |
 | Fake `claude`   | A Python script placed first on `PATH`, driven by the same `FAKECLAUDE_*` variables: records argv and stdin, sets output and exit code, can block; one copy per suite                     | `testdata/fakeclaude/main.go`                                    |
-| End to end      | Runs the installed `alr` command as a subprocess, in a container: the loop, results, gates, commit, `--dir`, dry-run, `--no-tui`, `--log-dir`, sandbox, SIGINT, SIGTERM                   | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check |
+| End to end      | Runs the installed `alr` command as a subprocess, in a container: the loop, results, gates, commit, `--dir`, dry-run, `--plain`, `--log-dir`, sandbox, SIGINT, SIGTERM                   | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check |
 | Golden          | The exact stdin text sent to Claude                                                                                                                                                       | gralph's golden assertions                                       |
 | TUI unit        | Each pane and dialog under Textual's headless `run_test` and `Pilot`, fed by a fake event stream, one case per branch (ADR-011); the state rules, Start and Stop, and the dialogs' checks | New                                                              |
 | TUI end to end  | Two pseudo-terminal runs in the container: a happy-path run and a Stop                                                                                                                    | gralph's `wizard_pty` and `wizard_signal` tests                  |

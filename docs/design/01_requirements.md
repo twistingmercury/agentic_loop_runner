@@ -1,7 +1,7 @@
 ---
-version: 5
+version: 6
 date: 2026-10-07
-notes: "The view no longer requires a git repository: goals 16 and 18 and the known differences say what happens outside a work tree."
+notes: "--plain replaces gralph's --no-tui: the command-line table and the known differences say so."
 ---
 
 # alr — Requirements
@@ -90,7 +90,7 @@ The flags below are accepted, with gralph's meaning and startup order.
 | `--tasks <path>`            | `-t`  | Required unless `--dir` gives it                                                        |
 | `--dry-run`                 |       | Validate and report only. The old alr short form `-d` now means `--dir`, as in gralph   |
 | `--gate-timeout <duration>` |       | Duration such as `90s`, `10m`, or `1h30m`; overrides every gate's own timeout            |
-| `--no-tui`                  |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
+| `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
 | `--skip-permissions`        |       | Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
 | `--commit`                  |       | Commit each completed task after its gates pass; pre-selects per task in the view        |
@@ -101,7 +101,8 @@ The flags below are accepted, with gralph's meaning and startup order.
 Known differences from gralph in this step:
 
 - The command is `alr`, and messages that name the command say `alr`
-- `--commit-after-all` exists only in `alr`
+- `--commit-after-all` and `--plain` exist only in `alr`
+- `--no-tui`, gralph's flag for plain output, is not accepted: it is an unknown-flag error, and `--plain` replaces it
 - `-p/--prompt` is not accepted. It is an unknown-flag error, as in gralph v0.11.0 and later
 - Inside a git work tree the view always commits, and offers per task or after all tasks as its two choices; outside one it runs without commits and says so; plain mode still commits only with a flag
 - The view's dialogs differ from gralph's wizard: modal pop-ups over a main window, a Start button, a commit setting in the strip rather than a yes/no step, a logging toggle on by default, no gate-timeout step, and a read-only file viewer

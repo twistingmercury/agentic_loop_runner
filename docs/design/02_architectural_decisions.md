@@ -1,7 +1,7 @@
 ---
-version: 8
+version: 9
 date: 2026-10-07
-notes: "ADR-014 and the folder dialog no longer require a git repository: outside a work tree the view runs without commits and says so. ADR-015 applies the log-folder ignore check only inside a work tree. ADR-014 notes the resumed after-all title."
+notes: "The flag that keeps a terminal run in plain mode is --plain, not gralph's --no-tui (ADR-013); ADR-002 notes the rename."
 ---
 
 # alr — Architectural Decisions
@@ -133,8 +133,8 @@ Split the work. This design covers the task file, the engine, plain mode, dry-ru
 full-screen path (stream-json parsing, events, the run log). The Textual view, the wizard, `--install-skill`, and the
 skill check are the next design.
 
-Until the view exists, `alr` always runs plain mode: `--no-tui` is accepted and does nothing, and `--log-dir` on a real
-run gives gralph's plain-mode error.
+Until the view exists, `alr` always runs plain mode: gralph's `--no-tui` flag was accepted and did nothing (it is now
+`--plain`, ADR-013), and `--log-dir` on a real run gives gralph's plain-mode error.
 
 **Consequences:**
 
@@ -618,7 +618,7 @@ One main window and modal dialogs on top of it.
 - **Nothing is written before Start.** Gate edits stay in memory. Start runs the usual startup checks, and the gates are
   saved to `tasks.yaml` only if they pass. The dialogs fill the same values the flags fill, and the startup checks run
   again on those values.
-- **When the view is used.** `alr` opens the TUI when stdin and stdout are terminals, `--no-tui` is absent, and the run
+- **When the view is used.** `alr` opens the TUI when stdin and stdout are terminals, `--plain` is absent, and the run
   is not a `--dry-run`. Otherwise, it runs plain mode, as before.
 
 **Consequences:**

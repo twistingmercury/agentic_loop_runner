@@ -60,7 +60,7 @@ task file leave open (run folder, permissions, gates). Nothing runs, and nothing
 written, until you press Start; Stop or Ctrl-C ends a run. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
-`--no-tui`, a non-terminal, or `--dry-run` for plain output.
+`--plain`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
 | --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
@@ -72,7 +72,7 @@ so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 | `--commit`                  |       | Commit each completed task after its gates pass                                          |
 | `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
 | `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
-| `--no-tui`                  |       | Use plain output instead of the full-screen view                                         |
+| `--plain`                   |       | Use plain output instead of the full-screen view                                         |
 | `--log-dir <folder>`        |       | Keep the run record in this folder; full-screen view only                                |
 | `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
 | `--version`                 | `-v`  | Print the version                                                                        |
