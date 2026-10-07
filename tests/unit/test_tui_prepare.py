@@ -7,8 +7,10 @@ import pytest
 from helpers import write_file
 
 from alr.engine.commit import CommitMode
-from alr.errors import RepoError
+from alr.errors import RepoError, RunLogError, TaskFileError
+from alr.stream.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
+from alr.tui import prepare as prepare_module
 from alr.tui.prepare import prepare
 from alr.tui.settings import Permissions, RunSettings
 
@@ -120,3 +122,42 @@ async def test_prepare_opens_the_run_log_in_an_ignored_folder(git_repo: Path) ->
 
     assert prepared.log is not None
     assert list((git_repo / "run" / "logs").glob("*/run.jsonl"))
+
+
+async def test_prepare_leaves_the_task_file_alone_when_the_log_cannot_open(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path, info: object) -> RunLog:
+        raise RunLogError("no room")
+
+    monkeypatch.setattr(RunLog, "open", refuse)
+    settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+    before = Path(settings.tasks_file).read_bytes()
+
+    with pytest.raises(RunLogError):
+        await prepare(settings)
+
+    assert Path(settings.tasks_file).read_bytes() == before
+
+
+async def test_prepare_closes_the_log_when_saving_the_gates_fails(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: str, task_list: object) -> None:
+        raise TaskFileError("read-only")
+
+    closed: list[RunLog] = []
+    close = RunLog.close
+
+    def spy(self: RunLog) -> None:
+        closed.append(self)
+        close(self)
+
+    monkeypatch.setattr(prepare_module, "save_tasks", refuse)
+    monkeypatch.setattr(RunLog, "close", spy)
+    settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+
+    with pytest.raises(TaskFileError):
+        await prepare(settings)
+
+    assert len(closed) == 1

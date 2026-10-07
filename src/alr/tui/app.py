@@ -108,7 +108,7 @@ class AlrApp(App[None]):
 
     def on_mount(self) -> None:
         # After the first refresh, so the table has its columns before it gets rows.
-        self.call_after_refresh(self._load_tasks)
+        self.call_after_refresh(self._show_tasks)
         self._refresh()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.action_stop)
@@ -124,8 +124,8 @@ class AlrApp(App[None]):
         self.query_one("#commit", Select).disabled = True
         self.query_one("#commit-note", Static).display = True
 
-    def _load_tasks(self) -> None:
-        """Show the tasks before Start; an unreadable file is reported by the dialogs."""
+    def _read_tasks(self) -> None:
+        """Load the task file; an unreadable one is reported by the dialogs."""
         if not self.settings.tasks_file:
             return
 
@@ -134,10 +134,19 @@ class AlrApp(App[None]):
         except AlrError:
             return
 
-        self.query_one(TasksPane).load(self._task_list)
+    def _show_tasks(self) -> None:
+        """Show the tasks before Start."""
+        # The launch worker may not have read the file yet; whichever runs first reads it.
+        if self._task_list is None:
+            self._read_tasks()
+
+        if self._task_list is not None:
+            self.query_one(TasksPane).load(self._task_list)
 
     async def launch_sequence(self) -> None:
         """Ask, in order, only for what the flags and the task file leave open."""
+        # Read here, not after the first refresh: needs_gates must see the file.
+        self._read_tasks()
         if not self.settings.tasks_file:
             await self.ask_folder()
 
@@ -155,6 +164,10 @@ class AlrApp(App[None]):
         check = await self.push_screen_wait(FolderDialog(str(Path.cwd())))
         if check is None:
             return
+
+        # Gates edited for another folder must never be saved into this one's file.
+        if check.tasks_file != self.settings.tasks_file:
+            self.settings.gates = None
 
         self.settings.tasks_file = check.tasks_file
         self._task_list = check.task_list

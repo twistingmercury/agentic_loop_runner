@@ -8,7 +8,7 @@ from pathlib import Path
 
 from alr.engine.commit import Repo, check_log_dir, open_repo
 from alr.engine.loop import RunOptions, load_tasks
-from alr.errors import RepoError
+from alr.errors import RepoError, TaskFileError
 from alr.stream.events import Event
 from alr.stream.runlog import Info, RunLog, run_dir
 from alr.tasks import TaskList, save_tasks
@@ -43,7 +43,6 @@ async def prepare(settings: RunSettings) -> Prepared:
     repo = await open_repo(settings.tasks_file)
     session_args = settings.session_args()
     log_path = await _check_log_folder(settings, repo)
-    _save_gates(settings, task_list)
     options = RunOptions(
         tasks_file=settings.tasks_file,
         gate_timeout=settings.gate_timeout,
@@ -52,7 +51,15 @@ async def prepare(settings: RunSettings) -> Prepared:
         commit_mode=settings.commit_mode,
     )
     log = None if log_path is None else _open_log(settings, log_path, repo)
-    return Prepared(task_list, options, log)
+    prepared = Prepared(task_list, options, log)
+    # Last, so a check or the log failing never leaves the task file rewritten.
+    try:
+        _save_gates(settings, task_list)
+    except TaskFileError:
+        prepared.close()
+        raise
+
+    return prepared
 
 
 async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | None:

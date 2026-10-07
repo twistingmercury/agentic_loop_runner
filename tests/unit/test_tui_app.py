@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 from helpers import git, write_file
+from textual.pilot import Pilot
 from textual.screen import ModalScreen
-from textual.widgets import Select, Static, TextArea
+from textual.widgets import Input, Select, Static, TextArea
 
 from alr.errors import RunLogError
 from alr.stream.runlog import RunLog
@@ -507,3 +508,49 @@ async def test_a_run_log_that_cannot_write_still_ends_the_run(
         await _finished(app)
 
         assert app.outcome == "failed"
+
+
+async def test_launch_opens_the_gates_dialog_when_flags_answer_everything_else(
+    git_repo: Path,
+) -> None:
+    text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
+    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    async with app.run_test():
+        await _until(lambda: isinstance(app.screen, GatesDialog))
+
+
+async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
+    await pilot.click("#menu-folder")
+    await _until(lambda: isinstance(app.screen, FolderDialog))
+    app.screen.query_one("#path", Input).value = str(folder)
+    await pilot.click("#ok")
+    await _until(lambda: not isinstance(app.screen, ModalScreen))
+
+
+async def test_picking_another_folder_drops_the_gates_edited_for_the_first(
+    git_repo: Path,
+) -> None:
+    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    other = git_repo / "other"
+    other.mkdir()
+    write_file(other / "tasks.yaml", TASKS)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await _pick_folder(app, pilot, other)
+
+        assert settings.tasks_file == str(other / "tasks.yaml")
+        assert settings.gates is None
+
+
+async def test_picking_the_same_folder_keeps_the_gates(git_repo: Path) -> None:
+    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await _pick_folder(app, pilot, git_repo / "run")
+
+        assert settings.gates == [Gate(cmd="true")]
