@@ -70,6 +70,11 @@ def test_format_duration(seconds: float, text: str) -> None:
         (3725.5, "1h 2m 6s"),
         (7200.0, "2h 0m 0s"),
         (3605.0, "1h 0m 5s"),
+        (-1, "0.0s"),
+        (-0.04, "0.0s"),
+        (float("nan"), "0.0s"),
+        (float("inf"), "0.0s"),
+        (float("-inf"), "0.0s"),
     ],
 )
 def test_format_elapsed(seconds: float, text: str) -> None:
