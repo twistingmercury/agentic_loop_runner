@@ -115,6 +115,47 @@ async def test_the_tasks_pane_is_wider_than_the_gates_pane(
         )
 
 
+@pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
+async def test_tasks_and_gates_share_the_top_row_above_the_activity_pane(
+    git_repo: Path, size: tuple[int, int]
+) -> None:
+    app = _app(git_repo)
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+
+        tasks = app.query_one("#tasks").region
+        gates = app.query_one("#gates").region
+        activity = app.query_one("#activity").region
+        assert (tasks.y, tasks.height) == (gates.y, gates.height)
+        assert tasks.right <= gates.x
+        assert activity.y >= tasks.bottom
+
+
+@pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
+async def test_the_activity_pane_spans_the_width_and_the_panes_fit_the_screen(
+    git_repo: Path, size: tuple[int, int]
+) -> None:
+    app = _app(git_repo)
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+
+        screen = app.screen.region
+        activity = app.query_one("#activity").region
+        assert activity.width == screen.width
+        assert activity.height >= 6
+        for pane in ("#tasks", "#activity", "#gates"):
+            assert screen.contains_region(app.query_one(pane).region)
+
+
+async def test_the_gates_title_is_fully_visible_at_80_columns(git_repo: Path) -> None:
+    app = _app(git_repo)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        gates = app.query_one("#gates")
+        assert gates.region.width >= len(gates.border_title) + 4
+
+
 async def test_a_forty_character_name_is_whole_at_110_columns(git_repo: Path) -> None:
     app = _app(git_repo, FORTY)
     async with app.run_test(size=(110, 32)) as pilot:

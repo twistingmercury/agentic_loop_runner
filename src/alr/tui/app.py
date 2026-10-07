@@ -74,10 +74,12 @@ class AlrApp(App[None]):
     #permissions { width: auto; padding: 1 2; }
     #reason { height: auto; padding: 0 1; color: $warning; }
     #panes { height: 1fr; }
-    #panes > * { height: 1fr; border: round $primary; }
-    #tasks { width: 5fr; min-width: 28; }
-    #activity { width: 3fr; }
+    #top { height: 2fr; }
+    #top > *, #activity { border: round $primary; }
+    #top > * { height: 1fr; }
+    #tasks { width: 3fr; min-width: 28; }
     #gates { width: 2fr; }
+    #activity { width: 100%; height: 3fr; }
     """
     BINDINGS = [
         Binding("s", "start", "Start"),
@@ -143,10 +145,11 @@ class AlrApp(App[None]):
             yield Button("Tasks", id="menu-tasks")
             yield Button("Sandbox", id="menu-sandbox")
             yield Button("Quit", id="menu-quit")
-        with Horizontal(id="panes"):
-            yield TasksPane(id="tasks")
+        with Vertical(id="panes"):
+            with Horizontal(id="top"):
+                yield TasksPane(id="tasks")
+                yield GatesPane(id="gates")
             yield _activity_pane()
-            yield GatesPane(id="gates")
         yield Static("", id="status")
         yield Footer()
 
