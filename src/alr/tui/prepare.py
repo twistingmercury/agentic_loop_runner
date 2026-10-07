@@ -1,0 +1,99 @@
+"""What Start does before a run: the startup checks again, then the saves."""
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from importlib import metadata
+from pathlib import Path
+
+from alr.engine.commit import Repo, check_log_dir, open_repo
+from alr.engine.loop import RunOptions, load_tasks
+from alr.errors import RepoError
+from alr.stream.events import Event
+from alr.stream.runlog import Info, RunLog, run_dir
+from alr.tasks import TaskList, save_tasks
+from alr.tui.settings import Permissions, RunSettings
+
+
+@dataclass
+class Prepared:
+    """A run that passed every check and is ready to hand to the engine."""
+
+    task_list: TaskList
+    options: RunOptions
+    log: RunLog | None = None
+
+    @property
+    def record(self) -> Callable[[Event], None] | None:
+        return None if self.log is None else self.log.record
+
+    def close(self) -> None:
+        if self.log is not None:
+            self.log.close()
+
+
+async def prepare(settings: RunSettings) -> Prepared:
+    """Check everything a run starts with; nothing is written before every check passes.
+
+    The dialogs checked their own answers as they were given, but the files
+    and the repository can change meanwhile, so the checks run again here on
+    the values the run will use.
+    """
+    task_list = load_tasks(settings.tasks_file)
+    repo = await open_repo(settings.tasks_file)
+    if repo is None:
+        raise RepoError(
+            "not a git repository: start alr inside the project's work tree"
+        )
+
+    session_args = settings.session_args()
+    log_path = await _check_log_folder(settings, repo)
+    _save_gates(settings, task_list)
+    options = RunOptions(
+        tasks_file=settings.tasks_file,
+        gate_timeout=settings.gate_timeout,
+        session_args=session_args,
+        repo=repo,
+        commit_mode=settings.commit_mode,
+    )
+    log = None if log_path is None else _open_log(settings, log_path)
+    return Prepared(task_list, options, log)
+
+
+async def _check_log_folder(settings: RunSettings, repo: Repo) -> Path | None:
+    """Return the new run's log folder, or None with logging off; refuse one git can see."""
+    if not settings.logging:
+        return None
+
+    path = run_dir(settings.log_folder(), datetime.now().astimezone())
+    try:
+        await check_log_dir(repo, str(path))
+    except RepoError as exc:
+        raise RepoError(
+            f"the log folder {settings.log_folder()} is not ignored by git; "
+            "add it to .gitignore or turn logging off"
+        ) from exc
+
+    return path
+
+
+def _save_gates(settings: RunSettings, task_list: TaskList) -> None:
+    if settings.gates is None:
+        return
+
+    task_list.shared.gates = settings.gates
+    save_tasks(settings.tasks_file, task_list)
+
+
+def _open_log(settings: RunSettings, path: Path) -> RunLog:
+    skip = settings.permissions is Permissions.SKIP
+    info = Info(
+        version=metadata.version("alr"),
+        tasks_file=settings.tasks_file,
+        permissions="skip" if skip else "sandbox",
+        sandbox_settings="" if skip else settings.sandbox_file,
+        gate_timeout=settings.gate_timeout,
+        # The view always commits.
+        commit=True,
+    )
+    return RunLog.open(path, info)
