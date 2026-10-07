@@ -15,6 +15,8 @@ from alr.errors import AlrError, UsageError
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
 from alr.tasks import parse_timeout
+from alr.tui.app import run_app
+from alr.tui.settings import Permissions, RunSettings
 
 _INTERRUPTED = "error: interrupted"
 
@@ -46,6 +48,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if args.gate_timeout is not None:
             check_gate_timeout(args.gate_timeout)
 
+        if wants_tui(args):
+            return _open_view(args, tasks_file, sandbox_settings)
+
         missing = _missing_flags(tasks_file)
         if missing:
             _report_missing(parser, missing)
@@ -71,6 +76,37 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         )
 
     return _run(start(tasks_file, gate_timeout, session, commit_mode))
+
+
+def wants_tui(args: argparse.Namespace) -> bool:
+    """Report whether this run opens the full-screen view: a terminal, no --no-tui, no dry run."""
+    if args.no_tui or args.dry_run:
+        return False
+
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> int:
+    """Open the full-screen view with what the flags already answer."""
+    commit_mode = check_commit_flags(args.commit, args.commit_after_all)
+    # Validates a given settings file and the both-flags conflict; no run starts here.
+    session_args(sandbox_file, args.skip_permissions, dry_run=True)
+    settings = RunSettings(
+        tasks_file=tasks_file,
+        sandbox_file=sandbox_file,
+        permissions=_permissions(sandbox_file, args.skip_permissions),
+        commit_mode=commit_mode or CommitMode.PER_TASK,
+        log_dir=args.log_dir,
+        gate_timeout=args.gate_timeout or "",
+    )
+    return run_app(settings)
+
+
+def _permissions(sandbox_file: str, skip: bool) -> Permissions:
+    if skip:
+        return Permissions.SKIP
+
+    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -108,7 +144,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-tui",
         action="store_true",
-        help="Use plain output instead of the full-screen view; alr has no full-screen view yet, so this changes nothing",
+        help="Use plain output instead of the full-screen view",
     )
     parser.add_argument(
         "--sandbox-settings",

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import sys
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from alr import cli
 from alr.engine import proc
 from alr.engine.commit import CommitMode
 from alr.errors import AlrError, SandboxError, UsageError
+from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
     "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
@@ -475,3 +477,107 @@ def test_check_commit_flags_maps_the_flags_to_a_mode(
     args = cli._parser().parse_args(flags)
 
     assert cli.check_commit_flags(args.commit, args.commit_after_all) is want
+
+
+@pytest.mark.parametrize(
+    ("flags", "tty", "want"),
+    [
+        ([], True, True),
+        ([], False, False),
+        (["--no-tui"], True, False),
+        (["--dry-run"], True, False),
+    ],
+    ids=["terminal", "no terminal", "--no-tui", "--dry-run"],
+)
+def test_wants_tui(
+    flags: list[str], tty: bool, want: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+
+    assert cli.wants_tui(cli._parser().parse_args(flags)) is want
+
+
+def _capture_view(monkeypatch: pytest.MonkeyPatch) -> list[RunSettings]:
+    seen: list[RunSettings] = []
+
+    def run_app(settings: RunSettings) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr("alr.cli.wants_tui", lambda args: True)
+    monkeypatch.setattr("alr.cli.run_app", run_app)
+    return seen
+
+
+def test_the_view_gets_the_resolved_flags(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+    _add_sandbox(folder)
+
+    code = cli.main(["-d", str(folder), "--commit-after-all", "--gate-timeout", "5m"])
+
+    assert code == 0
+    assert seen[0].tasks_file == str(folder / "tasks.yaml")
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].sandbox_file == str(folder / "sandbox.json")
+    assert seen[0].commit_mode is CommitMode.AFTER_ALL
+    assert seen[0].gate_timeout == "5m"
+
+
+def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--skip-permissions"])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.SKIP
+    assert seen[0].commit_mode is CommitMode.PER_TASK
+
+
+def test_the_view_accepts_log_dir_and_asks_for_a_missing_tasks_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    assert cli.main(["--log-dir", "logs"]) == 0
+    assert seen[0].tasks_file == ""
+    assert seen[0].log_dir == "logs"
+    assert seen[0].permissions is Permissions.UNSET
+
+
+def test_the_view_still_refuses_both_permission_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: Path,
+    settings: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(
+        ["-d", str(folder), "--sandbox-settings", settings, "--skip-permissions"]
+    )
+
+    assert code == 1
+    assert BOTH_PERMISSIONS in capsys.readouterr().err
+    assert seen == []
+
+
+def test_the_view_still_checks_a_given_settings_file(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = _capture_view(monkeypatch)
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+
+    code = cli.main(["-d", str(folder), "--sandbox-settings", str(bad)])
+
+    assert code == 1
+    assert capsys.readouterr().err.startswith("error: ")
+    assert seen == []
