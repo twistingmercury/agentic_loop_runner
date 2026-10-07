@@ -16,6 +16,7 @@ from alr.tui.dialogs import (
     FolderDialog,
     GatesDialog,
     PermissionsDialog,
+    ResetDialog,
     SummaryDialog,
 )
 from alr.tui.settings import Permissions, RunSettings
@@ -32,6 +33,7 @@ DIALOGS: dict[str, Callable[[str], Screen[object]]] = {
     "viewer": lambda tasks: FileViewer(tasks),
     "error": lambda tasks: ErrorDialog("something went wrong"),
     "summary": lambda tasks: SummaryDialog("done", 1.0, None),
+    "reset": lambda tasks: ResetDialog([]),
 }
 
 

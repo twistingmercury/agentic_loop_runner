@@ -25,9 +25,16 @@ from alr.stream.runlog import RunLog
 from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
+from alr.tui.panes import TasksPane
 from alr.tui.prepare import Prepared
 from alr.tui import app as app_module
-from alr.tui.dialogs import FileViewer, FolderDialog, GatesDialog, PermissionsDialog
+from alr.tui.dialogs import (
+    FileViewer,
+    FolderDialog,
+    GatesDialog,
+    PermissionsDialog,
+    ResetDialog,
+)
 from alr.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
@@ -849,3 +856,168 @@ async def test_reset_failed_flag_resets_the_file_at_launch(git_repo: Path) -> No
 
         assert not isinstance(app.screen, ModalScreen)
         assert saved_tasks(Path(settings.tasks_file)).tasks[0].error == ""
+
+
+DONE_AND_FAILED = FAILED_TASKS.replace(
+    "    name: Second\n    prompt: p\n",
+    "    name: Second\n    prompt: p\n    state: completed\n",
+)
+
+
+def _states(settings: RunSettings) -> list[str]:
+    return [task.state for task in saved_tasks(Path(settings.tasks_file)).tasks]
+
+
+async def test_a_file_with_a_failed_task_opens_with_start_blocked(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, FAILED_TASKS))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await pilot.pause()
+
+        assert app.query_one(TasksPane).get_row("1")[0] == "✖"
+        assert app.state is AppState.SETUP
+        assert app.query_one("#start").disabled
+        assert "1 failed task: press r to reset" in str(
+            app.query_one("#reason").render()
+        )
+
+
+async def test_the_reason_counts_several_failed_tasks(git_repo: Path) -> None:
+    both = FAILED_TASKS.replace(
+        "    name: Second\n    prompt: p\n",
+        "    name: Second\n    prompt: p\n    state: failed\n",
+    )
+    app = AlrApp(_settings(git_repo, both))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await pilot.pause()
+
+        assert "2 failed tasks: press r to reset" in str(
+            app.query_one("#reason").render()
+        )
+
+
+async def test_r_lists_the_failed_tasks(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo, FAILED_TASKS))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+
+        await pilot.press("r")
+        await _until(lambda: isinstance(app.screen, ResetDialog))
+
+        assert "1: First: boom" in str(app.screen.query_one("#message").render())
+
+
+async def test_escape_in_the_reset_dialog_changes_nothing(git_repo: Path) -> None:
+    settings = _settings(git_repo, FAILED_TASKS)
+    before = Path(settings.tasks_file).read_bytes()
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await pilot.press("r")
+        await _until(lambda: isinstance(app.screen, ResetDialog))
+
+        await pilot.press("escape")
+        await _until(lambda: not isinstance(app.screen, ModalScreen))
+
+        assert Path(settings.tasks_file).read_bytes() == before
+        assert app.query_one("#start").disabled
+
+
+async def test_enter_in_the_reset_dialog_resets_and_enables_start(
+    git_repo: Path,
+) -> None:
+    settings = _settings(git_repo, DONE_AND_FAILED, gates=[Gate(cmd="true")])
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await pilot.press("r")
+        await _until(lambda: isinstance(app.screen, ResetDialog))
+
+        await pilot.press("enter")
+        await _until(lambda: app.state is AppState.READY)
+
+        saved = saved_tasks(Path(settings.tasks_file))
+        assert [task.state for task in saved.tasks] == ["pending", "completed"]
+        assert [task.error for task in saved.tasks] == ["", ""]
+        # The edit waits for Start; a reset saves the file as it was loaded.
+        assert saved.gate_list() == []
+        assert not app.query_one("#start").disabled
+        assert app.query_one(TasksPane).get_row("1")[0] != "✖"
+
+
+async def test_r_does_nothing_when_no_task_failed(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await _until(lambda: app.state is AppState.READY)
+
+        await pilot.press("r")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ModalScreen)
+
+
+async def test_r_does_nothing_when_no_file_is_loaded() -> None:
+    app = AlrApp(RunSettings())
+    async with app.run_test() as pilot:
+        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await pilot.press("escape")
+        await _until(lambda: not isinstance(app.screen, ModalScreen))
+
+        await pilot.press("r")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ModalScreen)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_r_does_nothing_while_running(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _until(lambda: app.state is AppState.RUNNING)
+
+        await pilot.press("r")
+        await pilot.pause()
+        assert not isinstance(app.screen, ModalScreen)
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_r_does_nothing_once_finished(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+        await pilot.press("escape")
+        await _until(lambda: not isinstance(app.screen, ModalScreen))
+
+        await pilot.press("r")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ModalScreen)
+
+
+async def test_the_flag_resets_a_file_picked_in_the_folder_dialog(
+    git_repo: Path,
+) -> None:
+    write_file(git_repo / "run" / "tasks.yaml", FAILED_TASKS)
+    settings = RunSettings(
+        permissions=Permissions.SKIP, logging=False, reset_failed=True
+    )
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await _until(lambda: isinstance(app.screen, FolderDialog))
+
+        await pilot.press("end", *"/run", "enter")
+        await _until(lambda: app.state is AppState.READY)
+
+        assert _states(settings) == ["pending", "pending"]
+        assert app.query_one(TasksPane).get_row("1")[0] != "✖"

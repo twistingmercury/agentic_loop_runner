@@ -22,7 +22,7 @@ from textual.widgets import (
 )
 
 from alr.errors import AlrError
-from alr.tasks import Gate, parse_timeout
+from alr.tasks import Gate, Task, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
 from alr.tui.settings import Permissions
 
@@ -66,6 +66,38 @@ class ErrorDialog(_Dialog[None]):
 
     def on_button_pressed(self) -> None:
         self.dismiss(None)
+
+
+class ResetDialog(_Dialog[bool]):
+    """Ask before failed tasks go back to pending; Enter confirms, Escape cancels."""
+
+    AUTO_FOCUS = "#reset"
+
+    def __init__(self, failed: list[Task]) -> None:
+        super().__init__()
+        noun = "task" if len(failed) == 1 else "tasks"
+        self._title = f"Reset {len(failed)} failed {noun} to pending?"
+        self._lines = "\n".join(_failed_line(task) for task in failed)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(self._title, id="title")
+            yield Static(self._lines, id="message")
+            with Horizontal():
+                yield Button("Reset", id="reset")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, message: Button.Pressed) -> None:
+        self.dismiss(True if message.button.id == "reset" else None)
+
+
+def _failed_line(task: Task) -> str:
+    """One task as `id: name`, with the first line of its error when it has one."""
+    line = f"{task.id}: {task.name}"
+    if not task.error:
+        return line
+
+    return f"{line}: {task.error.splitlines()[0]}"
 
 
 class SummaryDialog(_Dialog[None]):

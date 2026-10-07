@@ -13,7 +13,7 @@ from textual.widgets import Button, Footer, Header, Select, Static, Switch
 from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
-from alr.engine.loop import load_tasks, reset_failed, run
+from alr.engine.loop import read_tasks, reset_failed, run
 from alr.errors import AlrError
 from alr.stream.events import RunDone
 from alr.stream.frontend import StreamFrontEnd
@@ -24,11 +24,12 @@ from alr.tui.dialogs import (
     FolderDialog,
     GatesDialog,
     PermissionsDialog,
+    ResetDialog,
     SummaryDialog,
 )
 from alr.tui.panes import ActivityPane, GatesPane, TasksPane
 from alr.tui.prepare import prepare
-from alr.tasks import TaskList
+from alr.tasks import FAILED, Task, TaskList
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -80,6 +81,7 @@ class AlrApp(App[None]):
         Binding("f", "menu('folder')", "Folder"),
         Binding("p", "menu('permissions')", "Permissions"),
         Binding("g", "menu('gates')", "Gates"),
+        Binding("r", "menu('reset')", "Reset"),
         Binding("t", "menu('tasks')", "Tasks file"),
         Binding("x", "menu('sandbox')", "Sandbox file"),
     ]
@@ -122,6 +124,7 @@ class AlrApp(App[None]):
             yield Button("Folder", id="menu-folder")
             yield Button("Permissions", id="menu-permissions")
             yield Button("Gates", id="menu-gates")
+            yield Button("Reset", id="menu-reset")
             yield Button("Tasks", id="menu-tasks")
             yield Button("Sandbox", id="menu-sandbox")
             yield Button("Quit", id="menu-quit")
@@ -165,16 +168,19 @@ class AlrApp(App[None]):
         if self.settings.reset_failed:
             reset_failed(tasks_file)
 
-        return load_tasks(tasks_file)
+        return read_tasks(tasks_file)
 
     def _show_tasks(self) -> None:
         """Show the tasks before Start."""
         # The launch worker may not have read the file yet; whichever runs first reads it.
         if self._task_list is None:
             self._read_tasks()
+        # The file may hold failed tasks, which hold Start back.
+        self._refresh()
 
         if self._task_list is not None:
             self.query_one(TasksPane).load(self._task_list)
+            self._refresh()
 
     async def launch_sequence(self) -> None:
         """Ask, in order, only for what the flags and the task file leave open."""
@@ -203,12 +209,22 @@ class AlrApp(App[None]):
             self.settings.gates = None
 
         self.settings.tasks_file = check.tasks_file
-        self._task_list = check.task_list
+        try:
+            # The check read the file before any reset; --reset-failed acts on the pick.
+            self._task_list = (
+                self._open_file(check.tasks_file)
+                if self.settings.reset_failed
+                else check.task_list
+            )
+        except AlrError as exc:
+            self.push_screen(ErrorDialog(str(exc)))
+            return
+
         if check.sandbox_file and self.settings.permissions is Permissions.UNSET:
             self.settings.permissions = Permissions.SANDBOX
             self.settings.sandbox_file = check.sandbox_file
 
-        self.query_one(TasksPane).load(check.task_list)
+        self.query_one(TasksPane).load(self._task_list)
         self._refresh()
 
     async def ask_permissions(self) -> None:
@@ -222,6 +238,40 @@ class AlrApp(App[None]):
         self.settings.permissions = choice.permissions
         self.settings.sandbox_file = choice.sandbox_file
         self._refresh()
+
+    async def ask_reset(self) -> None:
+        """Offer to put the failed tasks back to pending; this saves the file at once."""
+        failed = self._failed_tasks()
+        if not failed:
+            return
+
+        if await self.push_screen_wait(ResetDialog(failed)) is None:
+            return
+
+        try:
+            reset_failed(self.settings.tasks_file)
+            self._task_list = read_tasks(self.settings.tasks_file)
+        except AlrError as exc:
+            self.push_screen(ErrorDialog(str(exc)))
+            return
+
+        self.query_one(TasksPane).load(self._task_list)
+        self._refresh()
+
+    def _failed_tasks(self) -> list[Task]:
+        if self._task_list is None:
+            return []
+
+        return [task for task in self._task_list.tasks if task.state == FAILED]
+
+    def _blocker(self) -> str | None:
+        """Say what stops Start: no folder, then failed tasks, then the settings."""
+        failed = len(self._failed_tasks())
+        if self.settings.tasks_file and failed:
+            noun = "task" if failed == 1 else "tasks"
+            return f"{failed} failed {noun}: press r to reset"
+
+        return self.settings.missing()
 
     def needs_gates(self) -> bool:
         """True when the loaded file leaves the gates undecided and the user has not decided."""
@@ -252,7 +302,7 @@ class AlrApp(App[None]):
             self.query_one("#start", Button).disabled = True
             return
 
-        reason = self.settings.missing()
+        reason = self._blocker()
         self.state = AppState.SETUP if reason else AppState.READY
         self.query_one("#start", Button).disabled = reason is not None
         self.query_one("#reason", Static).update(reason or "")
@@ -291,6 +341,7 @@ class AlrApp(App[None]):
             "folder": self.ask_folder,
             "permissions": self.ask_permissions,
             "gates": self.ask_gates,
+            "reset": self.ask_reset,
         }
         self.run_worker(action[item](), exit_on_error=False)
 

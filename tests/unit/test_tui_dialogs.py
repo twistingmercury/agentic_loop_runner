@@ -11,9 +11,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, ListView, TextArea
 
 from alr.tui.checks import FolderCheck
-from alr.tasks import Gate
+from alr.tasks import FAILED, Gate, Task
 from alr.tui.dialogs import (
     ErrorDialog,
+    ResetDialog,
     SummaryDialog,
     FileViewer,
     FolderDialog,
@@ -263,8 +264,9 @@ async def test_file_viewer_closes(tmp_path: Path) -> None:
         lambda: FileViewer(""),
         lambda: ErrorDialog("x"),
         lambda: SummaryDialog("done", 1.0, None),
+        lambda: ResetDialog([]),
     ],
-    ids=["folder", "permissions", "gates", "viewer", "error", "summary"],
+    ids=["folder", "permissions", "gates", "viewer", "error", "summary", "reset"],
 )
 async def test_escape_closes_every_dialog_with_none(
     make: Callable[[], ModalScreen[object]],
@@ -347,3 +349,45 @@ async def test_the_folder_tree_picks_a_folder_with_arrows_and_enter(
         assert host.screen.query_one("#path", Input).value == str(
             git_repo / "run" / "feat"
         )
+
+
+FAILED_TASKS = [
+    Task(id=3, name="Add the thing", prompt="p", state=FAILED, error="boom\nmore"),
+    Task(id=5, name="No reason", prompt="p", state=FAILED),
+]
+
+
+async def test_reset_dialog_names_the_failed_tasks_and_their_first_error_line() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(ResetDialog(FAILED_TASKS), host.record)
+        await pilot.pause()
+
+        text = str(host.screen.query_one("#message").render())
+        title = str(host.screen.query_one("#title").render())
+        assert title == "Reset 2 failed tasks to pending?"
+        assert "3: Add the thing: boom" in text
+        assert "more" not in text
+        assert "5: No reason" in text
+
+
+async def test_reset_dialog_titles_one_task_in_the_singular() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(ResetDialog(FAILED_TASKS[:1]), host.record)
+        await pilot.pause()
+
+        title = str(host.screen.query_one("#title").render())
+        assert title == "Reset 1 failed task to pending?"
+
+
+async def test_enter_confirms_the_reset() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(ResetDialog(FAILED_TASKS), host.record)
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert host.result is True

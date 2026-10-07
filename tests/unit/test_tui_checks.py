@@ -6,7 +6,6 @@ import pytest
 from helpers import write_nested_file
 
 from alr.errors import (
-    FailedTasksError,
     SandboxError,
     TaskFileError,
     UsageError,
@@ -50,12 +49,15 @@ async def test_check_folder_with_a_broken_task_file_is_an_error(git_repo: Path) 
         await check_folder(str(git_repo / "run"))
 
 
-async def test_check_folder_with_a_failed_task_is_an_error(git_repo: Path) -> None:
+async def test_check_folder_accepts_a_failed_task_so_the_view_can_offer_a_reset(
+    git_repo: Path,
+) -> None:
     failed = TASKS + "    state: failed\n    error: x\n"
     write_nested_file(git_repo / "run" / "tasks.yaml", failed)
 
-    with pytest.raises(FailedTasksError):
-        await check_folder(str(git_repo / "run"))
+    check = await check_folder(str(git_repo / "run"))
+
+    assert [task.state for task in check.task_list.tasks] == ["failed"]
 
 
 async def test_check_folder_outside_a_repository_is_accepted(

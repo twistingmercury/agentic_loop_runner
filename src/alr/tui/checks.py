@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from alr.engine.loop import load_tasks
+from alr.engine.loop import read_tasks
 from alr.engine.sandbox import folder_sandbox, sandbox_args
 from alr.errors import UsageError
 from alr.tasks import TaskList
@@ -22,13 +22,14 @@ async def check_folder(folder: str) -> FolderCheck:
     """Accept a run folder, or raise why not.
 
     A folder outside a git work tree is fine: the run then commits nothing,
-    as in plain mode.
+    as in plain mode. A file with failed tasks is accepted too: the view
+    shows them and offers a reset.
     """
     tasks_file = Path(folder) / "tasks.yaml"
     if not tasks_file.is_file():
         raise UsageError(f"no tasks.yaml in {folder}")
 
-    task_list = load_tasks(str(tasks_file))
+    task_list = read_tasks(str(tasks_file))
     return FolderCheck(str(tasks_file), task_list, folder_sandbox(folder) or "")
 
 
