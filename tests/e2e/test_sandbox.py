@@ -60,7 +60,7 @@ def run_with_flags(
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        f"--tasks={tasks_path}",
+        f"--dir={tasks_path.parent}",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )

@@ -259,7 +259,7 @@ def test_gates_bad_gate_timeout_flag_runs_nothing(
     ],
 )
 def test_gates_bad_gate_timeout_flag_is_reported_before_anything_else(arg: str) -> None:
-    """With --tasks also missing, only a check that runs first reports the bad value."""
+    """With --dir also missing, only a check that runs first reports the bad value."""
     res = run_alr(arg)
 
     assert res.code == 1, res

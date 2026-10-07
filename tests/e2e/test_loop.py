@@ -162,7 +162,7 @@ def test_loop_claude_missing_from_path(tmp_path: Path) -> None:
     ],
 )
 def test_removed_flag_rejected(flag: str) -> None:
-    """Without the unknown-flag line and exit code 2, a returning flag would pass as a missing --tasks."""
+    """Without the unknown-flag line and exit code 2, a returning flag would pass as a missing --dir."""
     res = run_alr(flag)
 
     assert res.code == 2, res

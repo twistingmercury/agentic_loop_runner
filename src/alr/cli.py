@@ -44,7 +44,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return _install_skill()
 
     try:
-        tasks_file = resolve_dir(args.dir, args.tasks)
+        tasks_file = resolve_dir(args.dir)
         sandbox_settings = resolve_sandbox(
             args.dir, args.sandbox_settings, args.skip_permissions
         )
@@ -142,13 +142,7 @@ def _parser() -> argparse.ArgumentParser:
         "-d",
         "--dir",
         default="",
-        help="Run folder holding tasks.yaml (and optionally sandbox.json); --tasks and --sandbox-settings override",
-    )
-    parser.add_argument(
-        "-t",
-        "--tasks",
-        default="",
-        help="Path to the tasks.yaml task list that drives the loop; required unless --dir gives it",
+        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings overrides the folder's sandbox.json",
     )
     parser.add_argument(
         "--dry-run",
@@ -194,13 +188,13 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_dir(dir: str, tasks_path: str) -> str:
-    """Turn a run folder into the task file path.
+def resolve_dir(dir: str) -> str:
+    """Turn a run folder into the task file path; no folder gives no path.
 
-    The name is fixed, so a folder needs no other flag; --tasks always wins.
+    The name is fixed, so the folder is all the command line says.
     """
-    if not dir or tasks_path:
-        return tasks_path
+    if not dir:
+        return ""
 
     path = Path(dir) / "tasks.yaml"
     if not path.exists():
@@ -281,7 +275,7 @@ def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
 
 
 def _missing_flags(tasks_file: str) -> list[str]:
-    return [] if tasks_file else ["--tasks"]
+    return [] if tasks_file else ["--dir"]
 
 
 def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None:

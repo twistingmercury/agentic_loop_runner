@@ -25,7 +25,6 @@ def test_help_flag() -> None:
     assert res.code == 0, res
     for flag in (
         "--dir",
-        "--tasks",
         "--sandbox-settings",
         "--skip-permissions",
         "--gate-timeout",
@@ -44,19 +43,7 @@ def test_missing_tasks() -> None:
     res = run_alr()
 
     assert res.code == 1, res
-    assert "error: required flag --tasks not set\n" in res.err
-
-
-def test_nonexistent_tasks_file(tmp_path: Path) -> None:
-    tasks_path = tmp_path / "missing.yaml"
-
-    res = run_alr(*run_args(tasks_path))
-
-    assert res.code == 1, res
-    assert (
-        f'tasks file "{tasks_path}" is not accessible: No such file or directory'
-        in res.err
-    )
+    assert "error: required flag --dir not set\n" in res.err
 
 
 def run_two_tasks(folder: Path, *flags: str) -> tuple[Result, str]:

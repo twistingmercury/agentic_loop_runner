@@ -97,8 +97,8 @@ def shared_block(
 
 
 def run_args(tasks_path: Path) -> list[str]:
-    """The flags of an ordinary unsandboxed run."""
-    return ["--skip-permissions", f"--tasks={tasks_path}"]
+    """The flags of an ordinary unsandboxed run; the task file is the folder's tasks.yaml."""
+    return ["--skip-permissions", f"--dir={tasks_path.parent}"]
 
 
 VALID_TASKS_YAML = shared_block() + ONE_TASK
@@ -136,8 +136,8 @@ def run_dry_run(tmp_path: Path, tasks_yaml: str, *flags: str) -> tuple[Result, P
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        "-t",
-        str(tasks_path),
+        "-d",
+        str(tasks_path.parent),
         "--dry-run",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},

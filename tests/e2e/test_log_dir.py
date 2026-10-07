@@ -38,8 +38,8 @@ def run_with_log_dir(tmp_path: Path, *flags: str, empty: bool = False) -> LogDir
 
     res = run_alr(
         "--skip-permissions",
-        "-t",
-        str(tasks_path),
+        "-d",
+        str(tmp_path),
         "--log-dir=" if empty else f"--log-dir={log_dir}",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},

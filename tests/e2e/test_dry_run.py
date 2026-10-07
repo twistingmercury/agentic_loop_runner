@@ -58,12 +58,12 @@ def test_dry_run_flags_failed_task_and_exits_zero(
     )
 
 
-def test_dry_run_missing_tasks_flag() -> None:
+def test_dry_run_missing_dir_flag() -> None:
     res = run_alr("--dry-run")
 
     assert res.code == 1, res
     # Usage follows the error and names every flag, so match the error line.
-    assert "error: required flag --tasks not set\n" in res.err
+    assert "error: required flag --dir not set\n" in res.err
 
 
 def test_dry_run_valid_gates_are_not_run(tmp_path: Path, fake_claude: Path) -> None:
