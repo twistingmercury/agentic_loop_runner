@@ -45,6 +45,7 @@ class _Dialog[R](ModalScreen[R | None]):
     }
     _Dialog Horizontal { height: auto; }
     _Dialog #error { height: auto; }
+    _Dialog #message { margin-bottom: 1; }
     """
 
     def action_cancel(self) -> None:

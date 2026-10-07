@@ -57,21 +57,25 @@ class AlrApp(App[None]):
         height: 1;
         min-width: 0;
         width: auto;
-        padding: 0 2;
+        padding: 0 1;
         background: transparent;
         color: $text;
         text-style: none;
     }
     Button:focus { background: $accent; text-style: bold; }
     #start { margin: 1 0; }
-    #commit-box { width: 28; height: auto; }
+    #commit-box { width: 27; height: auto; }
+    #commit-row, #logging-row { width: auto; height: auto; }
+    .field { width: auto; height: 3; padding: 0 1; content-align: left middle; }
+    #commit { width: 18; }
     #commit-note { height: auto; padding: 0 1; }
     #permissions { width: auto; padding: 1 2; }
-    #reason { width: 1fr; padding: 1 2; }
+    #reason { height: auto; padding: 0 1; color: $warning; }
     #panes { height: 1fr; }
-    #tasks { height: 1fr; width: 1fr; min-width: 30; }
-    #activity { height: 1fr; width: 2fr; }
-    #gates { height: 1fr; width: 1fr; }
+    #panes > * { height: 1fr; border: round $primary; }
+    #tasks { width: 5fr; min-width: 28; }
+    #activity { width: 3fr; }
+    #gates { width: 2fr; }
     """
     BINDINGS = [
         Binding("s", "start", "Start"),
@@ -102,24 +106,28 @@ class AlrApp(App[None]):
         yield Header()
         with Horizontal(id="strip"):
             with Vertical(id="commit-box"):
-                yield Select(
-                    [
-                        ("per task", CommitMode.PER_TASK),
-                        ("after all", CommitMode.AFTER_ALL),
-                    ],
-                    value=self.settings.commit_mode,
-                    allow_blank=False,
-                    id="commit",
-                )
+                with Horizontal(id="commit-row"):
+                    yield Static("Commit", id="commit-label", classes="field")
+                    yield Select(
+                        [
+                            ("per task", CommitMode.PER_TASK),
+                            ("after all", CommitMode.AFTER_ALL),
+                        ],
+                        value=self.settings.commit_mode,
+                        allow_blank=False,
+                        id="commit",
+                    )
                 note = Static(
                     "no git repository: nothing will be committed", id="commit-note"
                 )
                 note.display = False
                 yield note
             yield Static("", id="permissions")
-            yield Switch(value=self.settings.logging, id="logging")
+            with Horizontal(id="logging-row"):
+                yield Static("Logging", id="logging-label", classes="field")
+                yield Switch(value=self.settings.logging, id="logging")
             yield Button("Start", id="start")
-            yield Static("", id="reason")
+        yield Static("", id="reason")
         with Horizontal(id="menu"):
             yield Button("Folder", id="menu-folder")
             yield Button("Permissions", id="menu-permissions")
