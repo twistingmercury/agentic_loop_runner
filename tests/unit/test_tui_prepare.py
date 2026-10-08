@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from helpers import write_file
 
-from alr.engine.commit import CommitMode
+from alr.engine.commit import CommitMode, Repo, open_repo
 from alr.errors import RepoError, RunLogError, TaskFileError
 from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
@@ -52,12 +52,25 @@ def _outside_settings(
     return replace(settings, **changes)
 
 
+@pytest.mark.parametrize("mode", list(CommitMode))
 async def test_prepare_outside_a_repository_runs_without_commits(
-    outside: Path, monkeypatch: pytest.MonkeyPatch
+    outside: Path, monkeypatch: pytest.MonkeyPatch, mode: CommitMode
 ) -> None:
-    prepared = await prepare(_outside_settings(outside, monkeypatch))
+    looked_up: list[str] = []
+
+    async def spy(tasks_file: str) -> Repo | None:
+        looked_up.append(tasks_file)
+        return await open_repo(tasks_file)
+
+    monkeypatch.setattr(prepare_module, "open_repo", spy)
+    settings = _outside_settings(outside, monkeypatch, commit_mode=mode)
+
+    prepared = await prepare(settings)
 
     assert prepared.options.repo is None
+    assert prepared.options.commit_mode is mode
+    # Only a mode that commits looks for the repository; with none git is never touched.
+    assert bool(looked_up) is (mode is not CommitMode.NONE)
 
 
 async def test_prepare_outside_a_repository_records_that_nothing_commits(
