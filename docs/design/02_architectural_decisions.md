@@ -1,7 +1,7 @@
 ---
-version: 25
+version: 26
 date: 2026-10-08
-notes: "ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+notes: "ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -690,7 +690,7 @@ Requiring a git repository for the view would be too limiting, and plain mode al
 Add an engine commit mode, `per_task` (the existing behavior) or `after_all`. (ADR-024 renames them `task` and `run` and adds `none`.)
 
 - **After all.** Each task still runs its session and gates as before. When the last task has completed, the engine runs
-  `git add -A` and one `git commit`, with the first line `alr: <n> tasks completed` and a body listing `<id>: <name>`
+  `git add -A` and one `git commit`, with the first line `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and a body listing `<id>: <name>`
   for each task. A failed or stopped run makes no commit, so the work stays in the tree.
 - **Same checks.** The startup checks are the ones `--commit` has: a clean work tree, and a task file that is ignored or
   outside the repository.

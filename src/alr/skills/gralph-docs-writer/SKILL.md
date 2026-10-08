@@ -34,7 +34,8 @@ task's `prompt`) and resets its `state` to `pending` by hand.
 With `--commit task`, Gralph also commits each task itself: once a task is
 `completed`, it commits what a plain `git add -A` would stage, with the task's
 `name` as the commit message. With `--commit run`, it makes one commit after the
-last task, titled `alr: <n> tasks completed`, with the task names listed in the
+last task, titled `alr: <n> tasks completed` (`alr: 1 task completed` for one task),
+with the task names listed in the
 body. A failed task is not committed; its changes stay
 in the work tree for a person to sort out. For a committing run the task file
 must be ignored by Git or kept outside the repository; Gralph refuses to start

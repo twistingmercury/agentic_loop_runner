@@ -92,20 +92,55 @@ A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 `--yolo`; the full-screen view asks in a dialog when neither is given.
 `--commit` needs a value; a bare `--commit`, a value other than `none`, `task`, or `run`, and the old
 `--commit-after-all` are usage errors (argparse rejects them and exits 2). In the view's Commit dropdown, "per task"
-is `task` and "after all" is `run`.
+is `task` and "after all" is `run`. `--commit` commits into the repository
+around the current directory, not the one around `-d`: the Claude sessions and
+the gates run in the current directory, so run `alr` from inside the repository
+they should edit.
 
 A `run` commit shows in `git log` with the subject `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and
 a body that lists `<id>: <name>` for each task that ran. A `task` commit uses the task's name as its subject.
 
-After a failed run: in `task` or `run` mode a failed run leaves its work in the tree, and the next committing run
-refuses a dirty tree. Commit, stash, or remove the leftovers, reset the failed tasks (`--reset-failed`), and run
-again. The work of tasks that already completed is then not part of the single `run` commit.
+A committing run (`task` or `run`) needs the task file and the run's `logs/`
+folder kept out of git: each must be ignored by git or sit outside the
+repository. Otherwise the run refuses to start with an error such as
+`--commit needs the task file ignored by git or outside the repository:
+tasks.yaml`. For a run folder `<folder>` inside the repository, add these lines
+to `.gitignore`:
 
-A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
-Plain mode always logs; the full-screen view has a Logging dropdown, on by default. When the
-run commits, git must ignore `logs/`, or the run will not start. If two runs start in the
-same second, the later one's folder gets a `-1` suffix (then `-2`); `alr` does not report the
-final folder name back. The git check looks at the plain folder name.
+```gitignore
+<folder>/tasks.yaml
+<folder>/logs/
+```
+
+Ignoring the whole folder with `<folder>/` works too. Do not run `git clean -fdx`
+in the repository: `-x` also deletes ignored files, which includes the task file
+and the logs.
+
+After a failed or stopped run, the work tree holds the leftovers, and the next
+committing run refuses to start until the tree is clean; the error lists the
+files. A failed run leaves its task `failed` and needs `--reset-failed`. A
+stopped run leaves the interrupted task `pending`, which needs no reset. Clean
+up by mode:
+
+- `task`: each earlier task is already committed, so the leftovers are only the
+  work of the failed or interrupted task. Discard it with `git reset` (this
+  unstages and changes no files), then `git restore .` and `git clean -fd`.
+  `git clean -fd` leaves the ignored task file and `logs/` alone. Then run
+  again, with `--reset-failed` after a failure.
+- `run`: nothing is committed until the last task, so the leftovers also hold
+  the work of every task that already completed. alr never redoes a `completed`
+  task, so do not stash, restore, or clean that work. Commit it yourself first
+  with `git add -A && git commit`. That commit also takes any partial changes of
+  the failed or interrupted task, so delete those files by hand first if you do
+  not want them. Then run again, with `--reset-failed` after a failure. The
+  completed work is in your commit, and alr's `run` commit holds only the tasks
+  that run this time.
+
+A real run logs to `<folder>/logs/<timestamp>/` in every commit mode (a dry run
+writes nothing). Plain mode always logs; the full-screen view has a Logging
+dropdown, on by default. If two runs start in the same second, the later one's
+folder gets a `-1` suffix (then `-2`); `alr` does not report the final folder
+name back. The git check looks at the plain folder name.
 
 In plain mode, `task-N.log` also holds each gate's output, git's output, and Claude's stderr, so you can
 see why a gate failed. The terminal shows the same output, but a gate sees a pipe instead of a terminal.
