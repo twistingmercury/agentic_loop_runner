@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -224,6 +225,31 @@ async def test_start_after_all_mode_makes_one_commit_for_the_run(
     await _start(tasks_file, commit=CommitMode.RUN)
 
     assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]
+
+
+async def test_start_after_all_mode_outside_a_repository_runs_and_says_so(
+    record: Path,
+    outside: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
+    monkeypatch.chdir(outside)
+    tasks_file = write_file(
+        outside / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+    )
+
+    await _start(tasks_file, commit=CommitMode.RUN)
+
+    assert "commit: not a git repository, nothing will be committed\n" in (
+        capsys.readouterr().out
+    )
+    assert _calls(record) == 1
+    assert (outside / "one.txt").exists()
+    assert not (outside / ".git").exists()
 
 
 async def test_start_logs_the_run_beside_the_task_file(
