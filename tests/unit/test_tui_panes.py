@@ -1,7 +1,7 @@
 """The three panes, each fed events directly."""
 
 import pytest
-from helpers import until
+from helpers import HandClock, until
 from textual.app import App, ComposeResult
 from textual.events import Resize
 from textual.geometry import Size
@@ -37,7 +37,7 @@ async def test_tasks_pane_shows_each_task_and_its_state() -> None:
         pane.apply(TaskStarted(FIRST))
         pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
 
-        assert [pane.get_row_at(i)[1:] for i in range(2)] == [
+        assert [pane.get_row_at(i)[1:3] for i in range(2)] == [
             ["1", "First"],
             ["2", "Second"],
         ]
@@ -63,6 +63,79 @@ async def test_tasks_pane_marks_a_failed_task() -> None:
         pane.apply(TaskFinished(Task(2, "Second", "p", state=FAILED), "boom", 1.0))
 
         assert pane.get_row_at(1)[0] == "✖"
+
+
+def _time_cell(pane: TasksPane, row: int) -> str:
+    return str(pane.get_cell_at((row, 3)))
+
+
+async def test_tasks_pane_has_a_time_column_last() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        labels = [str(column.label) for column in pane.columns.values()]
+
+        assert labels[-1] == "Time"
+
+
+async def test_tasks_pane_shows_how_long_a_finished_task_took() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+
+        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 65.0))
+
+        assert _time_cell(pane, 0) == "1m 5s"
+
+
+async def test_tasks_pane_shows_how_long_a_failed_task_took() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(SECOND))
+
+        pane.apply(TaskFinished(Task(2, "Second", "p", state=FAILED), "boom", 12.3))
+
+        assert _time_cell(pane, 1) == "12.3s"
+
+
+async def test_tasks_pane_counts_up_the_running_task_on_each_tick() -> None:
+    clock = HandClock()
+    pane = TasksPane(clock=clock)
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+        assert _time_cell(pane, 0) == "0.0s"
+
+        clock.now += 7
+        pane.tick()
+
+        assert _time_cell(pane, 0) == "7.0s"
+
+
+async def test_tasks_pane_stops_counting_once_the_task_finishes() -> None:
+    clock = HandClock()
+    pane = TasksPane(clock=clock)
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 3.0))
+
+        clock.now += 50
+        pane.tick()
+
+        assert _time_cell(pane, 0) == "3.0s"
+
+
+async def test_tasks_pane_leaves_pending_and_already_done_times_empty() -> None:
+    done = Task(id=1, name="First", prompt="p", state=COMPLETED)
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TaskList(shared=Shared(prompt="s"), tasks=[done, SECOND]))
+
+        pane.tick()
+
+        assert [_time_cell(pane, row) for row in range(2)] == ["", ""]
 
 
 async def test_activity_pane_shows_only_the_selected_task() -> None:

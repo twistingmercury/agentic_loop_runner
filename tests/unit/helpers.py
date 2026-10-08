@@ -224,3 +224,13 @@ def start_alr(*args: str, env: dict[str, str] | None = None) -> subprocess.Popen
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+class HandClock:
+    """A clock the test moves by hand, so the view's timers need no waiting."""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now

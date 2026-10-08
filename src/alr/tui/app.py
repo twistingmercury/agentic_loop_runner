@@ -111,7 +111,7 @@ class AlrApp(App[None]):
         self._worker: Worker[None] | None = None
         self._started = 0.0
         self._task_list: TaskList | None = None
-        # The status line's clock; a test passes its own so nothing has to wait.
+        # Drives the status line and the task times; a test passes its own so nothing waits.
         self._clock = clock
         self._progress: Progress | None = None
         self._ticker: Timer | None = None
@@ -159,7 +159,7 @@ class AlrApp(App[None]):
             yield Button("(q)uit", id="menu-quit")
         with Vertical(id="panes"):
             with Horizontal(id="top"):
-                yield TasksPane(id="tasks")
+                yield TasksPane(id="tasks", clock=self._clock)
                 yield GatesPane(id="gates")
             yield Static("", id="progress")
             yield _activity_pane()
@@ -202,6 +202,10 @@ class AlrApp(App[None]):
 
     def _show_tasks(self) -> None:
         """Show the tasks before Start."""
+        # Queued at mount, this can land after a quick Start; a reload then would wipe the run's rows.
+        if self.state in (AppState.RUNNING, AppState.FINISHED):
+            return
+
         # The launch worker may not have read the file yet; whichever runs first reads it.
         if self._task_list is None:
             self._read_tasks()
@@ -479,11 +483,12 @@ class AlrApp(App[None]):
         self._ticker = self.set_interval(1, self._tick)
 
     def _tick(self) -> None:
-        """Redraw the status line, so its timers move between events."""
+        """Redraw the status line and the running task's time, so they move between events."""
         if self._progress is None:
             return
 
         self.query_one("#progress", Static).update(self._progress.text())
+        self.query_one(TasksPane).tick()
 
     def _stop_ticking(self) -> None:
         if self._ticker is not None:

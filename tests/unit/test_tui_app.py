@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from helpers import (
+    HandClock,
     fake_claude_records,
     git,
     saved_tasks,
@@ -1398,16 +1399,6 @@ async def test_tab_skips_the_greyed_out_buttons(
         await _finished(app)
 
 
-class _Clock:
-    """A clock the test moves by hand, so the status line's timers need no waiting."""
-
-    def __init__(self) -> None:
-        self.now = 100.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 def _status_line(app: AlrApp) -> str:
     return str(app.query_one("#progress", Static).render())
 
@@ -1426,7 +1417,7 @@ async def test_the_status_line_shows_the_task_and_session(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(git_repo), clock=_Clock())
+    app = AlrApp(_settings(git_repo), clock=HandClock())
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -1460,7 +1451,7 @@ async def test_the_status_line_ticks_with_the_clock(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    clock = _Clock()
+    clock = HandClock()
     app = AlrApp(_settings(git_repo), clock=clock)
     async with app.run_test() as pilot:
         await pilot.press("s")
@@ -1492,7 +1483,7 @@ async def test_the_status_line_sits_whole_between_the_panes(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch, size: tuple[int, int]
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(git_repo), clock=_Clock())
+    app = AlrApp(_settings(git_repo), clock=HandClock())
     async with app.run_test(size=size) as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -1504,6 +1495,30 @@ async def test_the_status_line_sits_whole_between_the_panes(
         assert line.bottom <= app.query_one("#activity").region.y
         assert len(_status_line(app)) <= line.width - 2
         assert app.query_one("#tasks").region.height > 3
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+def _time_cell(app: AlrApp, row: int) -> str:
+    return str(app.query_one(TasksPane).get_cell_at((row, 3)))
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_running_task_time_ticks_with_the_clock(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    clock = HandClock()
+    app = AlrApp(_settings(git_repo), clock=clock)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: _time_cell(app, 0) == "0.0s")
+
+        # No event comes while the session blocks, so only the timer can redraw.
+        clock.now += 65
+        await until(lambda: _time_cell(app, 0) == "1m 5s")
+        assert _time_cell(app, 1) == ""
 
         await pilot.press("ctrl+c")
         await _finished(app)
