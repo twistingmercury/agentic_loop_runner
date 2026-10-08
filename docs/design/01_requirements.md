@@ -1,7 +1,7 @@
 ---
-version: 17
+version: 18
 date: 2026-10-08
-notes: "The commit flags are one flag, --commit {none,task,run}, default none, and --version also shows the OS and architecture (ADR-024); the flag table, the view's commit setting, and the commit-modes criterion say so. Earlier: removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022). --yolo replaces --skip-permissions with no alias (ADR-021)."
+notes: "The commit-modes criterion says a bare --commit and --commit-after-all are usage errors that exit 2, not exit 1 (ADR-024). Earlier: the commit flags are one flag, --commit {none,task,run}, default none, and --version also shows the OS and architecture (ADR-024); the flag table, the view's commit setting, and the commit-modes criterion say so. Earlier: removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022). --yolo replaces --skip-permissions with no alias (ADR-021)."
 ---
 
 # alr — Requirements
@@ -116,7 +116,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | View states            | Start disabled with a reason while something is missing; Running locks the settings and greys out the Folder, Permissions, Reset, and Quit buttons; Finished shows a summary and stays open | TUI unit tests under Textual's `run_test` and `Pilot`          |
 | Dialog rules           | A dialog opens only for an open step; nothing is written before Start except a confirmed reset | TUI unit tests                                                     |
 | Reset                  | A file with failed tasks opens with Start disabled and the reason shown; a confirmed reset saves them pending with no error text; `--reset-failed` does it silently and exits 1 with `--dry-run` | Engine, CLI, and TUI unit tests; e2e                |
-| Commit modes           | No git use, one commit per task, or one commit after the last task; none after a failed or stopped run; a bare `--commit` and `--commit-after-all` exit 1 | Unit tests against real git repositories; e2e                  |
+| Commit modes           | No git use, one commit per task, or one commit after the last task; none after a failed or stopped run; a bare `--commit` and `--commit-after-all` are usage errors that exit 2 | Unit tests against real git repositories; e2e                  |
 | Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
 | View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |
 | Skill install          | The bundled skill lands in `~/.claude/skills/gralph-docs-writer/`, replacing any copy           | Unit test with a temporary home; e2e                                        |

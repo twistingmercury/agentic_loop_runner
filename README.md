@@ -71,8 +71,8 @@ pane ticks every second and says where the run is, such as
 pending at Start, the step, the step's time, and the run's time). In a narrow window the step is
 cut with `…` so the times still show. The line is only `task n of N · run <time>` between tasks.
 The Tasks pane's Time column counts the running task up and keeps each finished task's time. The view's Commit dropdown
-offers none (the default), per task, and after all, and starts from `--commit` (outside a git work tree a run
-without commits says so), and it keeps run logs in `<folder>/logs`, which git must ignore. Use
+offers none (the default), per task, and after all, and starts from `--commit` (outside a git work tree, choosing
+a commit mode shows a note that nothing will be committed), and it keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |

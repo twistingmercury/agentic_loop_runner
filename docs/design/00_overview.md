@@ -1,7 +1,7 @@
 ---
-version: 12
+version: 13
 date: 2026-10-08
-notes: "The overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+notes: "The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -23,7 +23,7 @@ notes: "The overview names the --commit task and run modes (ADR-024). Earlier: t
 
 `alr` began as the Python port of [gralph](https://github.com/twistingmercury/gralph), which is written in Go. The port exists because a separate agent, to be built later as its own program, will use `alr` as a tool: it runs `alr --plain` and reads the exit code and the run log (`<dir>/logs/<timestamp>/run.jsonl` and `task-N.log`). `alr` itself will not embed an agent framework (ADR-022). Python still fits the runner: Textual and asyncio are Python libraries.
 
-This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, a choice of per-task or after-all commits, and `--install-skill`. The first version was built to match gralph v0.12.0's command line, task file, and behavior. `alr` has since evolved beyond gralph and changes flags, formats, and behavior as its own needs require (ADR-022). These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
+This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, a commit setting of none (the default), per task, or after all (ADR-024), and `--install-skill`. The first version was built to match gralph v0.12.0's command line, task file, and behavior. `alr` has since evolved beyond gralph and changes flags, formats, and behavior as its own needs require (ADR-022). These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
 
 ## Core Concept
 
@@ -90,7 +90,7 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | Step | Scope                                                                                                      | Status        |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------- |
 | 1    | Engine, plain mode, dry-run, and the stream path plus run log                                              | Done (v0.0.6) |
-| 2    | Textual full-screen view with setup dialogs, after-all commits, logging in both modes, `--install-skill` | Done          |
+| 2    | Textual full-screen view with setup dialogs, a commit setting, logging in both modes, `--install-skill` | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
 | 4    | A separate agent program that uses `alr` as a tool (ADR-022); not part of `alr`                            | Later         |
 
