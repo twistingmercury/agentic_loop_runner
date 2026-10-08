@@ -1,7 +1,7 @@
 ---
-version: 16
+version: 17
 date: 2026-10-07
-notes: "The engine and TUI components document the -1 run folder suffix, the unreported folder name, the check_log_dir check, the idle Gates button, and the 5,000-line Activity limit; Logging is called a setting."
+notes: "The unit tests run in parallel with pytest-xdist, and `-n 0` runs them serially. Before that: The engine and TUI components document the -1 run folder suffix, the unreported folder name, the check_log_dir check, the idle Gates button, and the 5,000-line Activity limit; Logging is called a setting."
 ---
 
 # alr — System Architecture
@@ -495,8 +495,9 @@ Tests are ported from gralph before the code they cover is written. There are tw
 | TUI end to end  | Two pseudo-terminal runs in the container: a happy-path run and a Stop                                                                                                                    | gralph's `wizard_pty` and `wizard_signal` tests                  |
 | Import boundary | `engine` imports neither front end; `plain`, `stream`, and `tui` do not import `plain`                                                                                                    | New                                                              |
 
-`make test` runs ruff format and lint, then the unit tests (`pytest tests/unit`). The Docker build runs the unit tests
-only. The e2e suite runs in a container against the wheel in `dist/`: `make e2e` runs it against the wheel already
+`make test` runs ruff format and lint, then the unit tests in parallel with `pytest-xdist` (`-n auto`). The Docker build
+runs the unit tests the same way, and only those. To run them one at a time, which is the way to use a debugger, use
+`uv run pytest -n 0 tests/unit` (or one test file or `-k`). A `tasks.yaml` gate may use `uv run pytest -n auto tests/unit`. The e2e suite runs in a container against the wheel in `dist/`: `make e2e` runs it against the wheel already
 built, and `make build` builds the wheel first. The e2e suite finds `alr` on `PATH` and never imports from `src/`. No
 real Claude and no network are needed.
 

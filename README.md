@@ -139,6 +139,10 @@ make analyze   # format and auto-fix lint findings
 make help      # list available targets
 ```
 
+`make test` runs the unit tests in parallel with `pytest-xdist` (`-n auto`), and so does the Docker build. To run them
+one at a time, which is the way to use a debugger, use `uv run pytest -n 0 tests/unit` (or point it at one test file or
+use `-k`). A `tasks.yaml` gate may use `uv run pytest -n auto tests/unit`.
+
 ### Versioning
 
 This project follows [Semantic Versioning 2.0.0](https://semver.org/).
