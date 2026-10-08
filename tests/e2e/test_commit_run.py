@@ -34,6 +34,9 @@ TWO_WORK_TASKS = (
 )
 
 
+DIRTY_TREE_ERROR = "error: --commit needs a clean work tree; commit, stash, or remove:"
+
+
 def git(repo: Path, *args: str) -> str:
     done = subprocess.run(
         ["git", *args], cwd=repo, check=True, capture_output=True, text=True
@@ -62,6 +65,19 @@ def test_commit_run_makes_one_commit_for_the_run(
     ]
     assert git(git_repo, "status", "--porcelain") == "", "nothing may be left behind"
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed", 2: "completed"}
+
+
+def test_commit_run_dirty_tree_refuses_to_start(
+    git_repo: Path, tasks_path: Path
+) -> None:
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+
+    res = run_with(tasks_path, "--commit", "run")
+
+    assert res.code == 1, res
+    assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
+    assert git(git_repo, "log", "--format=%s").splitlines() == ["init"]
+    assert tasks_path.read_text(encoding="utf-8") == TWO_WORK_TASKS
 
 
 def test_commit_after_all_is_an_unknown_flag(git_repo: Path, tasks_path: Path) -> None:
