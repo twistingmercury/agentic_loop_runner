@@ -487,7 +487,9 @@ class AlrApp(App[None]):
         if self._progress is None:
             return
 
-        self.query_one("#progress", Static).update(self._progress.text())
+        line = self.query_one("#progress", Static)
+        # The line is one row tall; whatever wraps is hidden, and the timers come last.
+        line.update(self._progress.text(width=line.content_size.width))
         self.query_one(TasksPane).tick()
 
     def _stop_ticking(self) -> None:

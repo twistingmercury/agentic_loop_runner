@@ -176,3 +176,82 @@ def test_default_clock_is_monotonic() -> None:
     progress.feed(TaskStarted(FIRST))
 
     assert progress.text().startswith("task 1 of 1 · session · ")
+
+
+def test_gate_that_starts_with_a_newline_reads_like_the_gate_marker(
+    progress: Progress,
+) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(GateStarted(FIRST, Gate("\nmake lint")))
+
+    assert progress.text() == "task 1 of 12 · gate 1 of 2:  · 0.0s · run 0.0s"
+
+
+def test_long_gate_is_cut_with_an_ellipsis_so_the_timers_fit(
+    progress: Progress, clock: FakeClock
+) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(GateStarted(FIRST, Gate("uv run pytest " + "-k very_long_name " * 8)))
+    clock.advance(75)
+
+    text = progress.text(width=60)
+
+    assert len(text) == 60
+    assert text.startswith("task 1 of 12 · gate 1 of 2: uv run py")
+    assert text.endswith("… · 1m 15s · run 1m 15s")
+
+
+def test_gate_that_fits_is_not_cut(progress: Progress) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(GateStarted(FIRST, FORMAT))
+
+    assert progress.text(width=200) == progress.text()
+
+
+def test_line_exactly_as_wide_as_the_room_is_not_cut(progress: Progress) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(GateStarted(FIRST, FORMAT))
+    whole = progress.text()
+
+    assert progress.text(width=len(whole)) == whole
+    assert progress.text(width=len(whole) - 1).count("…") == 1
+
+
+def test_task_finished_clears_the_step_and_its_timer(
+    progress: Progress, clock: FakeClock
+) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(GateStarted(FIRST, FORMAT))
+    clock.advance(9)
+    progress.feed(TaskFinished(FIRST, None, 9.0))
+    clock.advance(2)
+
+    assert progress.text() == "task 1 of 12 · run 11.0s"
+
+
+def test_next_task_start_brings_the_step_back(
+    progress: Progress, clock: FakeClock
+) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(TaskFinished(FIRST, None, 1.0))
+    clock.advance(3)
+    progress.feed(TaskStarted(SECOND))
+
+    assert progress.text() == "task 2 of 12 · session · 0.0s · run 3.0s"
+
+
+def test_after_all_commit_reads_commit_once_it_starts(
+    clock: FakeClock,
+) -> None:
+    progress = Progress(total_tasks=1, gate_count=1, clock=clock)
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(TaskFinished(FIRST, None, 4.0))
+    clock.advance(4)
+    after_finish = progress.text()
+    progress.feed(CommitStarted(FIRST))
+    clock.advance(1)
+
+    assert (after_finish, progress.text()) == (
+        "task 1 of 1 · run 4.0s",
+        "task 1 of 1 · commit · 1.0s · run 5.0s",
+    )
