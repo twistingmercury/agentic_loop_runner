@@ -126,8 +126,9 @@ class AlrApp(App[None]):
                     yield Static("Commit:", id="commit-label", classes="field")
                     yield Select(
                         [
-                            ("per task", CommitMode.PER_TASK),
-                            ("after all", CommitMode.AFTER_ALL),
+                            ("none", CommitMode.NONE),
+                            ("per task", CommitMode.TASK),
+                            ("after all", CommitMode.RUN),
                         ],
                         value=self.settings.commit_mode,
                         allow_blank=False,
@@ -171,17 +172,39 @@ class AlrApp(App[None]):
         self._refresh()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.action_stop)
-        self.run_worker(self._check_work_tree(), exit_on_error=False)
+        self._look_for_work_tree()
         self.run_worker(self.launch_sequence(), exit_on_error=False)
 
-    async def _check_work_tree(self) -> None:
-        """Without a work tree nothing can be committed, so the commit choice is moot."""
-        self.in_work_tree = await work_tree_root() is not None
-        if self.in_work_tree:
+    def _look_for_work_tree(self) -> None:
+        """Start the work-tree lookup, but only once a commit mode asks and nothing has answered.
+
+        With `none` git is never touched, so the lookup waits for the user to
+        pick a mode that commits. A failed lookup leaves the answer open; Start
+        opens the repository itself and reports its error.
+        """
+        if (
+            self.settings.commit_mode is CommitMode.NONE
+            or self.in_work_tree is not None
+        ):
             return
 
-        self.query_one("#commit", Select).disabled = True
-        self.query_one("#commit-note", Static).display = True
+        self.run_worker(self._check_work_tree(), exit_on_error=False)
+
+    async def _check_work_tree(self) -> None:
+        """Learn whether a work tree is around, so the note can say nothing will be committed."""
+        self.in_work_tree = await work_tree_root() is not None
+        self._show_commit_note()
+
+    def _show_commit_note(self) -> None:
+        """Warn only when a commit was asked for and there is no repository to hold it.
+
+        Decided from the current mode and answer, so a lookup that finishes
+        after the user changed the mode still leaves the note right.
+        """
+        asked = self.settings.commit_mode is not CommitMode.NONE
+        self.query_one("#commit-note", Static).display = (
+            asked and self.in_work_tree is False
+        )
 
     def _read_tasks(self) -> None:
         """Load the task file; an unreadable one is reported by the dialogs."""
@@ -332,10 +355,7 @@ class AlrApp(App[None]):
     def _lock_dropdowns(self) -> None:
         """A run copies the settings at Start, so later changes would only mislead."""
         locked = self.state in (AppState.RUNNING, AppState.FINISHED)
-        # Without a work tree the commit choice stays off in every state.
-        self.query_one("#commit", Select).disabled = (
-            locked or self.in_work_tree is False
-        )
+        self.query_one("#commit", Select).disabled = locked
         self.query_one("#logging", Select).disabled = locked
 
     def _refresh(self) -> None:
@@ -425,6 +445,8 @@ class AlrApp(App[None]):
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "commit" and isinstance(message.value, CommitMode):
             self.settings.commit_mode = message.value
+            self._look_for_work_tree()
+            self._show_commit_note()
 
         if message.select.id == "logging" and isinstance(message.value, bool):
             self.settings.logging = message.value
@@ -533,6 +555,11 @@ class AlrApp(App[None]):
         self._finish(RunDone(error, time.monotonic() - self._started))
 
     def on_run_event(self, message: RunEvent) -> None:
+        # Textual delivers the events queued before an exit after it has taken
+        # the screens down, when there is nothing left to draw them on.
+        if not self.is_running:
+            return
+
         event = message.event
         if self._progress is not None:
             self._progress.feed(event)

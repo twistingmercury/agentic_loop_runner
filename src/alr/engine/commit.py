@@ -18,10 +18,11 @@ _NOT_A_REPO = ("not a git repository", "must be run in a work tree")
 
 
 class CommitMode(StrEnum):
-    """When a run commits: after each completed task, or once after the last one."""
+    """When a run commits: never, after each completed task, or once after the last one."""
 
-    PER_TASK = "per_task"
-    AFTER_ALL = "after_all"
+    NONE = "none"
+    TASK = "task"
+    RUN = "run"
 
 
 @dataclass(frozen=True)
@@ -41,13 +42,25 @@ async def open_repo(tasks_file: str) -> Repo | None:
     Inside a work tree, git must not see tasks_file and the tree must be
     clean, so that each commit holds exactly one task's work.
     """
+    repo = await find_repo(tasks_file)
+    if repo is not None:
+        await check_clean(repo)
+
+    return repo
+
+
+async def find_repo(tasks_file: str) -> Repo | None:
+    """Find the work tree like open_repo, but leave the clean-tree check to the caller.
+
+    A caller that also checks the log directory does that first: a tree dirty
+    only with the run's own log folder needs that folder ignored, not committed.
+    """
     root = await _find_root()
     if not root:
         return None
 
     repo = Repo(root=root)
     await _check_task_file(repo, tasks_file)
-    await _check_clean(repo)
     return repo
 
 
@@ -88,7 +101,8 @@ async def commit_all(
 
     The front end's calls each name a task, so the last one carries the git steps.
     """
-    title = f"alr: {len(tasks)} tasks completed"
+    noun = "task" if len(tasks) == 1 else "tasks"
+    title = f"alr: {len(tasks)} {noun} completed"
     body = "\n".join(f"{task.id}: {task.name}" for task in tasks)
     return await _commit_changes(repo, tasks[-1], front_end, [title, body])
 
@@ -176,7 +190,7 @@ async def _check_task_file(repo: Repo, tasks_file: str) -> None:
     )
 
 
-async def _check_clean(repo: Repo) -> None:
+async def check_clean(repo: Repo) -> None:
     """Refuse a work tree with uncommitted changes."""
     # Every untracked file is listed by name, and quotePath keeps non-ASCII
     # names readable in the error.

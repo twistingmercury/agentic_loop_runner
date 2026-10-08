@@ -31,14 +31,17 @@ result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand.
 
-With the `--commit` flag, Gralph also commits each task itself: once a task is
+With `--commit task`, Gralph also commits each task itself: once a task is
 `completed`, it commits what a plain `git add -A` would stage, with the task's
-`name` as the commit message. A failed task is not committed; its changes stay
-in the work tree for a person to sort out. For a `--commit` run the task file
+`name` as the commit message. With `--commit run`, it makes one commit after the
+last task, titled `alr: <n> tasks completed` (`alr: 1 task completed` for one task),
+with the task names listed in the
+body. A failed task is not committed; its changes stay
+in the work tree for a person to sort out. For a committing run the task file
 must be ignored by Git or kept outside the repository; Gralph refuses to start
 otherwise. A sandbox settings file should also be ignored or kept outside, so it does
-not show up as an uncommitted change. Without
-the flag, Gralph never touches Git.
+not show up as an uncommitted change. With
+`--commit none` (the default), alr never touches git.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
@@ -58,10 +61,11 @@ authorized.
    scope, output destination, actual document paths, and project verification
    and Git policies. Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml).
-3. Ask the user whether the run will use `gralph --commit`. If it will, the
+3. Ask the user whether the run will use `gralph --commit task` or `--commit run` (the value is
+   required; the default is `none`). If it will, the
    session must not commit: the `Commits` line in `shared.prompt` reads "Do not
-   commit. Leave your changes in the work tree.", task names are written as
-   commit subjects (imperative, under about 70 characters), and no task prompt
+   commit. Leave your changes in the work tree.", for `--commit task`
+   task names are written as commit subjects (imperative, under about 70 characters), and no task prompt
    mentions committing.
 4. Draft the task list and show the user a summary, one line per task:
    `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
@@ -98,7 +102,7 @@ authorized.
 7. Write `shared.prompt` from the template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
-   task. For a `--commit` run the `Commits` line tells the session not to
+   task. For a `--commit task` or `--commit run` run the `Commits` line tells the session not to
    commit; otherwise keep commits conditional on the project's authorization.
    Keep the `tasks.yaml` rule and the Finish section as written so the file
    works without this skill installed. Apart from the project's own checks,
@@ -111,9 +115,9 @@ authorized.
    `GENERATE_*` token remains in the file.
 9. Report the output path and the checks performed. Do not launch the loop
    merely to validate generated files.
-   For a `--commit` run, also tell the user the `.gitignore` line that keeps
+   For a committing run, also tell the user the `.gitignore` line that keeps
    the files out of Git (the output directory, or `tasks.yaml`).
-   For a `--commit` run this is required for `tasks.yaml`, not just advice; the
+   For a committing run this is required for `tasks.yaml`, not just advice; the
    same for any sandbox settings file, so it does not show up as an
    uncommitted change. Do not edit `.gitignore` yourself unless asked.
 
@@ -142,6 +146,6 @@ the sequence: code that nothing calls until a later task fails an unused-code
 linter, and a fixture change can break a suite another task fixes. Reorder or
 merge tasks so each one leaves every check passing.
 
-Honor project policies for source commits unless the run uses `--commit`, where
+Honor project policies for source commits unless the run uses `--commit task` or `--commit run`, where
 Gralph does the committing, and never instruct the session to edit or commit
 `tasks.yaml`.

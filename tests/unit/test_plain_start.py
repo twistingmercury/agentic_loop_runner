@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -55,7 +56,7 @@ def _calls(record: Path) -> int:
 
 async def _start(
     tasks_file: str,
-    commit: CommitMode | None = None,
+    commit: CommitMode = CommitMode.NONE,
     reset_failed: bool = False,
     sandbox_settings: str = "",
 ) -> None:
@@ -180,7 +181,7 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     with pytest.raises(RepoError) as caught:
-        await _start(tasks_file, commit=CommitMode.PER_TASK)
+        await _start(tasks_file, commit=CommitMode.TASK)
 
     assert "--commit needs a clean work tree" in str(caught.value)
     assert _calls(record) == 0, "claude must not run"
@@ -197,7 +198,7 @@ async def test_start_commit_flag_commits_the_task(
         "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
-    await _start(tasks_file, commit=CommitMode.PER_TASK)
+    await _start(tasks_file, commit=CommitMode.TASK)
 
     assert commit_subjects(git_repo) == ["First", "init"]
 
@@ -221,9 +222,54 @@ async def test_start_after_all_mode_makes_one_commit_for_the_run(
         "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
-    await _start(tasks_file, commit=CommitMode.AFTER_ALL)
+    await _start(tasks_file, commit=CommitMode.RUN)
 
-    assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]
+    assert commit_subjects(git_repo) == ["alr: 1 task completed", "init"]
+
+
+async def test_start_after_all_mode_outside_a_repository_runs_and_says_so(
+    record: Path,
+    outside: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
+    monkeypatch.chdir(outside)
+    tasks_file = write_file(
+        outside / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+    )
+
+    await _start(tasks_file, commit=CommitMode.RUN)
+
+    assert "commit: not a git repository, nothing will be committed\n" in (
+        capsys.readouterr().out
+    )
+    assert _calls(record) == 1
+    assert (outside / "one.txt").exists()
+    assert not (outside / ".git").exists()
+
+
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_start_logs_that_the_run_commits_even_outside_a_repository(
+    record: Path,
+    outside: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: CommitMode,
+) -> None:
+    # Pins the current behavior: plain mode logs whether the mode asks for commits,
+    # while the view logs whether a repository exists, so the two differ here.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
+    monkeypatch.chdir(outside)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file, commit=mode)
+
+    assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
 
 
 async def test_start_logs_the_run_beside_the_task_file(
@@ -270,7 +316,7 @@ async def test_start_logs_that_the_run_commits(
 ) -> None:
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
-    await _start(tasks_file, commit=CommitMode.PER_TASK)
+    await _start(tasks_file, commit=CommitMode.TASK)
 
     assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
 
@@ -284,10 +330,43 @@ async def test_start_commit_refuses_a_log_folder_git_can_see(
     tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
 
     with pytest.raises(RepoError, match="log directory"):
-        await _start(tasks_file, commit=CommitMode.PER_TASK)
+        await _start(tasks_file, commit=CommitMode.TASK)
 
     assert _calls(record) == 0, "claude must not run"
     assert not (git_repo / "work" / "logs").exists()
+
+
+async def test_start_commit_tells_a_tree_dirty_only_with_its_log_folder_to_ignore_it(
+    record: Path, git_repo: Path
+) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+    # A default-mode run leaves its untracked log folder behind.
+    await _start(tasks_file)
+    calls = _calls(record)
+
+    with pytest.raises(RepoError, match="log directory") as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert "clean work tree" not in str(caught.value)
+    assert _calls(record) == calls, "claude must not run"
+
+
+async def test_start_commit_with_another_dirty_file_still_reports_the_dirty_tree(
+    record: Path, git_repo: Path
+) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+    # The log folder is ignored here, so only the stray file can make the tree dirty.
+    exclude.write_text("work/tasks.yaml\nwork/logs/\n", encoding="utf-8")
+
+    with pytest.raises(RepoError, match="--commit needs a clean work tree") as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert "stray.txt" in str(caught.value)
 
 
 async def test_start_commit_accepts_a_log_folder_git_ignores(
@@ -295,7 +374,7 @@ async def test_start_commit_accepts_a_log_folder_git_ignores(
 ) -> None:
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", ONE_TASK_YAML)
 
-    await _start(tasks_file, commit=CommitMode.PER_TASK)
+    await _start(tasks_file, commit=CommitMode.TASK)
 
     assert (git_repo / "run" / "logs").is_dir()
 

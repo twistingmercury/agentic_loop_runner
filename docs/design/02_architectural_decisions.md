@@ -1,7 +1,7 @@
 ---
-version: 22
+version: 27
 date: 2026-10-08
-notes: "ADR-023 gets the bounded-read rule for gates and git (cut off 2 seconds after the process exits, pipes closed; the session is read to the end) and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output in the run log; ADR-019 is amended and its sentences about the old limit corrected. Earlier: ADR-022: alr has evolved beyond gralph and is a tool, not an agent; it supersedes the drop-in parts of ADR-001 and ADR-007 and the agent-layer plans of ADR-001 to ADR-004 and ADR-012 (their status lines point to it); ADR-017 drops the known-differences pointer; ADR-020 gets the status line's exact form in place."
+notes: "ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -52,6 +52,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [021](#adr-021-the-bypass-flag-is---yolo) | The bypass flag is `--yolo` | Accepted | 2026-10-08 |
 | [022](#adr-022-alr-has-evolved-beyond-gralph) | alr has evolved beyond gralph | Accepted | 2026-10-08 |
 | [023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output) | Plain mode records gate, git, and session-stderr output | Accepted | 2026-10-08 |
+| [024](#adr-024-one---commit-flag-with-three-modes-none-task-and-run) | One `--commit` flag with three modes: none, task, and run | Accepted | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -311,7 +312,7 @@ Compatibility covers the surface a user works with:
 - The command-line flags and what they mean
 - The task file format and its field rules, the shared prompt, and the text sent to Claude
 - The result line and the outcome rule
-- What gates, `--commit`, and the sandbox flags do
+- What gates, `--commit` (now `none`, `task`, or `run`, ADR-024), and the sandbox flags do
 - Exit codes and the shape of plain-mode output
 - The full-screen view's behavior, when it is built
 
@@ -442,7 +443,7 @@ A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`.
 
 *Positive:*
 
-- `alr -d .local/feat --commit` is a whole command for a folder that holds its task file and sandbox settings
+- `alr -d .local/feat --commit task` is a whole command for a folder that holds its task file and sandbox settings
 - A command that names the folder reproduces the run
 
 *Negative:*
@@ -608,9 +609,10 @@ window that is always there, with the setup as pop-ups, and a run that begins on
 
 One main window and modal dialogs on top of it.
 
-- **Layout.** A labelled settings strip reading `Commit: [per task ▾]  Permissions: skip  Logging: [on ▾]  (s)tart`:
+- **Layout.** A labelled settings strip reading `Commit: [none ▾]  Permissions: skip  Logging: [on ▾]  (s)tart`:
   the Commit and Logging controls are dropdowns, and both lock once Start is pressed and stay locked after the run
-  (the Commit dropdown is also disabled, with its note, outside a git work tree). The reason Start is disabled has its
+  (the Commit dropdown offers none, per task, and after all, and starts from `--commit`, ADR-024; outside a git work tree
+  its note shows when a mode other than none is chosen). The reason Start is disabled has its
   own row beneath. Under it is a menu row of flat, one-row buttons that carry their hotkeys in their names, `(f)older
   (p)ermissions (g)ates (r)eset (t)asks sandbo(x) (q)uit`, since Textual has no menu-bar widget; there is no footer. Then
   come three titled panes: Tasks (3fr) and Gates & commits (2fr) side by side in a top row of about 40% of the height,
@@ -674,7 +676,7 @@ One main window and modal dialogs on top of it.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted
+**Status:** Accepted. ADR-024 amends the flags and the view's setting: `--commit {none,task,run}` replaces `--commit` and `--commit-after-all`, and the view's Commit dropdown gains none, the default.
 
 **Context:**
 
@@ -685,34 +687,39 @@ Requiring a git repository for the view would be too limiting, and plain mode al
 
 **Decision:**
 
-Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
+Add an engine commit mode, `per_task` (the existing behavior) or `after_all`. (ADR-024 renames them `task` and `run` and adds `none`.)
 
 - **After all.** Each task still runs its session and gates as before. When the last task has completed, the engine runs
-  `git add -A` and one `git commit`, with the first line `alr: <n> tasks completed` and a body listing `<id>: <name>`
+  `git add -A` and one `git commit`, with the first line `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and a body listing `<id>: <name>`
   for each task. A failed or stopped run makes no commit, so the work stays in the tree.
 - **Same checks.** The startup checks are the ones `--commit` has: a clean work tree, and a task file that is ignored or
   outside the repository.
 - **Flags.** `--commit` keeps its meaning, one commit per task. A new `--commit-after-all` asks for the second mode.
-  Passing both is a usage error. Plain mode accepts both, since the engine is shared.
+  Passing both is a usage error. Plain mode accepts both, since the engine is shared. (Amended by ADR-024: one
+  `--commit {none,task,run}` replaces both flags, with no alias for `--commit-after-all`.)
 - **In the TUI** the commit setting is a choice of the two modes, per task by default, with no way to turn commits off
-  while there is a work tree. A passed flag pre-selects its mode.
+  while there is a work tree. A passed flag pre-selects its mode. (Amended by ADR-024: the dropdown also offers none,
+  and none is the default.)
 - **No work tree.** When the working directory is not inside a git work tree there is nothing to commit to. The setting
   is disabled with the note "no git repository: nothing will be committed", and the run makes no commits, as plain mode
-  does with `--commit` outside a repository.
+  does with `--commit` outside a repository. (Amended by ADR-024: the setting is not disabled. The dropdown stays usable,
+  the note shows only when a mode other than none is chosen, and with none the view never looks for a work tree.)
 
 **Consequences:**
 
 *Positive:*
 
 - One commit per feature is possible without squashing afterward
-- `--commit` and every command line that uses it behave as before
+- `--commit` and every command line that uses it behave as before (Amended by ADR-024: a bare `--commit` is now a usage
+  error, and `--commit task` is the old `--commit`.)
 
 *Negative:*
 
 - After a failed or stopped run, the completed tasks' work is uncommitted, and the dirty-tree check blocks the next
   start until it is committed or discarded
 - Outside a git work tree the view runs but commits nothing, so the changes stay in the folder; only the note beside the
-  commit setting says so
+  commit setting says so (Amended by ADR-024: with the default none there is no note at all, and the note shows only
+  when a mode other than none is chosen)
 - Resuming an after-all run after committing the earlier work by hand gives a commit title with a smaller `n` and a
   body that lists only the tasks that ran in the resumed session
 
@@ -725,7 +732,7 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`.
 **Context:**
 
 Gralph asks about logging and about a default gate timeout
-as wizard steps. Since the TUI commits whenever it is inside a work tree (ADR-014), a log folder inside the repository would dirty the
+as wizard steps. Since the TUI could commit whenever it was inside a work tree (ADR-014; ADR-024 later made none the default), a log folder inside the repository would dirty the
 tree unless it is git-ignored.
 
 **Decision:**
@@ -881,9 +888,9 @@ meant two sets of rules.
   `tasks.yaml`.
 - **Plain mode always logs.** There is no way to turn it off. The view keeps its Logging setting (default on). A dry run
   never logs, because it writes nothing.
-- **Committing runs.** When a plain run commits (`--commit` or `--commit-after-all`) inside a work tree and the log
+- **Committing runs.** When a plain run commits (`--commit task` or `--commit run`; ADR-024) inside a work tree and the log
   folder is visible to git, the run refuses to start with the engine's `check_log_dir` error. Outside a work tree, or
-  without a commit flag, there is nothing to check.
+  with `--commit none` (the default), there is nothing to check.
 - **Shared record code.** The run events and the run log writer move from `alr.stream` to a neutral package,
   `alr.record`, which imports only `alr.tasks`, `alr.errors`, and the standard library. `alr.plain`, `alr.stream`, and
   `alr.tui` may import it; `alr.engine` may not.
@@ -1100,5 +1107,69 @@ This amends ADR-019 (its plain detail log), and keeps the interface ADR-022 name
   The full-screen view's log already behaves this way
 - Plain mode's exit codes and log format are the interface the outside agent depends on; changing them needs the care
   ADR-022 asks for
+
+### ADR-024: One `--commit` flag with three modes: none, task, and run
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+Two flags, `--commit` and `--commit-after-all`, chose when to commit, and passing both was a usage error. Two flags that
+conflict are one choice. The view had a matching dropdown with no way to turn commits off, so a plain run touched git
+only on request while the view committed by default. The mode names also need a vocabulary: the task file talks about
+tasks, and "session" already means each task's Claude session, so "session" would mislead.
+
+**Decision:**
+
+One flag, `--commit {none,task,run}`, default `none`.
+
+- **Modes.** `none` never touches git, as a run without a commit flag did. `task` commits each completed task after its
+  gates pass (the old `--commit`). `run` makes one commit after the last task, and none on a failed or stopped run (the
+  old `--commit-after-all`, ADR-014). Its subject is `alr: <n> tasks completed`, or `alr: 1 task completed` for one task,
+  and its body lists `<id>: <name>` for each task. `CommitMode` becomes `NONE`, `TASK`, and `RUN`, with the values `"none"`,
+  `"task"`, and `"run"` (it was `PER_TASK` and `AFTER_ALL`).
+- **Names.** `run` and not `session`, because a session is each task's Claude session. `task` and `run` follow the task
+  file's own words.
+- **Default.** `none`, so plain mode touches git only when asked. The view's default changes from per task to none, and
+  its Commit dropdown offers none, per task, and after all. The dropdown starts from the flag and locks once Start is
+  pressed. Outside a git work tree the dropdown stays usable, and the note "no git repository: nothing will be
+  committed" shows when a mode other than none is chosen.
+- **The view's work-tree lookup.** The view looks for a work tree only when a mode other than none is chosen: at launch
+  when the flag gives `task` or `run`, or when the user picks one of them in the dropdown. With `none` git is never
+  touched at mount, the note is never shown, and no lookup runs until the user picks `task` or `run`. Once the lookup
+  has answered, the answer is kept and no lookup is repeated. Picking `none` again hides the note at once, and a lookup
+  still running cannot show it. A failed lookup leaves the note hidden and the view running, and the next pick of
+  `task` or `run` tries again. Start still opens the repository for `task` and `run` only, and reports its own errors.
+- **No alias.** The old `--commit-after-all` and a bare `--commit` with no value are usage errors, as `--no-tui`, `-t`,
+  `--log-dir`, and `--skip-permissions` already are.
+- **Check order.** A committing run checks the repository, then the log folder, then the clean tree. A tree dirty only
+  with the run's own `logs/` folder is told that the log folder must be ignored, not that the tree is dirty.
+- **`--version`.** It also prints the OS and architecture after the version, such as `alr version: 0.0.9 linux/x86_64`.
+  This is a separate, small change made in the same loop.
+
+This amends ADR-014 (the flags and the view's commit setting) and ADR-019 (its commit flags).
+
+**Consequences:**
+
+*Positive:*
+
+- One choice, one flag: the conflicting-flags error no longer exists
+- A run in the view no longer commits unless asked
+- The mode names match the task file's words
+
+*Negative:*
+
+- Scripts that use `--commit` alone or `--commit-after-all` change to `--commit task` or `--commit run`
+- Someone used to the view committing per task by default has to pick it
+- A `none` run can leave an unignored `logs/` folder in the tree; the next committing run now says the log folder must
+  be ignored (it used to say the tree is dirty)
+- Known limit, inherited from before the single flag: after a failed run in a commit mode the work stays in the tree,
+  and the next committing run refuses a dirty tree until the user cleans it up. In `task` mode only the failed task's
+  partial work is left, and it can be discarded. In `run` mode the tree also holds the work of every task already
+  marked `completed`, and alr never redoes a `completed` task, so that work must be committed by hand first and never
+  stashed or cleaned (the README has the steps); it is then in the user's commit, not in a single `run` commit. A
+  failed final `run` commit also leaves the work staged and every task `completed`
 
 **Next:** [System Architecture](03_system_architecture.md)

@@ -1,5 +1,6 @@
 """The command line itself: --version, --help, required flags, missing files, and --plain."""
 
+import re
 from pathlib import Path
 
 from e2e_helpers import (
@@ -15,8 +16,7 @@ def test_version_flag() -> None:
     res = run_alr("--version")
 
     assert res.code == 0, res
-    assert res.out.startswith("alr version: ")
-    assert res.out.count("\n") == 1
+    assert re.fullmatch(r"alr version: \S+ [a-z]+/\S+\n", res.out)
 
 
 def test_help_flag() -> None:

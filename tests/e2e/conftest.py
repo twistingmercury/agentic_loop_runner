@@ -44,7 +44,7 @@ def outside(tmp_path: Path) -> Path:
 def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a git repository holding one commit, and make it the working directory.
 
-    The commit ignores run/, where tests keep the task file as a --commit run
+    The commit ignores run/, where tests keep the task file as a --commit task or --commit run
     requires, and the folder exists so a run can save the file there.
     """
     # Symlinks resolved, so the path compares equal to the one git reports.

@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 from helpers import (
     commit_subjects,
+    fake_claude_records,
     git,
     run_loop,
+    until,
     wait_for_text,
     write_nested_file,
 )
@@ -592,7 +594,11 @@ async def test_run_commit_odd_task_names(
 
 
 async def _cancel_during_commit(
-    repo_dir: Path, tasks_file: Path, ready: Path, script: str
+    repo_dir: Path,
+    tasks_file: Path,
+    ready: Path,
+    script: str,
+    commit_mode: CommitMode = CommitMode.TASK,
 ) -> tuple[float, RunCancelledError]:
     """Run one task whose pre-commit hook is script and cancel once the hook has started.
 
@@ -601,7 +607,12 @@ async def _cancel_during_commit(
     _install_hook(repo_dir, script.replace("READY", f"'{ready}'"))
     repo = await _open(tasks_file)
     run = asyncio.ensure_future(
-        run_loop(_gated_task(_work_gate("one.txt")), tasks_file, repo=repo)
+        run_loop(
+            _gated_task(_work_gate("one.txt")),
+            tasks_file,
+            repo=repo,
+            commit_mode=commit_mode,
+        )
     )
     await wait_for_text(ready)
 
@@ -730,7 +741,7 @@ async def test_run_after_all_makes_one_commit_listing_every_task(
         _two_tasks(_NUMBERED),
         tasks_file,
         repo=await _open(tasks_file),
-        commit_mode=CommitMode.AFTER_ALL,
+        commit_mode=CommitMode.RUN,
     )
 
     assert commit_subjects(git_repo) == ["alr: 2 tasks completed", "init"]
@@ -742,6 +753,22 @@ async def test_run_after_all_makes_one_commit_listing_every_task(
 
 
 @pytest.mark.usefixtures("fake_claude")
+async def test_run_with_mode_none_makes_no_commit_even_with_a_repo(
+    git_repo: Path,
+) -> None:
+    tasks_file = _task_file(git_repo)
+
+    await run_loop(
+        _two_tasks(_NUMBERED),
+        tasks_file,
+        repo=await _open(tasks_file),
+        commit_mode=CommitMode.NONE,
+    )
+
+    assert commit_subjects(git_repo) == ["init"]
+
+
+@pytest.mark.usefixtures("fake_claude")
 async def test_run_after_all_failed_task_makes_no_commit(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -750,11 +777,124 @@ async def test_run_after_all_failed_task_makes_no_commit(
     repo = await _open(tasks_file)
 
     with pytest.raises(RunError, match="nope"):
-        await run_loop(
-            _two_tasks(), tasks_file, repo=repo, commit_mode=CommitMode.AFTER_ALL
-        )
+        await run_loop(_two_tasks(), tasks_file, repo=repo, commit_mode=CommitMode.RUN)
 
     assert commit_subjects(git_repo) == ["init"]
+
+
+# Passes while one.txt is absent and writes it, so task 1 completes with work
+# in the tree and any later task fails its gate.
+_WORK_ONCE = Gate(cmd="if [ -e one.txt ]; then exit 1; fi; echo work > one.txt")
+
+
+def _assert_work_left_uncommitted(repo: Path) -> None:
+    assert commit_subjects(repo) == ["init"]
+    assert git(repo, "status", "--porcelain").strip() == "?? one.txt"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_later_failed_task_leaves_earlier_work_uncommitted(
+    git_repo: Path,
+) -> None:
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(RunError, match="task 2: Second failed"):
+        await run_loop(
+            _two_tasks(_WORK_ONCE),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    _assert_work_left_uncommitted(git_repo)
+    assert _saved_states(tasks_file)[0] == (COMPLETED, "")
+
+
+async def test_run_after_all_later_cancelled_task_leaves_earlier_work_uncommitted(
+    git_repo: Path, record: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK_ON", "block-second")
+    tasks_file = _task_file(git_repo)
+    task_list = TaskList(
+        shared=Shared(prompt="shared", gates=[_WORK_ONCE]),
+        tasks=[
+            Task(id=1, name="First", prompt="p1"),
+            Task(id=2, name="Second", prompt="block-second"),
+        ],
+    )
+    run = asyncio.ensure_future(
+        run_loop(
+            task_list,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+    )
+    await until(lambda: len(fake_claude_records(record)) == 2)
+
+    run.cancel()
+    with pytest.raises(RunCancelledError, match="task 2"):
+        await asyncio.wait_for(run, 10)
+
+    _assert_work_left_uncommitted(git_repo)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_cancel_during_the_final_commit_stops_the_run(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_nested_file(
+        _task_file(git_repo),
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
+    )
+
+    _, error = await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        CommitMode.RUN,
+    )
+
+    assert str(error) == "stopped during the final commit"
+    assert commit_subjects(git_repo) == ["init"]
+    assert list((git_repo / ".git").glob("*.lock")) == [], (
+        "git must be stopped politely so it removes its own lock"
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_outside_a_repository_never_commits(
+    git_repo: Path,
+) -> None:
+    await run_loop(
+        _gated_task(_work_gate("one.txt")),
+        _task_file(git_repo),
+        repo=None,
+        commit_mode=CommitMode.RUN,
+    )
+
+    assert commit_subjects(git_repo) == ["init"]
+    assert (git_repo / "one.txt").exists()
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_resumed_run_commits_only_the_tasks_that_ran(
+    git_repo: Path,
+) -> None:
+    resumed = _two_tasks(_NUMBERED)
+    resumed.tasks[0].state = COMPLETED
+    tasks_file = _task_file(git_repo)
+
+    await run_loop(
+        resumed,
+        tasks_file,
+        repo=await _open(tasks_file),
+        commit_mode=CommitMode.RUN,
+    )
+
+    assert commit_subjects(git_repo) == ["alr: 1 task completed", "init"]
+    assert git(git_repo, "log", "-1", "--format=%b").strip() == "2: Second"
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -767,7 +907,7 @@ async def test_run_after_all_with_every_task_completed_makes_no_commit(
     tasks_file = _task_file(git_repo)
 
     await run_loop(
-        done, tasks_file, repo=await _open(tasks_file), commit_mode=CommitMode.AFTER_ALL
+        done, tasks_file, repo=await _open(tasks_file), commit_mode=CommitMode.RUN
     )
 
     assert commit_subjects(git_repo) == ["init"]
@@ -784,7 +924,7 @@ async def test_run_after_all_commit_failure_stops_the_run(git_repo: Path) -> Non
             _two_tasks(_NUMBERED),
             tasks_file,
             repo=repo,
-            commit_mode=CommitMode.AFTER_ALL,
+            commit_mode=CommitMode.RUN,
         )
 
     assert commit_subjects(git_repo) == ["init"]

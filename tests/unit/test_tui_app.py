@@ -30,7 +30,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from alr.errors import RunLogError
+from alr.errors import RepoError, RunLogError
 from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
@@ -86,7 +86,10 @@ def _visible_settings(repo: Path) -> RunSettings:
     (repo / "visible").mkdir()
     tasks_file = write_file(repo / "visible" / "tasks.yaml", TASKS)
     return RunSettings(
-        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False
+        tasks_file=tasks_file,
+        permissions=Permissions.SKIP,
+        logging=False,
+        commit_mode=CommitMode.TASK,
     )
 
 
@@ -115,7 +118,7 @@ async def test_ready_enables_start(git_repo: Path) -> None:
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_a_clean_run_finishes_done_with_a_summary(git_repo: Path) -> None:
-    app = AlrApp(_settings(git_repo, WORKING_TASKS))
+    app = AlrApp(_settings(git_repo, WORKING_TASKS, commit_mode=CommitMode.TASK))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -235,7 +238,7 @@ async def test_ctrl_c_when_nothing_runs_quits(git_repo: Path) -> None:
 async def test_a_failed_check_on_start_shows_an_error_and_stays_ready(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo)
+    settings = _settings(git_repo, commit_mode=CommitMode.TASK)
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
     app = AlrApp(settings)
     async with app.run_test() as pilot:
@@ -459,6 +462,66 @@ async def test_logging_is_a_dropdown_with_on_and_off(git_repo: Path) -> None:
         assert options.option_count == 2
 
 
+async def test_commit_is_a_dropdown_with_none_per_task_and_after_all(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        assert app.query_one("#commit", Select).value is CommitMode.NONE
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter")
+        options = app.query_one("#commit SelectOverlay", OptionList)
+
+        assert [str(options.get_option_at_index(i).prompt) for i in range(3)] == [
+            "none",
+            "per task",
+            "after all",
+        ]
+        assert options.option_count == 3
+
+
+async def test_the_commit_dropdown_starts_from_the_flag(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
+    async with app.run_test():
+        await until(lambda: app.state is AppState.READY)
+
+        assert app.query_one("#commit", Select).value is CommitMode.TASK
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_none_run_in_a_dirty_repository_starts_and_commits_nothing(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, WORKING_TASKS))
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "done"
+        assert git(git_repo, "log", "--format=%s").split() == ["init"]
+
+
+async def test_switching_to_per_task_in_a_dirty_repository_is_refused(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "enter")
+        await until(lambda: app.settings.commit_mode is CommitMode.TASK)
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        assert app.state is AppState.READY
+        assert "clean work tree" in str(app.screen.query_one("#message").render())
+
+
 @pytest.fixture
 def outside_settings(outside: Path, monkeypatch: pytest.MonkeyPatch) -> RunSettings:
     """Settings for a run in a folder with no git repository around it."""
@@ -474,11 +537,11 @@ def outside_settings(outside: Path, monkeypatch: pytest.MonkeyPatch) -> RunSetti
 async def test_a_run_outside_a_repository_finishes_done_without_commits(
     outside: Path, outside_settings: RunSettings
 ) -> None:
+    outside_settings.commit_mode = CommitMode.TASK
     app = AlrApp(outside_settings)
     async with app.run_test() as pilot:
         await until(lambda: app.in_work_tree is not None)
 
-        assert app.query_one("#commit", Select).disabled
         assert app.query_one("#commit-note", Static).display
         assert "no git repository: nothing will be committed" in str(
             app.query_one("#commit-note", Static).render()
@@ -491,10 +554,37 @@ async def test_a_run_outside_a_repository_finishes_done_without_commits(
         assert not (outside / ".git").exists()
 
 
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_note_shows_for_after_all_outside_a_repository(
+    outside_settings: RunSettings,
+) -> None:
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "down", "enter")
+        await until(lambda: app.settings.commit_mode is CommitMode.RUN)
+
+        assert _note_shown(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_note_shows_when_the_settings_start_on_after_all(
+    outside_settings: RunSettings,
+) -> None:
+    outside_settings.commit_mode = CommitMode.RUN
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert _note_shown(app)
+
+
 async def test_a_run_inside_a_repository_keeps_the_commit_choice(
     git_repo: Path,
 ) -> None:
-    app = AlrApp(_settings(git_repo))
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
     async with app.run_test() as pilot:
         await until(lambda: app.in_work_tree is not None)
         await pilot.pause()
@@ -854,7 +944,7 @@ def closed_logs(monkeypatch: pytest.MonkeyPatch) -> list[RunLog]:
 
 
 def _logged_settings(repo: Path, tasks: str) -> RunSettings:
-    settings = _settings(repo, tasks)
+    settings = _settings(repo, tasks, commit_mode=CommitMode.TASK)
     settings.logging = True
     return settings
 
@@ -1071,8 +1161,8 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
         await until(lambda: app.state is AppState.READY)
 
         await _tab_to(app, pilot, "commit")
-        await pilot.press("enter", "down", "enter")
-        await until(lambda: app.settings.commit_mode is CommitMode.AFTER_ALL)
+        await pilot.press("enter", "down", "down", "enter")
+        await until(lambda: app.settings.commit_mode is CommitMode.RUN)
 
         await _tab_to(app, pilot, "logging")
         await pilot.press("enter", "down", "enter")
@@ -1081,6 +1171,19 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
         await _tab_to(app, pilot, "start")
         await pilot.press("enter")
         await until(lambda: app.state is not AppState.READY)
+
+
+async def test_a_run_event_that_arrives_after_the_app_stopped_is_ignored(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test():
+        await until(lambda: app.state is AppState.READY)
+
+    # Textual still delivers the messages queued before the exit, after it has
+    # taken the screens down; a run that was mid-flight posts them up to the end.
+    first = Task(id=1, name="First", prompt="p")
+    app.on_run_event(RunEvent(Activity(first, "late")))
 
 
 async def _tab_to(app: AlrApp, pilot: Pilot, widget_id: str) -> None:
@@ -1289,7 +1392,7 @@ def _dropdowns_disabled(app: AlrApp) -> tuple[bool, bool]:
 async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await until(lambda: app.in_work_tree is not None)
+        await until(lambda: app.state is AppState.READY)
         await pilot.pause()
 
         assert _dropdowns_disabled(app) == (False, False)
@@ -1301,21 +1404,211 @@ async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
         assert _dropdowns_disabled(app) == (True, True)
 
 
+async def test_the_dropdowns_are_disabled_while_running_and_enabled_after_a_failed_start(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def held_then_failing(settings: RunSettings) -> Prepared:
+        entered.set()
+        await release.wait()
+        raise OSError("gone")
+
+    monkeypatch.setattr(app_module, "prepare", held_then_failing)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        assert app.state is AppState.RUNNING
+        assert _dropdowns_disabled(app) == (True, True)
+
+        release.set()
+        await until(lambda: app.state is AppState.READY)
+
+        assert _dropdowns_disabled(app) == (False, False)
+
+
+def _note_shown(app: AlrApp) -> bool:
+    return app.query_one("#commit-note", Static).display
+
+
 @pytest.mark.usefixtures("fake_claude")
-async def test_the_commit_dropdown_stays_disabled_outside_a_repository(
+async def test_the_commit_note_follows_the_dropdown_outside_a_repository(
     outside_settings: RunSettings,
 ) -> None:
     app = AlrApp(outside_settings)
     async with app.run_test() as pilot:
-        await until(lambda: app.in_work_tree is not None)
         await until(lambda: app.state is AppState.READY)
 
-        assert _dropdowns_disabled(app) == (True, False)
+        assert not _note_shown(app)
+
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "enter")
+        await until(lambda: _note_shown(app))
+
+        await pilot.press("enter", "up", "enter")
+        await until(lambda: not _note_shown(app))
 
         await pilot.press("s")
         await _finished(app)
 
         assert _dropdowns_disabled(app) == (True, True)
+
+
+class _Lookups:
+    """A stand-in for the work-tree lookup that counts its calls and can be held open."""
+
+    def __init__(self, answer: str | None) -> None:
+        self.calls = 0
+        self.answer = answer
+        self.release = asyncio.Event()
+
+    async def hold(self) -> str | None:
+        self.calls += 1
+        await self.release.wait()
+        return self.answer
+
+    async def __call__(self) -> str | None:
+        self.calls += 1
+        return self.answer
+
+
+def _patch_lookup(monkeypatch: pytest.MonkeyPatch, answer: str | None) -> _Lookups:
+    lookups = _Lookups(answer)
+    monkeypatch.setattr(app_module, "work_tree_root", lookups)
+    return lookups
+
+
+async def _pick_commit(app: AlrApp, pilot: Pilot, *moves: str) -> None:
+    """Open the Commit dropdown, move from the current option by the given keys, then choose."""
+    await _tab_to(app, pilot, "commit")
+    await pilot.press("enter", *moves, "enter")
+
+
+async def test_none_never_looks_at_the_repository_inside_one(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, str(git_repo))
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.NONE))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert lookups.calls == 0
+        assert app.in_work_tree is None
+        assert not _note_shown(app)
+
+
+async def test_none_never_looks_at_the_repository_outside_one(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert lookups.calls == 0
+        assert not _note_shown(app)
+
+
+async def test_the_launch_lookup_runs_for_per_task_and_shows_the_note_outside(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    outside_settings.commit_mode = CommitMode.TASK
+    app = AlrApp(outside_settings)
+    async with app.run_test():
+        await until(lambda: app.in_work_tree is not None)
+
+        assert lookups.calls == 1
+        assert _note_shown(app)
+
+
+async def test_picking_per_task_outside_a_repository_looks_it_up_and_shows_the_note(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        assert lookups.calls == 0
+
+        await _pick_commit(app, pilot, "down")
+        await until(lambda: _note_shown(app))
+
+        assert lookups.calls == 1
+
+        await _pick_commit(app, pilot, "up")
+        await until(lambda: app.settings.commit_mode is CommitMode.NONE)
+
+        assert not _note_shown(app)
+
+
+async def test_a_lookup_finishing_after_the_switch_back_to_none_shows_no_note(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    monkeypatch.setattr(app_module, "work_tree_root", lookups.hold)
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _pick_commit(app, pilot, "down")
+        await until(lambda: lookups.calls == 1)
+        await _pick_commit(app, pilot, "up")
+        await until(lambda: app.settings.commit_mode is CommitMode.NONE)
+
+        lookups.release.set()
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert not _note_shown(app)
+
+
+async def test_a_failing_lookup_does_not_crash_the_view(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken() -> str | None:
+        raise RepoError("--commit: git rev-parse: boom")
+
+    monkeypatch.setattr(app_module, "work_tree_root", broken)
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert app.in_work_tree is None
+        assert not _note_shown(app)
+
+
+async def test_the_commit_note_stays_hidden_inside_a_repository_with_per_task(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
+    async with app.run_test() as pilot:
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert app.in_work_tree is True
+        assert not _note_shown(app)
+
+
+async def test_the_commit_note_stays_hidden_inside_a_repository_after_picking_after_all(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _pick_commit(app, pilot, "down", "down")
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert app.settings.commit_mode is CommitMode.RUN
+        assert not _note_shown(app)
 
 
 MENU = ["folder", "permissions", "gates", "reset", "tasks", "sandbox", "quit"]

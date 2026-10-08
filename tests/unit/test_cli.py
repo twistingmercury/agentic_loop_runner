@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import os
+import platform
+import re
 import signal
 import sys
 import time
@@ -124,6 +126,20 @@ def test_version_prints_one_line(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert out.startswith("alr version: ")
     assert out.count("\n") == 1
+    assert re.fullmatch(r"alr version: \S+ [a-z]+/\S+\n", out)
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "expected"),
+    [("Linux", "x86_64", "linux/x86_64"), ("Darwin", "arm64", "darwin/arm64")],
+)
+def test_version_line_shows_os_and_arch(
+    monkeypatch: pytest.MonkeyPatch, system: str, machine: str, expected: str
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: system)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+
+    assert cli._version_line().endswith(f" {expected}")
 
 
 def test_missing_required_flags_are_each_named(
@@ -330,7 +346,7 @@ def test_a_second_signal_does_not_leave_git_running(
     hook.write_text(f"#!/bin/sh\ntrap '' TERM\necho $$ > '{ready}'\nexec sleep 60\n")
     hook.chmod(0o700)
 
-    process = start_alr("-d", str(tasks_file.parent), "--yolo", "--commit")
+    process = start_alr("-d", str(tasks_file.parent), "--yolo", "--commit", "task")
     hook_pid = 0
     try:
         hook_pid = int(wait_for_file(ready))
@@ -351,22 +367,32 @@ def test_a_second_signal_does_not_leave_git_running(
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
 
 
-@pytest.fixture
-def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Capture the session flags a real run starts with, without running it."""
-    seen: list[list[str]] = []
+def _capture_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[list[str]], list[CommitMode]]:
+    """Replace the real run with one that records its session flags and commit mode."""
+    sessions: list[list[str]] = []
+    modes: list[CommitMode] = []
 
     async def fake_start(
         tasks_file: str,
         gate_timeout: str,
         session: list[str],
-        commit: CommitMode | None,
+        commit: CommitMode,
         reset_failed: bool,
         sandbox_settings: str = "",
     ) -> None:
-        seen.append(session)
+        sessions.append(session)
+        modes.append(commit)
 
     monkeypatch.setattr(cli, "start", fake_start)
+    return sessions, modes
+
+
+@pytest.fixture
+def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Capture the session flags a real run starts with, without running it."""
+    seen, _ = _capture_start(monkeypatch)
     return seen
 
 
@@ -462,34 +488,86 @@ def test_dry_run_names_the_folders_sandbox_json(
     assert f"sandbox settings: {folder}/sandbox.json" in capsys.readouterr().out
 
 
-def test_commit_and_commit_after_all_together_exit_1(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
+@pytest.mark.parametrize(
+    ("flags", "want"),
+    [
+        ([], CommitMode.NONE),
+        (["--commit", "none"], CommitMode.NONE),
+        (["--commit", "task"], CommitMode.TASK),
+        (["--commit", "run"], CommitMode.RUN),
+    ],
+)
+def test_commit_flag_maps_to_a_mode(flags: list[str], want: CommitMode) -> None:
+    args = cli._parser().parse_args(flags)
+
+    assert CommitMode(args.commit) is want
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [["--commit-after-all"], ["--commit"], ["--commit", "sometimes"]],
+    ids=["old flag", "bare", "bad value"],
+)
+def test_bad_commit_forms_are_usage_errors(flags: list[str]) -> None:
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["--yolo", *flags])
+
+    assert caught.value.code == 2
+
+
+def test_a_bad_commit_value_lists_the_choices(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (tmp_path / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+    with pytest.raises(SystemExit):
+        cli.main(["--commit", "sometimes"])
 
-    code = cli.main(["-d", str(tmp_path), "--yolo", "--commit", "--commit-after-all"])
-
-    assert code == 1
-    assert (
-        "--commit and --commit-after-all cannot be used together"
-        in capsys.readouterr().err
-    )
+    assert "(choose from none, task, run)" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     ("flags", "want"),
     [
-        ([], None),
-        (["--commit"], CommitMode.PER_TASK),
-        (["--commit-after-all"], CommitMode.AFTER_ALL),
+        ([], CommitMode.NONE),
+        (["--commit", "task"], CommitMode.TASK),
+        (["--commit", "run"], CommitMode.RUN),
     ],
 )
-def test_check_commit_flags_maps_the_flags_to_a_mode(
-    flags: list[str], want: CommitMode | None
+def test_plain_start_gets_the_commit_mode(
+    flags: list[str], want: CommitMode, monkeypatch: pytest.MonkeyPatch, folder: Path
 ) -> None:
-    args = cli._parser().parse_args(flags)
+    _, modes = _capture_start(monkeypatch)
 
-    assert cli.check_commit_flags(args.commit, args.commit_after_all) is want
+    assert cli.main(["-d", str(folder), "--yolo", "--plain", *flags]) == 0
+    assert modes == [want]
+
+
+def test_dry_run_with_commit_task_reports_the_commit_checks(
+    git_repo: Path, outside: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (outside / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+
+    assert cli.main(["-d", str(outside), "--dry-run", "--commit", "task"]) == 0
+    assert f"commit: {git_repo}" in capsys.readouterr().out
+
+
+def test_dry_run_without_commit_does_not_consult_git(
+    git_repo: Path, outside: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (outside / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+
+    assert cli.main(["-d", str(outside), "--dry-run"]) == 0
+    assert "commit:" not in capsys.readouterr().out
+
+
+def test_help_shows_commit_and_not_commit_after_all(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    out = capsys.readouterr().out
+    assert "--commit" in out
+    assert "--commit-after-all" not in out
 
 
 @pytest.mark.parametrize(
@@ -529,17 +607,17 @@ def test_the_view_gets_the_resolved_flags(
     seen = _capture_view(monkeypatch)
     _add_sandbox(folder)
 
-    code = cli.main(["-d", str(folder), "--commit-after-all", "--gate-timeout", "5m"])
+    code = cli.main(["-d", str(folder), "--commit", "run", "--gate-timeout", "5m"])
 
     assert code == 0
     assert seen[0].tasks_file == str(folder / "tasks.yaml")
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == str(folder / "sandbox.json")
-    assert seen[0].commit_mode is CommitMode.AFTER_ALL
+    assert seen[0].commit_mode is CommitMode.RUN
     assert seen[0].gate_timeout == "5m"
 
 
-def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
+def test_the_view_defaults_to_no_commit_and_takes_skip(
     monkeypatch: pytest.MonkeyPatch, folder: Path
 ) -> None:
     seen = _capture_view(monkeypatch)
@@ -548,7 +626,7 @@ def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
 
     assert code == 0
     assert seen[0].permissions is Permissions.SKIP
-    assert seen[0].commit_mode is CommitMode.PER_TASK
+    assert seen[0].commit_mode is CommitMode.NONE
 
 
 def test_the_view_asks_for_a_missing_dir_flag(

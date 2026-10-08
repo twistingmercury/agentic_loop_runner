@@ -4,9 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from helpers import write_file
+from helpers import write_file, write_nested_file
 
-from alr.engine.commit import CommitMode
+from alr.engine.commit import CommitMode, Repo, find_repo
 from alr.errors import RepoError, RunLogError, TaskFileError
 from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
@@ -32,9 +32,9 @@ def _settings(repo: Path, **changes: object) -> RunSettings:
 
 
 async def test_prepare_returns_the_options_for_a_valid_setup(git_repo: Path) -> None:
-    prepared = await prepare(_settings(git_repo, commit_mode=CommitMode.AFTER_ALL))
+    prepared = await prepare(_settings(git_repo, commit_mode=CommitMode.RUN))
 
-    assert prepared.options.commit_mode is CommitMode.AFTER_ALL
+    assert prepared.options.commit_mode is CommitMode.RUN
     assert prepared.options.repo is not None
     assert prepared.log is None
 
@@ -52,12 +52,25 @@ def _outside_settings(
     return replace(settings, **changes)
 
 
+@pytest.mark.parametrize("mode", list(CommitMode))
 async def test_prepare_outside_a_repository_runs_without_commits(
-    outside: Path, monkeypatch: pytest.MonkeyPatch
+    outside: Path, monkeypatch: pytest.MonkeyPatch, mode: CommitMode
 ) -> None:
-    prepared = await prepare(_outside_settings(outside, monkeypatch))
+    looked_up: list[str] = []
+
+    async def spy(tasks_file: str) -> Repo | None:
+        looked_up.append(tasks_file)
+        return await find_repo(tasks_file)
+
+    monkeypatch.setattr(prepare_module, "find_repo", spy)
+    settings = _outside_settings(outside, monkeypatch, commit_mode=mode)
+
+    prepared = await prepare(settings)
 
     assert prepared.options.repo is None
+    assert prepared.options.commit_mode is mode
+    # Only a mode that commits looks for the repository; with none git is never touched.
+    assert bool(looked_up) is (mode is not CommitMode.NONE)
 
 
 async def test_prepare_outside_a_repository_records_that_nothing_commits(
@@ -72,10 +85,26 @@ async def test_prepare_outside_a_repository_records_that_nothing_commits(
     assert '"commit":false' in ledger.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_prepare_outside_a_repository_records_false_even_when_a_mode_asks(
+    outside: Path, monkeypatch: pytest.MonkeyPatch, mode: CommitMode
+) -> None:
+    # Pins the current behavior: the view logs whether a repository exists, while
+    # plain mode logs whether the mode asks, so the two differ outside a work tree.
+    settings = _outside_settings(outside, monkeypatch, logging=True, commit_mode=mode)
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    ledger = next((outside / "logs").glob("*/run.jsonl"))
+    assert '"commit":false' in ledger.read_text(encoding="utf-8")
+
+
 async def test_prepare_in_a_repository_records_that_commits_happen(
     git_repo: Path,
 ) -> None:
-    prepared = await prepare(_settings(git_repo, logging=True))
+    settings = _settings(git_repo, logging=True, commit_mode=CommitMode.TASK)
+    prepared = await prepare(settings)
     prepared.close()
 
     ledger = next((git_repo / "run" / "logs").glob("*/run.jsonl"))
@@ -85,7 +114,9 @@ async def test_prepare_in_a_repository_records_that_commits_happen(
 async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    settings = _settings(
+        git_repo, gates=[Gate(cmd="true")], commit_mode=CommitMode.TASK
+    )
     before = Path(settings.tasks_file).read_text(encoding="utf-8")
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
 
@@ -93,6 +124,50 @@ async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
         await prepare(settings)
 
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == before
+
+
+def _visible_settings(git_repo: Path, **changes: object) -> RunSettings:
+    """Settings whose task file is ignored while its log folder, beside it, is not."""
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", TASKS))
+    settings = RunSettings(
+        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=True
+    )
+    return replace(settings, **changes)
+
+
+async def test_prepare_tells_a_tree_dirty_only_with_its_log_folder_to_ignore_it(
+    git_repo: Path,
+) -> None:
+    settings = _visible_settings(git_repo)
+    # A default-mode run leaves its untracked log folder behind.
+    (await prepare(settings)).close()
+    settings = replace(settings, commit_mode=CommitMode.TASK)
+
+    with pytest.raises(RepoError, match="not ignored by git") as caught:
+        await prepare(settings)
+
+    assert "clean work tree" not in str(caught.value)
+
+
+async def test_prepare_with_another_dirty_file_still_reports_the_dirty_tree(
+    git_repo: Path,
+) -> None:
+    settings = _visible_settings(git_repo, commit_mode=CommitMode.TASK, logging=False)
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(RepoError, match="clean work tree"):
+        await prepare(settings)
+
+
+async def test_prepare_with_none_never_opens_the_repository(git_repo: Path) -> None:
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+
+    prepared = await prepare(_settings(git_repo, commit_mode=CommitMode.NONE))
+
+    assert prepared.options.repo is None
+    assert prepared.options.commit_mode is CommitMode.NONE
 
 
 async def test_prepare_saves_edited_gates_once_every_check_passes(
@@ -115,7 +190,10 @@ async def test_prepare_log_folder_git_can_see_is_an_error(git_repo: Path) -> Non
     (git_repo / "visible").mkdir()
     tasks_file = write_file(git_repo / "visible" / "tasks.yaml", TASKS)
     settings = RunSettings(
-        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=True
+        tasks_file=tasks_file,
+        permissions=Permissions.SKIP,
+        logging=True,
+        commit_mode=CommitMode.TASK,
     )
 
     with pytest.raises(RepoError, match="add it to .gitignore"):

@@ -16,6 +16,7 @@ from helpers import (
 
 from alr import tasks
 from alr.engine import loop
+from alr.engine.commit import CommitMode
 from alr.errors import (
     FailedTasksError,
     RunError,
@@ -43,6 +44,10 @@ TWO_PENDING_YAML = (
     "  - {id: 1, name: First, prompt: p1, state: pending}\n"
     "  - {id: 2, name: Second, prompt: p2, state: pending}\n"
 )
+
+
+def test_run_options_default_to_never_committing() -> None:
+    assert loop.RunOptions("tasks.yaml", "", []).commit_mode is CommitMode.NONE
 
 
 async def _wait_until(condition: Callable[[], bool], what: str) -> None:

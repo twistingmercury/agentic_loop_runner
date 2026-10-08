@@ -25,22 +25,48 @@ async def start(
     stderr: int | None = None,
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
+    gentle: bool = False,
 ) -> asyncio.subprocess.Process:
     """Start argv in its own process group, so a stop reaches everything it spawns.
 
     Because the child leaves alr's foreground process group, a terminal Ctrl-C
     reaches only alr. Cancelling finish is what stops the child; nothing may
     rely on the child receiving SIGINT itself.
+    A cancel that lands while the child is still being created is handled like
+    a cancel of finish: the spawn is let to complete, the whole group is
+    stopped (with SIGTERM first when gentle, as for finish), and the
+    cancellation carries on. An OSError from the spawn propagates unchanged.
     """
-    return await asyncio.create_subprocess_exec(
-        *argv,
-        stdin=stdin,
-        stdout=stdout,
-        stderr=stderr,
-        cwd=cwd,
-        env=env,
-        process_group=0,
+    spawn = asyncio.ensure_future(
+        asyncio.create_subprocess_exec(
+            *argv,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            cwd=cwd,
+            env=env,
+            process_group=0,
+        )
     )
+    try:
+        # Shielded, because asyncio would otherwise cancel the spawn by killing
+        # only the leader with SIGKILL: no SIGTERM, and its children left alone.
+        return await asyncio.shield(spawn)
+    except asyncio.CancelledError:
+        await asyncio.shield(_stop_spawned(spawn, gentle))
+        raise
+
+
+async def _stop_spawned(
+    spawn: asyncio.Future[asyncio.subprocess.Process], gentle: bool
+) -> None:
+    """Wait for a spawn whose caller was cancelled, then stop the group it made."""
+    [outcome] = await asyncio.gather(spawn, return_exceptions=True)
+    if isinstance(outcome, BaseException):
+        # No process exists; the caller's cancellation is what carries on.
+        return
+
+    await _stop_group(outcome, gentle)
 
 
 async def finish(
@@ -183,6 +209,7 @@ async def capture(
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
         env=env,
+        gentle=gentle,
     )
     stdout, stderr = bytearray(), bytearray()
     returncode = await _run_to_exit(

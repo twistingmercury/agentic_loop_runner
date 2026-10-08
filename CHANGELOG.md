@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--commit` takes `none`, `task`, or `run` and defaults to `none`: `task`
+  commits each completed task, and `run` makes one commit after the last task.
+- The full-screen view's Commit dropdown gets a `none` option and defaults to
+  it, where it used to default to per task. It starts from `--commit`.
+- The `run` commit subject says `alr: 1 task completed` for one task, not
+  `1 tasks`.
+- A committing run whose only dirt is its own log folder now says the log folder
+  must be ignored, instead of that the tree is dirty.
+- `--version` also shows the OS and architecture, such as
+  `alr version: 0.0.9 linux/x86_64`.
+
+### Removed
+
+- `--commit-after-all`; use `--commit run`.
+- `--commit` without a value; use `--commit task`.
+
 ## [0.0.9] - 2026-10-08
 
 ### Changed

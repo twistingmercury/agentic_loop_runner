@@ -6,7 +6,7 @@ from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from alr.engine.commit import CommitMode, Repo, check_log_dir
+from alr.engine.commit import CommitMode, Repo
 from alr.engine.loop import RunOptions, reset_failed, run
 from alr.errors import (
     RunCancelledError,
@@ -23,7 +23,7 @@ async def start(
     tasks_file: str,
     gate_timeout: str,
     session_args: Sequence[str],
-    commit: CommitMode | None,
+    commit: CommitMode,
     reset: bool = False,
     sandbox_settings: str = "",
 ) -> None:
@@ -41,10 +41,10 @@ async def start(
         # A FailedTasksError is not one, so it passes through without the prefix.
         raise type(exc)(f"failed to start loop runner: {exc}") from exc
 
-    repo = await repo_for(sys.stdout, tasks_file, commit is not None)
+    commits = commit is not CommitMode.NONE
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
-    await check_log_dir(repo, str(path))
-    info = _info(tasks_file, gate_timeout, sandbox_settings, commit is not None)
+    repo = await repo_for(sys.stdout, tasks_file, commits, str(path))
+    info = _info(tasks_file, gate_timeout, sandbox_settings, commits)
     log = RunLog.open(path, info)
     try:
         await _run_logged(
@@ -73,7 +73,7 @@ async def _run_logged(
     gate_timeout: str,
     session_args: Sequence[str],
     repo: Repo | None,
-    commit: CommitMode | None,
+    commit: CommitMode,
     log: RunLog,
 ) -> None:
     options = RunOptions(
@@ -81,7 +81,7 @@ async def _run_logged(
         gate_timeout=gate_timeout,
         session_args=session_args,
         repo=repo,
-        commit_mode=commit or CommitMode.PER_TASK,
+        commit_mode=commit,
     )
     try:
         await run(task_list, options, PlainFrontEnd(record=log.record))
