@@ -730,7 +730,7 @@ async def test_run_after_all_makes_one_commit_listing_every_task(
         _two_tasks(_NUMBERED),
         tasks_file,
         repo=await _open(tasks_file),
-        commit_mode=CommitMode.AFTER_ALL,
+        commit_mode=CommitMode.RUN,
     )
 
     assert commit_subjects(git_repo) == ["alr: 2 tasks completed", "init"]
@@ -742,6 +742,22 @@ async def test_run_after_all_makes_one_commit_listing_every_task(
 
 
 @pytest.mark.usefixtures("fake_claude")
+async def test_run_with_mode_none_makes_no_commit_even_with_a_repo(
+    git_repo: Path,
+) -> None:
+    tasks_file = _task_file(git_repo)
+
+    await run_loop(
+        _two_tasks(_NUMBERED),
+        tasks_file,
+        repo=await _open(tasks_file),
+        commit_mode=CommitMode.NONE,
+    )
+
+    assert commit_subjects(git_repo) == ["init"]
+
+
+@pytest.mark.usefixtures("fake_claude")
 async def test_run_after_all_failed_task_makes_no_commit(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -750,9 +766,7 @@ async def test_run_after_all_failed_task_makes_no_commit(
     repo = await _open(tasks_file)
 
     with pytest.raises(RunError, match="nope"):
-        await run_loop(
-            _two_tasks(), tasks_file, repo=repo, commit_mode=CommitMode.AFTER_ALL
-        )
+        await run_loop(_two_tasks(), tasks_file, repo=repo, commit_mode=CommitMode.RUN)
 
     assert commit_subjects(git_repo) == ["init"]
 
@@ -767,7 +781,7 @@ async def test_run_after_all_with_every_task_completed_makes_no_commit(
     tasks_file = _task_file(git_repo)
 
     await run_loop(
-        done, tasks_file, repo=await _open(tasks_file), commit_mode=CommitMode.AFTER_ALL
+        done, tasks_file, repo=await _open(tasks_file), commit_mode=CommitMode.RUN
     )
 
     assert commit_subjects(git_repo) == ["init"]
@@ -784,7 +798,7 @@ async def test_run_after_all_commit_failure_stops_the_run(git_repo: Path) -> Non
             _two_tasks(_NUMBERED),
             tasks_file,
             repo=repo,
-            commit_mode=CommitMode.AFTER_ALL,
+            commit_mode=CommitMode.RUN,
         )
 
     assert commit_subjects(git_repo) == ["init"]

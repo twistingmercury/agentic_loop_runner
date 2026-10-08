@@ -49,10 +49,10 @@ class RunOptions:
     """The Claude flags that set what a session may do."""
 
     repo: Repo | None = None
-    """Where each completed task is committed; None for a run without --commit."""
+    """Where completed work is committed; None for a run without a repository."""
 
-    commit_mode: CommitMode = CommitMode.PER_TASK
-    """When the repo is committed into: after each task, or once after the last."""
+    commit_mode: CommitMode = CommitMode.NONE
+    """When the repo is committed into: never, after each task, or once after the last."""
 
 
 def read_tasks(path: str) -> TaskList:
@@ -148,7 +148,7 @@ async def _commit_after_all(
     ran: Sequence[Task], options: RunOptions, front_end: FrontEnd
 ) -> None:
     """Commit the whole run once; a failed run never gets here, so its work stays in the tree."""
-    if options.repo is None or options.commit_mode is not CommitMode.AFTER_ALL:
+    if options.repo is None or options.commit_mode is not CommitMode.RUN:
         return
 
     if not ran:
@@ -212,7 +212,7 @@ async def _run_task(
     state, error = await run_gates(
         replace(task), gates, options.gate_timeout, front_end
     )
-    per_task = options.commit_mode is CommitMode.PER_TASK
+    per_task = options.commit_mode is CommitMode.TASK
     if state != COMPLETED or options.repo is None or not per_task:
         return state, error
 

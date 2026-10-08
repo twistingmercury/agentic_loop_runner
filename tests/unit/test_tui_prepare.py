@@ -32,9 +32,9 @@ def _settings(repo: Path, **changes: object) -> RunSettings:
 
 
 async def test_prepare_returns_the_options_for_a_valid_setup(git_repo: Path) -> None:
-    prepared = await prepare(_settings(git_repo, commit_mode=CommitMode.AFTER_ALL))
+    prepared = await prepare(_settings(git_repo, commit_mode=CommitMode.RUN))
 
-    assert prepared.options.commit_mode is CommitMode.AFTER_ALL
+    assert prepared.options.commit_mode is CommitMode.RUN
     assert prepared.options.repo is not None
     assert prepared.log is None
 

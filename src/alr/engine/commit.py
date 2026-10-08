@@ -18,10 +18,11 @@ _NOT_A_REPO = ("not a git repository", "must be run in a work tree")
 
 
 class CommitMode(StrEnum):
-    """When a run commits: after each completed task, or once after the last one."""
+    """When a run commits: never, after each completed task, or once after the last one."""
 
-    PER_TASK = "per_task"
-    AFTER_ALL = "after_all"
+    NONE = "none"
+    TASK = "task"
+    RUN = "run"
 
 
 @dataclass(frozen=True)

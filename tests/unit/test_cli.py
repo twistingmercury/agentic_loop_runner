@@ -360,7 +360,7 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         tasks_file: str,
         gate_timeout: str,
         session: list[str],
-        commit: CommitMode | None,
+        commit: CommitMode,
         reset_failed: bool,
         sandbox_settings: str = "",
     ) -> None:
@@ -479,13 +479,13 @@ def test_commit_and_commit_after_all_together_exit_1(
 @pytest.mark.parametrize(
     ("flags", "want"),
     [
-        ([], None),
-        (["--commit"], CommitMode.PER_TASK),
-        (["--commit-after-all"], CommitMode.AFTER_ALL),
+        ([], CommitMode.NONE),
+        (["--commit"], CommitMode.TASK),
+        (["--commit-after-all"], CommitMode.RUN),
     ],
 )
 def test_check_commit_flags_maps_the_flags_to_a_mode(
-    flags: list[str], want: CommitMode | None
+    flags: list[str], want: CommitMode
 ) -> None:
     args = cli._parser().parse_args(flags)
 
@@ -535,7 +535,7 @@ def test_the_view_gets_the_resolved_flags(
     assert seen[0].tasks_file == str(folder / "tasks.yaml")
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == str(folder / "sandbox.json")
-    assert seen[0].commit_mode is CommitMode.AFTER_ALL
+    assert seen[0].commit_mode is CommitMode.RUN
     assert seen[0].gate_timeout == "5m"
 
 
@@ -548,7 +548,7 @@ def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
 
     assert code == 0
     assert seen[0].permissions is Permissions.SKIP
-    assert seen[0].commit_mode is CommitMode.PER_TASK
+    assert seen[0].commit_mode is CommitMode.TASK
 
 
 def test_the_view_asks_for_a_missing_dir_flag(

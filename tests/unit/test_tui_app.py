@@ -1072,7 +1072,7 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
 
         await _tab_to(app, pilot, "commit")
         await pilot.press("enter", "down", "enter")
-        await until(lambda: app.settings.commit_mode is CommitMode.AFTER_ALL)
+        await until(lambda: app.settings.commit_mode is CommitMode.RUN)
 
         await _tab_to(app, pilot, "logging")
         await pilot.press("enter", "down", "enter")

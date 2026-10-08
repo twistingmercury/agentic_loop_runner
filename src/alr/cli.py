@@ -73,7 +73,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
                 tasks_file,
                 gate_timeout,
                 sandbox_settings,
-                commit_mode is not None,
+                commit_mode is not CommitMode.NONE,
             )
         )
 
@@ -117,7 +117,9 @@ def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> 
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
         permissions=_permissions(sandbox_file, args.yolo),
-        commit_mode=commit_mode or CommitMode.PER_TASK,
+        commit_mode=commit_mode
+        if commit_mode is not CommitMode.NONE
+        else CommitMode.TASK,
         gate_timeout=args.gate_timeout or "",
         reset_failed=args.reset_failed,
     )
@@ -242,15 +244,15 @@ def check_gate_timeout(value: str) -> None:
         raise UsageError(f"--gate-timeout: {exc}") from exc
 
 
-def check_commit_flags(commit: bool, after_all: bool) -> CommitMode | None:
+def check_commit_flags(commit: bool, after_all: bool) -> CommitMode:
     """Turn the two commit flags into the mode they ask for; asking for both is an error."""
     if commit and after_all:
         raise UsageError("--commit and --commit-after-all cannot be used together")
 
     if after_all:
-        return CommitMode.AFTER_ALL
+        return CommitMode.RUN
 
-    return CommitMode.PER_TASK if commit else None
+    return CommitMode.TASK if commit else CommitMode.NONE
 
 
 def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:

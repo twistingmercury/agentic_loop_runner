@@ -82,7 +82,7 @@ async def run_loop(
     session_args: list[str] | None = None,
     repo: Repo | None = None,
     front_end: FrontEnd | None = None,
-    commit_mode: CommitMode = CommitMode.PER_TASK,
+    commit_mode: CommitMode = CommitMode.TASK,
 ) -> None:
     """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(

@@ -55,7 +55,7 @@ def _calls(record: Path) -> int:
 
 async def _start(
     tasks_file: str,
-    commit: CommitMode | None = None,
+    commit: CommitMode = CommitMode.NONE,
     reset_failed: bool = False,
     sandbox_settings: str = "",
 ) -> None:
@@ -180,7 +180,7 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     with pytest.raises(RepoError) as caught:
-        await _start(tasks_file, commit=CommitMode.PER_TASK)
+        await _start(tasks_file, commit=CommitMode.TASK)
 
     assert "--commit needs a clean work tree" in str(caught.value)
     assert _calls(record) == 0, "claude must not run"
@@ -197,7 +197,7 @@ async def test_start_commit_flag_commits_the_task(
         "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
-    await _start(tasks_file, commit=CommitMode.PER_TASK)
+    await _start(tasks_file, commit=CommitMode.TASK)
 
     assert commit_subjects(git_repo) == ["First", "init"]
 
@@ -221,7 +221,7 @@ async def test_start_after_all_mode_makes_one_commit_for_the_run(
         "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
-    await _start(tasks_file, commit=CommitMode.AFTER_ALL)
+    await _start(tasks_file, commit=CommitMode.RUN)
 
     assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]
 
@@ -270,7 +270,7 @@ async def test_start_logs_that_the_run_commits(
 ) -> None:
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
-    await _start(tasks_file, commit=CommitMode.PER_TASK)
+    await _start(tasks_file, commit=CommitMode.TASK)
 
     assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
 
@@ -284,7 +284,7 @@ async def test_start_commit_refuses_a_log_folder_git_can_see(
     tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
 
     with pytest.raises(RepoError, match="log directory"):
-        await _start(tasks_file, commit=CommitMode.PER_TASK)
+        await _start(tasks_file, commit=CommitMode.TASK)
 
     assert _calls(record) == 0, "claude must not run"
     assert not (git_repo / "work" / "logs").exists()
@@ -295,7 +295,7 @@ async def test_start_commit_accepts_a_log_folder_git_ignores(
 ) -> None:
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", ONE_TASK_YAML)
 
-    await _start(tasks_file, commit=CommitMode.PER_TASK)
+    await _start(tasks_file, commit=CommitMode.TASK)
 
     assert (git_repo / "run" / "logs").is_dir()
 

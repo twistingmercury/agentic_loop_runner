@@ -126,8 +126,8 @@ class AlrApp(App[None]):
                     yield Static("Commit:", id="commit-label", classes="field")
                     yield Select(
                         [
-                            ("per task", CommitMode.PER_TASK),
-                            ("after all", CommitMode.AFTER_ALL),
+                            ("per task", CommitMode.TASK),
+                            ("after all", CommitMode.RUN),
                         ],
                         value=self.settings.commit_mode,
                         allow_blank=False,
