@@ -119,8 +119,13 @@ class PlainFrontEnd:
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)
 
+        # Bounded: a gate's or git's own exit is its result, so a descendant
+        # that outlives it and holds the pipes must not hold up the run.
         return await proc.finish(
-            process, _pump_outputs(process, self._raw_line(task)), gentle=gentle
+            process,
+            _pump_outputs(process, self._raw_line(task)),
+            gentle=gentle,
+            bounded=True,
         )
 
     def _raw_line(self, task: Task) -> Callable[[bytes], None]:

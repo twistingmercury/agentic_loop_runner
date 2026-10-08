@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import wait_for_text, wait_until_gone
+from helpers import kill_holder_and_let_pipes_close, wait_for_text, wait_until_gone
 
 from alr.engine import proc
 
@@ -117,13 +117,6 @@ async def test_finish_stops_the_group_when_the_drain_fails(tmp_path: Path) -> No
     await wait_until_gone(int(pid_file.read_text()))
 
 
-async def _kill_holder_and_let_pipes_close(pid_file: Path) -> None:
-    os.kill(int(pid_file.read_text()), signal.SIGKILL)
-    # Closing the pipes lets asyncio finish with the transport; one left open
-    # would only be cleaned up after the loop is gone, with a warning.
-    await asyncio.sleep(0.05)
-
-
 async def test_gentle_finish_cuts_off_a_drain_held_open_by_a_background_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -143,11 +136,112 @@ async def test_gentle_finish_cuts_off_a_drain_held_open_by_a_background_process(
         )
         elapsed = time.monotonic() - started
     finally:
-        await _kill_holder_and_let_pipes_close(pid_file)
+        await kill_holder_and_let_pipes_close(pid_file)
 
     assert result is None
     assert lines == [b"line\n"]
     assert elapsed < 2
+
+
+async def test_bounded_finish_cuts_off_a_drain_held_open_by_a_background_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "holder.pid"
+    process = await proc.start(
+        ["sh", "-c", f"sleep 30 & echo $! > {pid_file}; echo line; exit 3"],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+    started = time.monotonic()
+
+    try:
+        result = await proc.finish(
+            process, proc.read_lines(process.stdout, lines.append), bounded=True
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    assert result == "exit status 3"
+    assert lines == [b"line\n"]
+    assert 0.2 <= elapsed < 2
+
+
+async def test_bounded_finish_cuts_off_a_drain_held_open_by_an_escaped_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "escaped.pid"
+    # setsid takes the sleeper out of the group, so nothing but the grace
+    # period can end the drain.
+    process = await proc.start(
+        [
+            "sh",
+            "-c",
+            f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & echo line",
+        ],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+
+    try:
+        result = await asyncio.wait_for(
+            proc.finish(
+                process, proc.read_lines(process.stdout, lines.append), bounded=True
+            ),
+            5,
+        )
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    assert result is None
+    assert lines == [b"line\n"]
+
+
+async def test_unbounded_finish_waits_for_a_drain_held_open_by_a_background_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "holder.pid"
+    process = await proc.start(
+        ["sh", "-c", f"sleep 30 & echo $! > {pid_file}; echo line"],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+    waiter = asyncio.ensure_future(
+        proc.finish(process, proc.read_lines(process.stdout, lines.append))
+    )
+
+    try:
+        # Well past the grace period a bounded finish would have given up after.
+        done, _ = await asyncio.wait({waiter}, timeout=0.6)
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+        await asyncio.gather(waiter, return_exceptions=True)
+
+    assert not done, "a session's output must be read to the end"
+    assert lines == [b"line\n"]
+
+
+async def test_bounded_cancel_stops_the_group_without_sigterm(
+    tmp_path: Path,
+) -> None:
+    ready, stopped = tmp_path / "ready", tmp_path / "stopped"
+    script = f"trap 'echo bye > {stopped}; exit 0' TERM; echo ready > {ready}; sleep 60 & wait"
+    process = await proc.start(["sh", "-c", script])
+    waiter = asyncio.ensure_future(proc.finish(process, bounded=True))
+    await wait_for_text(ready)
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    assert process.returncode == -signal.SIGKILL
+    assert not stopped.exists(), "only gentle sends SIGTERM first"
 
 
 async def test_cancel_returns_when_an_escaped_descendant_holds_the_pipe(
@@ -180,7 +274,7 @@ async def test_cancel_returns_when_an_escaped_descendant_holds_the_pipe(
         # not hold up the suite.
         done, _ = await asyncio.wait({waiter}, timeout=1)
     finally:
-        await _kill_holder_and_let_pipes_close(pid_file)
+        await kill_holder_and_let_pipes_close(pid_file)
         await asyncio.gather(waiter, return_exceptions=True)
 
     assert done, "the stop waited for the escaped descendant to close the pipe"

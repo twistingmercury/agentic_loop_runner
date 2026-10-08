@@ -2,11 +2,13 @@
 
 import asyncio
 import sys
+import time
 from pathlib import Path
 
 import pytest
-from helpers import git, run_loop, wait_for_text
+from helpers import git, kill_holder_and_let_pipes_close, run_loop, wait_for_text
 
+from alr.engine import proc
 from alr.engine.commit import open_repo
 from alr.errors import RunError
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
@@ -343,3 +345,51 @@ async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_
     assert chunks[0][-1:] == b"\xc3"
     assert capsysbinary.readouterr().out == line
     assert b"".join(chunks) == line
+
+
+async def test_a_gate_that_exits_while_a_background_process_holds_its_pipes_returns_after_the_grace_period(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "holder.pid"
+    gate = Gate(cmd=f"sleep 30 & echo $! > {pid_file}; echo hi")
+    started = time.monotonic()
+
+    try:
+        events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", gate), 10)
+        elapsed = time.monotonic() - started
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    assert "hi" in _lines(events)
+    assert elapsed < 5
+    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    assert finished.error is None
+
+
+async def test_a_gate_that_exited_in_time_does_not_time_out_on_an_escaped_descendant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "escaped.pid"
+    # setsid takes the sleeper out of the group a time limit would stop.
+    gate = Gate(cmd=f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & echo hi")
+    events: list[Event] = []
+
+    try:
+        await asyncio.wait_for(
+            run_loop(
+                _task_list(gate),
+                tmp_path / "tasks.yaml",
+                gate_timeout="1s",
+                front_end=PlainFrontEnd(events.append),
+            ),
+            10,
+        )
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    assert finished.timed_out is False
+    assert finished.error is None
+    assert "hi" in _lines(events)
