@@ -1396,3 +1396,114 @@ async def test_tab_skips_the_greyed_out_buttons(
 
         await pilot.press("ctrl+c")
         await _finished(app)
+
+
+class _Clock:
+    """A clock the test moves by hand, so the status line's timers need no waiting."""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _status_line(app: AlrApp) -> str:
+    return str(app.query_one("#progress", Static).render())
+
+
+async def test_the_status_line_is_empty_before_start(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert _status_line(app) == ""
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_shows_the_task_and_session(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo), clock=_Clock())
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+
+        assert _status_line(app) == "task 1 of 2 · session · 0.0s · run 0.0s"
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_shows_the_running_gate(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    pid_file = tmp_path / "gate.pid"
+    app = AlrApp(_settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30")))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        pid = int(await wait_for_text(pid_file))
+        await until(lambda: "gate 1 of 1: echo $$" in _status_line(app))
+
+        assert _status_line(app).startswith("task 1 of 2 · gate 1 of 1: ")
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+        await wait_until_gone(pid)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_ticks_with_the_clock(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    clock = _Clock()
+    app = AlrApp(_settings(git_repo), clock=clock)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+
+        # No event comes while the session blocks, so only the timer can redraw.
+        clock.now += 65
+        await until(lambda: _status_line(app).endswith("1m 5s · run 1m 5s"))
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_is_cleared_when_the_summary_appears(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, WORKING_TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        assert _status_line(app) == ""
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("size", [(80, 24), (110, 32)], ids=["80x24", "110x32"])
+async def test_the_status_line_sits_whole_between_the_panes(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, size: tuple[int, int]
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo), clock=_Clock())
+    async with app.run_test(size=size) as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+        await pilot.pause()
+
+        line = app.query_one("#progress").region
+        assert line.height == 1
+        assert app.query_one("#tasks").region.bottom <= line.y
+        assert line.bottom <= app.query_one("#activity").region.y
+        assert len(_status_line(app)) <= line.width - 2
+        assert app.query_one("#tasks").region.height > 3
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
