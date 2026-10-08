@@ -820,6 +820,28 @@ git commit -m "Drop the view's redundant mount-time work-tree lookup"
 
 ---
 
+### Task 8b: The full-screen view exits with the same codes
+
+**Files:**
+- Modify: `src/alr/tui/app.py` (`outcome` handling, `_finish`, `run_app`)
+- Test: `tests/unit/test_tui_app.py`
+
+**Interfaces:**
+- Consumes: `RunDone.exit_code` (Task 3). Produces: `AlrApp.exit_code: int`, `run_app` returns it.
+
+- [ ] **Step 1: Write the failing tests.** Drive the app with the file's existing pilot pattern and a fake run: a clean run leaves `app.exit_code == 0`; a failed task 1; a failed commit 4; the user's Stop 130. A session where no run ever started (quit from the Ready screen) also leaves 0. A refusal at Start (dirty tree) keeps the view on the Ready screen with the refusal's message and does not exit, so there is no code to test there.
+- [ ] **Step 2: Run to verify they fail.** Expected: FAIL (`exit_code` missing; `run_app` returns 0 or 1).
+- [ ] **Step 3: Implement.** In `_finish`, store `self.exit_code = event.exit_code`. `run_app` returns `app.exit_code` (default 0). Drop the `"done"`-only mapping; keep `outcome` for the summary dialog text.
+- [ ] **Step 4: Run to verify they pass**, then `make test`.
+- [ ] **Step 5: Commit**
+
+```bash
+git add src tests
+git commit -m "Exit the full-screen view with the same codes as plain mode"
+```
+
+---
+
 ### Task 9: One e2e test per exit code
 
 **Files:**
@@ -882,4 +904,4 @@ git commit -m "Document the exit codes, the run log fields, and run mode's new l
 ## Self-review notes
 
 - **Spec coverage:** the contract table (Tasks 1, 2, 4, 5, 9), refusals and their order (4), log fields (3), `task` lifecycle (5), `run` lifecycle (6), name validation (7), the view's lookup (8), docs (10), testing and review (9, 11). Stage 2 items (lock, own session, `PR_SET_PDEATHSIG`, pre-add ignore re-check, the `locked` refusal) are in the stage 2 plan.
-- **Known gap, to confirm with the user:** the full-screen view's own exit code stays 0 or 1.
+- The view's exit code follows the same table (Task 8b).
