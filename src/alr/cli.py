@@ -117,14 +117,13 @@ def wants_tui(args: argparse.Namespace) -> bool:
 
 def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> int:
     """Open the full-screen view with what the flags already answer."""
-    commit_mode = CommitMode(args.commit)
     # Validates a given settings file; no run starts here.
     session_args(sandbox_file, args.yolo, dry_run=True)
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
         permissions=_permissions(sandbox_file, args.yolo),
-        commit_mode=commit_mode,
+        commit_mode=CommitMode(args.commit),
         gate_timeout=args.gate_timeout or "",
         reset_failed=args.reset_failed,
     )

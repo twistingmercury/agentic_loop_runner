@@ -41,12 +41,11 @@ async def start(
         # A FailedTasksError is not one, so it passes through without the prefix.
         raise type(exc)(f"failed to start loop runner: {exc}") from exc
 
-    repo = await repo_for(sys.stdout, tasks_file, commit is not CommitMode.NONE)
+    commits = commit is not CommitMode.NONE
+    repo = await repo_for(sys.stdout, tasks_file, commits)
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
     await check_log_dir(repo, str(path))
-    info = _info(
-        tasks_file, gate_timeout, sandbox_settings, commit is not CommitMode.NONE
-    )
+    info = _info(tasks_file, gate_timeout, sandbox_settings, commits)
     log = RunLog.open(path, info)
     try:
         await _run_logged(
