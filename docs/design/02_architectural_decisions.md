@@ -1,7 +1,7 @@
 ---
-version: 27
+version: 28
 date: 2026-10-08
-notes: "ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+notes: "Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -53,6 +53,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [022](#adr-022-alr-has-evolved-beyond-gralph) | alr has evolved beyond gralph | Accepted | 2026-10-08 |
 | [023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output) | Plain mode records gate, git, and session-stderr output | Accepted | 2026-10-08 |
 | [024](#adr-024-one---commit-flag-with-three-modes-none-task-and-run) | One `--commit` flag with three modes: none, task, and run | Accepted | 2026-10-08 |
+| [025](#adr-025-every-outcome-has-an-exit-code-and-a-reason) | Every outcome has an exit code and a reason | Proposed | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -1171,5 +1172,110 @@ This amends ADR-014 (the flags and the view's commit setting) and ADR-019 (its c
   marked `completed`, and alr never redoes a `completed` task, so that work must be committed by hand first and never
   stashed or cleaned (the README has the steps); it is then in the user's commit, not in a single `run` commit. A
   failed final `run` commit also leaves the work staged and every task `completed`
+
+### ADR-025: Every outcome has an exit code and a reason
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed
+
+**Context:**
+
+The outer agent drives `alr --plain`, reads the exit code and `logs/<timestamp>/`, reviews a failure, remediates it, and
+restarts the loop with a retry cap. Today almost every failure exits 1, a commit failure is labeled `stopped`, a refusal
+to start looks like a failed task, the log cannot say which commit mode ran, and a failed commit leaves tasks marked
+`completed` whose work was never committed. Two adversarial reviews found these. The owner's rule: **`completed` means
+complete.** A commit is a step like a gate; if it fails, the task failed, and the failure carries a logged reason.
+
+**Principle: deterministic and idempotent.** The same command on the same inputs (task file, flags, work tree,
+repository state) gives the same outcome, and rerunning after any outcome is safe: it redoes the work from a
+well-defined state or refuses with a reason, and never builds on a half-finished state. Known exceptions: Claude's
+output can differ between runs; on platforms without `PR_SET_PDEATHSIG` a SIGKILL of alr during a commit can still let
+the commit land afterwards; log folder names carry a timestamp and a `-1` suffix, so they never collide but are not
+identical.
+
+**Decision:**
+
+*The contract.*
+
+| Outcome | Exit | Log | Reason |
+|---|---|---|---|
+| Completed | 0 | `run_finished` result `completed` | none |
+| A task or gate failed | 1 | result `failed` | the gate's or session's own text, in `error` |
+| Usage error (a bad flag) | 2 | none | argparse's message |
+| Refused to start | 3 | none | first stderr line: `error: refused: <reason>: <message>` |
+| A commit failed | 4 | result `commit_failed`; the task is `failed` | `error`: `commit failed: <first line of git's or the hook's output>` |
+| Stopped | 130 (SIGINT), 143 (SIGTERM) | result `stopped` | none |
+
+Refusal reasons: `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`,
+`locked`. The text after the reason is the existing message. A refusal writes no run log: nothing ran, and a log for a
+"log folder visible" refusal would create the dirt it refused over.
+
+*Log fields.*
+
+- `run_started`: `"commit": "none" | "task" | "run"` (was a boolean). With no repository found, the field still names
+  the requested mode and the existing stdout note says nothing will be committed.
+- `run_finished`: `result` in `completed | failed | commit_failed | stopped`, `error` as today, and `exit`, the code
+  alr is about to return.
+- `task_finished`: in `run` mode a task whose gates passed is `passed` (not yet committed); the successful run's
+  `run_finished` completes them. In `none` and `task` modes it says `completed` or `failed`, and in `task` mode
+  `completed` is written only after the commit succeeds.
+- `committed`: unchanged (task id and hash); in `run` mode it names the last task.
+
+*Task lifecycle.*
+
+- `none`: `completed` when the gates pass (unchanged).
+- `task`: before each commit alr re-checks that the task file and log folder are still ignored; if not, the task fails
+  with that reason and nothing is committed. A task is `completed` only after its commit succeeds. A failed commit (git,
+  a hook, a missing identity, a lock, a signing program) marks the task `failed` with the reason, leaves the work
+  staged, and exits 4.
+- `run`: all-or-nothing. In-memory state drives the live view; `tasks.yaml` is written once, at the end. If the single
+  commit succeeds, every task that ran becomes `completed`. If a task or gate fails, that task is `failed` and the
+  others `pending`. If the commit fails, the last task is `failed` with the reason and the others stay `pending`. A
+  failed or stopped `run` leaves nothing marked completed, so the leftover work may be discarded and the run repeated.
+- A stop leaves the interrupted task `pending`, as today.
+
+*Implementation.*
+
+- Each error class carries its exit code and `main` maps it: refused (with the reason word), commit failed, stopped
+  (with the signal), run failed. No scattered `return 1`.
+- Refusals are raised before the run log opens. `--reset-failed` is applied only after the refusal checks pass, so a
+  refused run changes nothing on disk. `--dry-run --commit task|run` runs the same refusal checks.
+- The commit failure reason is the first non-empty line of git's combined output, trimmed to 200 characters; the full
+  text is in `task-N.log`.
+- A task `name` containing a line break (anything `str.splitlines` splits on) is rejected at load, with an error naming
+  the task id. The bundled skill documents the rule.
+- Commit safety: a lock file under `.git/` for the whole committing run (a second run is refused, `locked`); git starts
+  in its own session so it has no controlling terminal and a signing program fails fast; on Linux git is asked to stop
+  if alr dies (`PR_SET_PDEATHSIG`); elsewhere that is a documented limit.
+- The view's redundant mount-time work-tree lookup is dropped.
+
+*Staging.* Stage 1 is the contract and lifecycle (exit codes, refusals, log fields, the `run` and `task` lifecycles,
+name validation). Stage 2 is commit safety (the lock, git's own session, `PR_SET_PDEATHSIG`, the pre-add ignore
+re-check).
+
+*Testing.* A unit test per exit code, refusal reason, log field and `run_finished` result; the `run` states (failed task,
+failed commit, stopped, success); a failed `task` commit keeps the work staged and the task `failed`; one e2e test per
+exit code. Each new test is proven by breaking the code it covers, and a final adversarial review runs before the PR.
+
+This amends ADR-024 (the lifecycle and log of each commit mode) and ADR-019 (the run log fields).
+
+**Consequences:**
+
+*Positive:*
+
+- One unambiguous answer per outcome for a driving program
+- No task is complete unless it is
+- A failed or stopped `run` is safe to discard and repeat; the README's lost-work warning goes away
+- A SIGKILL cannot produce a duplicate commit on Linux
+
+*Negative:*
+
+- Breaking changes to exit codes (a stop and a refusal were 1), to the `commit` field's type, and to the saved state of
+  `run` mode; all pre-1.0 and allowed by ADR-022
+- A long `run` that fails late is repeated from the start
+- `completed` in `task` mode now also means committed
+- One more word, `passed`, in the log
+- On platforms without `PR_SET_PDEATHSIG` a SIGKILL during a commit can still land the commit
 
 **Next:** [System Architecture](03_system_architecture.md)
