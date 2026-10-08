@@ -1,7 +1,7 @@
 ---
-version: 24
+version: 25
 date: 2026-10-08
-notes: "Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+notes: "ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -1127,7 +1127,8 @@ One flag, `--commit {none,task,run}`, default `none`.
 
 - **Modes.** `none` never touches git, as a run without a commit flag did. `task` commits each completed task after its
   gates pass (the old `--commit`). `run` makes one commit after the last task, and none on a failed or stopped run (the
-  old `--commit-after-all`, ADR-014). `CommitMode` becomes `NONE`, `TASK`, and `RUN`, with the values `"none"`,
+  old `--commit-after-all`, ADR-014). Its subject is `alr: <n> tasks completed`, or `alr: 1 task completed` for one task,
+  and its body lists `<id>: <name>` for each task. `CommitMode` becomes `NONE`, `TASK`, and `RUN`, with the values `"none"`,
   `"task"`, and `"run"` (it was `PER_TASK` and `AFTER_ALL`).
 - **Names.** `run` and not `session`, because a session is each task's Claude session. `task` and `run` follow the task
   file's own words.
@@ -1143,6 +1144,8 @@ One flag, `--commit {none,task,run}`, default `none`.
   `task` or `run` tries again. Start still opens the repository for `task` and `run` only, and reports its own errors.
 - **No alias.** The old `--commit-after-all` and a bare `--commit` with no value are usage errors, as `--no-tui`, `-t`,
   `--log-dir`, and `--skip-permissions` already are.
+- **Check order.** A committing run checks the repository, then the log folder, then the clean tree. A tree dirty only
+  with the run's own `logs/` folder is told that the log folder must be ignored, not that the tree is dirty.
 - **`--version`.** It also prints the OS and architecture after the version, such as `alr version: 0.0.9 linux/x86_64`.
   This is a separate, small change made in the same loop.
 
@@ -1160,5 +1163,11 @@ This amends ADR-014 (the flags and the view's commit setting) and ADR-019 (its c
 
 - Scripts that use `--commit` alone or `--commit-after-all` change to `--commit task` or `--commit run`
 - Someone used to the view committing per task by default has to pick it
+- A `none` run can leave an unignored `logs/` folder in the tree; the next committing run now says the log folder must
+  be ignored (it used to say the tree is dirty)
+- Known limit, inherited from before the single flag: after a failed run in a commit mode the work stays in the tree,
+  and the next committing run refuses a dirty tree until the user commits, stashes, or removes it. The work of tasks
+  already completed is then not part of a single `run` commit. A failed final `run` commit also leaves the work staged
+  and every task `completed`
 
 **Next:** [System Architecture](03_system_architecture.md)

@@ -1,7 +1,7 @@
 ---
-version: 24
+version: 25
 date: 2026-10-08
-notes: "The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
+notes: "Startup order: argparse rejects a bad --commit value, a bare --commit, and --commit-after-all before every step with exit 2, which is said apart from UsageError exiting 1; the log folder is checked before the clean tree; the run commit says 1 task for one task (ADR-024). Earlier: The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
 ---
 
 # alr — System Architecture
@@ -162,7 +162,8 @@ How gralph's packages map onto this:
 - Route to the dry run, the plain real run, or the full-screen view (ADR-013)
 - Run `--install-skill` first, when passed: copy the bundled skill and exit 0 (ADR-016)
 - Install the SIGINT and SIGTERM handlers that cancel the run
-- Catch `AlrError` in one place: print `error: <message>` to stderr and exit 1
+- Catch `AlrError` in one place: print `error: <message>` to stderr and exit 1 (a `UsageError` too). argparse rejects a
+  bad flag value itself, at parse time, with exit 2
 - Exit 0 only when every task completed
 
 **Key Characteristics:**
@@ -217,7 +218,7 @@ How gralph's packages map onto this:
 - With `--commit none` (the default), never touch git
 - With `--commit task`, after the gates pass: `git add -A`, then `git commit -m <task name>` when anything is staged
 - With `--commit run`, make no commit per task; once every task has completed, run `git add -A` and one
-  `git commit` titled `alr: <n> tasks completed` with the `<id>: <name>` of each task in the body. A failed or stopped
+  `git commit` titled `alr: <n> tasks completed` (`alr: 1 task completed` for one task) with the `<id>: <name>` of each task in the body. A failed or stopped
   run makes no commit (ADR-014, ADR-024)
 - Save the task file after every task; stop the run at the first failed task
 - Measure the duration of each session, gate, task, and the run
@@ -450,6 +451,10 @@ sequenceDiagram
 
 ### Startup Order
 
+Before step 1, argparse checks the command line. `--commit` takes `none`, `task`, or `run`; any other value, a bare
+`--commit`, and the removed `--commit-after-all` are rejected there (`invalid choice` or unrecognized argument) and exit
+2, even without `-d` (ADR-024). The steps below raise `AlrError`s, which exit 1.
+
 1. With `--install-skill`: copy the bundled skill, print its path, and exit 0
 2. Resolve `--dir`: the task file is `<folder>/tasks.yaml`, then fill an unset `--sandbox-settings` with
    `<folder>/sandbox.json` when that is a regular file and `--yolo` was not passed. A folder with no
@@ -458,13 +463,15 @@ sequenceDiagram
 4. Pick the front end: full-screen when stdin and stdout are terminals, `--plain` is absent, and the run is not a
    `--dry-run`; otherwise plain
 5. Check plain mode's required flag, `--dir`. The full-screen view asks for a missing one in a dialog instead
-6. `--commit` takes `none`, `task`, or `run`; any other value, a bare `--commit`, and the removed `--commit-after-all` are usage errors (ADR-024)
-7. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or
+6. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or
    `--yolo` on a real run; a dry run needs neither but still checks a settings file it is given
-8. Dry run, plain real run, or the full-screen view. A plain real run logs to `<folder>/logs` and, when it commits with
-   that folder visible to git, exits 1 with the `check_log_dir` error (ADR-019). With `--reset-failed`, a real run sets failed tasks back to pending
+7. Dry run, plain real run, or the full-screen view. A plain real run logs to `<folder>/logs` and, when it commits with
+   that folder visible to git, exits 1 with the `check_log_dir` error (ADR-019). With a commit mode the repository checks
+   run in this order: find the work tree and check that git does not track the task file, then check the log folder,
+   then check that the tree is clean, so a tree dirty only with the run's own `logs/` folder is told to ignore it
+   instead of to clean up. With `--reset-failed`, a real run sets failed tasks back to pending
    silently before it loads the file (the view does it when it first reads the file); `--reset-failed` with `--dry-run`
-   is a usage error (ADR-018). The view repeats steps 1 to 6 on Start with the dialogs' values
+   is a usage error (ADR-018). The view repeats steps 1 to 5 on Start with the dialogs' values
 
 ### Stopping
 
@@ -486,7 +493,7 @@ having to match it word for word (ADR-007).
 
 | Error               | Raised when                                                                           |
 |---------------------|---------------------------------------------------------------------------------------|
-| `UsageError`        | A flag is missing, conflicts with another, or has a bad value                         |
+| `UsageError`        | A flag is missing, conflicts with another, or has a bad value (argparse's own rejections exit 2) |
 | `TaskFileError`     | The task file cannot be read, parsed, validated (including `shared.prompt`), or saved |
 | `FailedTasksError`  | The task file already holds a failed task                                             |
 | `SandboxError`      | The sandbox settings file is missing, unreadable, or not a JSON object                |
@@ -503,7 +510,9 @@ found on Start (a dirty work tree, a task file git does not ignore, a log folder
 pop-up and the app stays Ready. A failed or stopped run arrives as `RunDone` and shows in the Finished summary with the
 engine's error text. An unexpected exception in the worker shows as a failed run, and Textual restores the terminal.
 
-`alr.cli` catches `AlrError` once, prints `error: <message>`, and exits 1. Any other exception is a bug and is left to
+`alr.cli` catches `AlrError` once, prints `error: <message>`, and exits 1. A flag argparse rejects at parse time (such as
+`--commit bogus`, a bare `--commit`, or the removed `--commit-after-all`) is not an `AlrError`: argparse prints its own
+usage error and exits 2, before any startup step. Any other exception is a bug and is left to
 show its traceback. Lower-level errors are wrapped with `raise ... from ...` so the cause is kept.
 
 ## Testing

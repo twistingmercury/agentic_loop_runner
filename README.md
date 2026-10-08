@@ -72,7 +72,7 @@ pending at Start, the step, the step's time, and the run's time). In a narrow wi
 cut with `…` so the times still show. The line is only `task n of N · run <time>` between tasks.
 The Tasks pane's Time column counts the running task up and keeps each finished task's time. The view's Commit dropdown
 offers none (the default), per task, and after all, and starts from `--commit` (outside a git work tree, choosing
-a commit mode shows a note that nothing will be committed), and it keeps run logs in `<folder>/logs`, which git must ignore. Use
+a commit mode shows a note that nothing will be committed), and it keeps run logs in `<folder>/logs`, which git must ignore when it commits. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
@@ -90,7 +90,16 @@ a commit mode shows a note that nothing will be committed), and it keeps run log
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 `--yolo`; the full-screen view asks in a dialog when neither is given.
-`--commit` needs a value; a bare `--commit` and the old `--commit-after-all` are usage errors.
+`--commit` needs a value; a bare `--commit`, a value other than `none`, `task`, or `run`, and the old
+`--commit-after-all` are usage errors (argparse rejects them and exits 2). In the view's Commit dropdown, "per task"
+is `task` and "after all" is `run`.
+
+A `run` commit shows in `git log` with the subject `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and
+a body that lists `<id>: <name>` for each task that ran. A `task` commit uses the task's name as its subject.
+
+After a failed run: in `task` or `run` mode a failed run leaves its work in the tree, and the next committing run
+refuses a dirty tree. Commit, stash, or remove the leftovers, reset the failed tasks (`--reset-failed`), and run
+again. The work of tasks that already completed is then not part of the single `run` commit.
 
 A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
 Plain mode always logs; the full-screen view has a Logging dropdown, on by default. When the
