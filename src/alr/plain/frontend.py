@@ -115,7 +115,9 @@ class PlainFrontEnd:
         """Run a gate or a git command: show its output as it comes and report each line."""
         # No stdin. Both outputs are piped so each line can reach the run log.
         try:
-            process = await proc.start(argv, stdout=PIPE, stderr=PIPE, cwd=cwd)
+            process = await proc.start(
+                argv, stdout=PIPE, stderr=PIPE, cwd=cwd, gentle=gentle
+            )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)
 

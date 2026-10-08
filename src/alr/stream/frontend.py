@@ -100,7 +100,9 @@ class StreamFrontEnd:
         gentle: bool = False,
     ) -> str | None:
         try:
-            process = await proc.start(argv, stdout=PIPE, stderr=PIPE, cwd=cwd)
+            process = await proc.start(
+                argv, stdout=PIPE, stderr=PIPE, cwd=cwd, gentle=gentle
+            )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)
 

@@ -44,6 +44,72 @@ async def test_cancel_kills_the_whole_group(tmp_path: Path) -> None:
     await wait_until_gone(int(pid_file.read_text()))
 
 
+def _hold_spawn(monkeypatch: pytest.MonkeyPatch, release: asyncio.Event) -> None:
+    """Make proc.start wait on release after the child exists but before it returns."""
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def held_spawn(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
+        process = await real_spawn(*args, **kwargs)
+        await release.wait()
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", held_spawn)
+
+
+async def _cancel_start_during_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, gentle: bool
+) -> tuple[Path, Path]:
+    """Cancel proc.start after the child is running but before the spawn returns.
+
+    Returns the file the child writes on SIGTERM and the file holding the pid of
+    the child's own background sleep.
+    """
+    ready, stopped = tmp_path / "ready", tmp_path / "stopped"
+    script = (
+        f"trap 'echo bye > {stopped}; exit 0' TERM; sleep 60 & echo $! > {ready}; wait"
+    )
+    release = asyncio.Event()
+    _hold_spawn(monkeypatch, release)
+    starting = asyncio.ensure_future(proc.start(["sh", "-c", script], gentle=gentle))
+    await wait_for_text(ready)
+
+    starting.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(starting, 5)
+
+    return stopped, ready
+
+
+async def test_a_gentle_cancel_during_the_spawn_sends_sigterm_to_the_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stopped, ready = await _cancel_start_during_spawn(
+        tmp_path, monkeypatch, gentle=True
+    )
+
+    assert stopped.read_text(encoding="utf-8") == "bye\n", (
+        "SIGTERM must reach the child before any SIGKILL"
+    )
+    await wait_until_gone(int(ready.read_text()))
+
+
+async def test_a_cancel_during_the_spawn_kills_the_whole_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stopped, ready = await _cancel_start_during_spawn(
+        tmp_path, monkeypatch, gentle=False
+    )
+
+    assert not stopped.exists(), "only gentle sends SIGTERM first"
+    await wait_until_gone(int(ready.read_text()))
+
+
+async def test_a_missing_executable_still_fails_the_start(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        await proc.start([str(tmp_path / "missing")])
+
+
 async def test_read_lines_has_no_length_limit() -> None:
     process = await proc.start(
         ["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' 'x'; echo; printf tail"],
