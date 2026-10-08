@@ -27,10 +27,8 @@ SANDBOXED = [
     "--settings",
     '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true}}',
 ]
-BOTH_PERMISSIONS = "--sandbox-settings and --skip-permissions cannot be used together"
-NO_PERMISSIONS = (
-    "pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox"
-)
+BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
+NO_PERMISSIONS = "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
 BAD_DURATION = "--gate-timeout: must be a duration string such as 90s or 10m"
 GATE_TIMEOUT_FLAG = "--gate-timeout"
 
@@ -161,6 +159,16 @@ def test_no_tui_flag_is_an_unknown_argument(
     assert "unrecognized arguments: --no-tui" in capsys.readouterr().err
 
 
+def test_skip_permissions_flag_is_an_unknown_argument(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["-d", str(folder), "--skip-permissions"])
+
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --skip-permissions" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("flag", ["-t", "--tasks"])
 def test_tasks_flag_is_an_unknown_argument(
     flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
@@ -182,7 +190,7 @@ def test_dir_with_only_tasks_yaml_dry_runs(
 
 @pytest.mark.usefixtures("fake_claude")
 def test_dir_with_only_tasks_yaml_runs(folder: Path) -> None:
-    assert cli.main(["-d", str(folder), "--skip-permissions"]) == 0
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
 
 
 def test_both_permission_flags_are_refused(
@@ -194,7 +202,7 @@ def test_both_permission_flags_are_refused(
             str(folder),
             "--sandbox-settings",
             "s.json",
-            "--skip-permissions",
+            "--yolo",
         ]
     )
 
@@ -213,7 +221,7 @@ def test_log_dir_flag_is_an_unknown_argument(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.main(["-d", str(folder), "--skip-permissions", "--log-dir", "logs"])
+        cli.main(["-d", str(folder), "--yolo", "--log-dir", "logs"])
 
     assert exit_info.value.code == 2
     assert "unrecognized arguments: --log-dir" in capsys.readouterr().err
@@ -288,7 +296,7 @@ def test_a_signal_leaves_no_traceback_and_no_change(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = start_alr("-d", str(tmp_path), "--skip-permissions")
+    process = start_alr("-d", str(tmp_path), "--yolo")
     try:
         claude_pid = int(wait_for_file(ready))
         process.send_signal(stop)
@@ -322,7 +330,7 @@ def test_a_second_signal_does_not_leave_git_running(
     hook.write_text(f"#!/bin/sh\ntrap '' TERM\necho $$ > '{ready}'\nexec sleep 60\n")
     hook.chmod(0o700)
 
-    process = start_alr("-d", str(tasks_file.parent), "--skip-permissions", "--commit")
+    process = start_alr("-d", str(tasks_file.parent), "--yolo", "--commit")
     hook_pid = 0
     try:
         hook_pid = int(wait_for_file(ready))
@@ -388,12 +396,12 @@ def test_sandbox_settings_flag_wins_over_the_folder(
     assert sessions == [SANDBOXED]
 
 
-def test_skip_permissions_opts_out_of_the_folders_sandbox(
+def test_yolo_opts_out_of_the_folders_sandbox(
     folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     _add_sandbox(folder)
 
-    assert cli.main(["-d", str(folder), "--skip-permissions"]) == 0
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
     assert sessions == [["--dangerously-skip-permissions"]]
     assert capsys.readouterr().err == ""
 
@@ -459,9 +467,7 @@ def test_commit_and_commit_after_all_together_exit_1(
 ) -> None:
     (tmp_path / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
 
-    code = cli.main(
-        ["-d", str(tmp_path), "--skip-permissions", "--commit", "--commit-after-all"]
-    )
+    code = cli.main(["-d", str(tmp_path), "--yolo", "--commit", "--commit-after-all"])
 
     assert code == 1
     assert (
@@ -538,7 +544,7 @@ def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
 ) -> None:
     seen = _capture_view(monkeypatch)
 
-    code = cli.main(["-d", str(folder), "--skip-permissions"])
+    code = cli.main(["-d", str(folder), "--yolo"])
 
     assert code == 0
     assert seen[0].permissions is Permissions.SKIP
@@ -563,9 +569,7 @@ def test_the_view_still_refuses_both_permission_flags(
 ) -> None:
     seen = _capture_view(monkeypatch)
 
-    code = cli.main(
-        ["-d", str(folder), "--sandbox-settings", settings, "--skip-permissions"]
-    )
+    code = cli.main(["-d", str(folder), "--sandbox-settings", settings, "--yolo"])
 
     assert code == 1
     assert BOTH_PERMISSIONS in capsys.readouterr().err
@@ -636,7 +640,7 @@ def test_a_plain_run_with_reset_failed_runs_a_failed_task(
         encoding="utf-8",
     )
 
-    code = cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
+    code = cli.main(["-d", str(folder), "--yolo", "--reset-failed"])
 
     assert code == 0
     assert "failed" not in capsys.readouterr().out
@@ -651,7 +655,7 @@ def test_a_plain_run_without_reset_failed_still_refuses_a_failed_task(
         encoding="utf-8",
     )
 
-    code = cli.main(["-d", str(folder), "--skip-permissions"])
+    code = cli.main(["-d", str(folder), "--yolo"])
 
     assert code == 1
     assert "Some tasks failed previous runs:" in capsys.readouterr().out
@@ -662,7 +666,7 @@ def test_the_view_gets_the_reset_failed_flag(
 ) -> None:
     seen = _capture_view(monkeypatch)
 
-    cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
+    cli.main(["-d", str(folder), "--yolo", "--reset-failed"])
 
     assert seen[0].reset_failed is True
 
