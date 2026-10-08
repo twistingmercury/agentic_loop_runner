@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from helpers import git, run_loop
+from helpers import git, run_loop, wait_for_text
 
 from alr.engine.commit import open_repo
 from alr.errors import RunError
@@ -181,18 +181,79 @@ async def test_gate_stderr_is_decoded_leniently(tmp_path: Path) -> None:
     assert "bad\ufffd" in _lines(events)
 
 
-async def test_commit_marker_and_hash_are_recorded_but_git_output_is_not(
-    git_repo: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
+def _install_hook(repo: Path, script: str) -> None:
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
+    hook.chmod(0o700)
+
+
+async def test_commit_marker_and_hash_are_recorded(git_repo: Path) -> None:
     tasks_file = git_repo / "run" / "tasks.yaml"
 
     events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
 
     assert "→ commit First" in _lines(events)
-    assert not any("file changed" in line for line in _lines(events))
-    assert "file changed" in capfd.readouterr().out
     [committed] = [e for e in events if isinstance(e, Committed)]
     assert committed.commit_hash == git(git_repo, "rev-parse", "HEAD").strip()
+
+
+async def test_git_output_reaches_the_terminal_and_the_record_after_the_commit_marker(
+    git_repo: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    _install_hook(git_repo, "echo hook-out; echo hook-err >&2")
+    tasks_file = git_repo / "run" / "tasks.yaml"
+
+    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
+
+    captured = capfd.readouterr()
+    # git itself sends a hook's stdout to stderr; the commit summary is stdout.
+    assert "hook-out\nhook-err\n" in captured.err
+    assert "hook-err" not in captured.out
+    assert "file changed" in captured.out
+    assert "file changed" not in captured.err
+    lines = _lines(events)
+    after_marker = lines[lines.index("→ commit First") + 1 :]
+    assert {"hook-out", "hook-err"} <= set(after_marker)
+    assert any("file changed" in line for line in after_marker)
+
+
+async def test_failing_git_command_records_its_output_and_returns_the_exit_text(
+    git_repo: Path,
+) -> None:
+    _install_hook(git_repo, "echo hook-refused >&2; exit 1")
+    tasks_file = git_repo / "run" / "tasks.yaml"
+    events: list[Event] = []
+
+    with pytest.raises(RunError):
+        await run_loop(
+            _task_list(Gate(cmd="echo work > one.txt")),
+            tasks_file,
+            repo=await open_repo(str(tasks_file)),
+            front_end=PlainFrontEnd(events.append),
+        )
+
+    lines = _lines(events)
+    assert "hook-refused" in lines[lines.index("→ commit First") + 1 :]
+    [finished] = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished.error == "task 1: First failed: commit failed: exit status 1"
+
+
+async def test_cancel_during_git_stops_the_group_gently(tmp_path: Path) -> None:
+    ready, stopped = tmp_path / "ready", tmp_path / "stopped"
+    script = f"trap 'echo bye > {stopped}; exit 0' TERM; echo ready > {ready}; sleep 60 & wait"
+    task = Task(id=1, name="First", prompt="p1")
+    run = asyncio.ensure_future(
+        PlainFrontEnd().run_git(task, ["sh", "-c", script], str(tmp_path))
+    )
+    await wait_for_text(ready)
+
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert stopped.read_text(encoding="utf-8") == "bye\n", (
+        "SIGTERM must reach the child before any SIGKILL"
+    )
 
 
 async def test_no_recorder_prints_the_same_output(

@@ -72,13 +72,7 @@ class PlainFrontEnd:
         print(f"gate: {gate.cmd}", flush=True)
         self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
         self._report(GateStarted(task, gate))
-        # No stdin. Both outputs are piped so each line can reach the run log.
-        try:
-            process = await proc.start(["sh", "-c", gate.cmd], stdout=PIPE, stderr=PIPE)
-        except OSError as exc:
-            return proc.start_failed_text("sh", exc)
-
-        return await proc.finish(process, _pump_outputs(process, self._raw_line(task)))
+        return await self._run_command(task, ["sh", "-c", gate.cmd])
 
     def gate_finished(
         self,
@@ -99,13 +93,7 @@ class PlainFrontEnd:
         self._report(CommitStarted(task))
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        # stdout and stderr inherited, so git's output passes straight through.
-        try:
-            process = await proc.start(argv, cwd=cwd)
-        except OSError as exc:
-            return proc.start_failed_text(argv[0], exc)
-
-        return await proc.finish(process, gentle=True)
+        return await self._run_command(task, argv, cwd=cwd, gentle=True)
 
     def committed(self, task: Task, commit_hash: str) -> None:
         self._report(Committed(task, commit_hash))
@@ -115,6 +103,25 @@ class PlainFrontEnd:
 
     def run_done(self, error: str | None, seconds: float) -> None:
         self._report(RunDone(error, seconds))
+
+    async def _run_command(
+        self,
+        task: Task,
+        argv: Sequence[str],
+        *,
+        cwd: str | None = None,
+        gentle: bool = False,
+    ) -> str | None:
+        """Run a gate or a git command: show its output as it comes and report each line."""
+        # No stdin. Both outputs are piped so each line can reach the run log.
+        try:
+            process = await proc.start(argv, stdout=PIPE, stderr=PIPE, cwd=cwd)
+        except OSError as exc:
+            return proc.start_failed_text(argv[0], exc)
+
+        return await proc.finish(
+            process, _pump_outputs(process, self._raw_line(task)), gentle=gentle
+        )
 
     def _raw_line(self, task: Task) -> Callable[[bytes], None]:
         def report_line(line: bytes) -> None:
@@ -143,9 +150,9 @@ async def _pump(
 async def _pump_outputs(
     process: asyncio.subprocess.Process, on_line: Callable[[bytes], None]
 ) -> None:
-    """Tee stdout and stderr at the same time, so a full pipe never blocks the gate."""
+    """Tee stdout and stderr at the same time, so a full pipe never blocks the command."""
     if process.stdout is None or process.stderr is None:
-        raise RuntimeError("the gate was started without output pipes")
+        raise RuntimeError("the command was started without output pipes")
 
     await asyncio.gather(
         _tee(process.stdout, sys.stdout.buffer, on_line),
