@@ -86,7 +86,10 @@ def _visible_settings(repo: Path) -> RunSettings:
     (repo / "visible").mkdir()
     tasks_file = write_file(repo / "visible" / "tasks.yaml", TASKS)
     return RunSettings(
-        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False
+        tasks_file=tasks_file,
+        permissions=Permissions.SKIP,
+        logging=False,
+        commit_mode=CommitMode.TASK,
     )
 
 
@@ -115,7 +118,7 @@ async def test_ready_enables_start(git_repo: Path) -> None:
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_a_clean_run_finishes_done_with_a_summary(git_repo: Path) -> None:
-    app = AlrApp(_settings(git_repo, WORKING_TASKS))
+    app = AlrApp(_settings(git_repo, WORKING_TASKS, commit_mode=CommitMode.TASK))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -235,7 +238,7 @@ async def test_ctrl_c_when_nothing_runs_quits(git_repo: Path) -> None:
 async def test_a_failed_check_on_start_shows_an_error_and_stays_ready(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo)
+    settings = _settings(git_repo, commit_mode=CommitMode.TASK)
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
     app = AlrApp(settings)
     async with app.run_test() as pilot:
@@ -459,6 +462,66 @@ async def test_logging_is_a_dropdown_with_on_and_off(git_repo: Path) -> None:
         assert options.option_count == 2
 
 
+async def test_commit_is_a_dropdown_with_none_per_task_and_after_all(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        assert app.query_one("#commit", Select).value is CommitMode.NONE
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter")
+        options = app.query_one("#commit SelectOverlay", OptionList)
+
+        assert [str(options.get_option_at_index(i).prompt) for i in range(3)] == [
+            "none",
+            "per task",
+            "after all",
+        ]
+        assert options.option_count == 3
+
+
+async def test_the_commit_dropdown_starts_from_the_flag(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
+    async with app.run_test():
+        await until(lambda: app.state is AppState.READY)
+
+        assert app.query_one("#commit", Select).value is CommitMode.TASK
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_none_run_in_a_dirty_repository_starts_and_commits_nothing(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, WORKING_TASKS))
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "done"
+        assert git(git_repo, "log", "--format=%s").split() == ["init"]
+
+
+async def test_switching_to_per_task_in_a_dirty_repository_is_refused(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "enter")
+        await until(lambda: app.settings.commit_mode is CommitMode.TASK)
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        assert app.state is AppState.READY
+        assert "clean work tree" in str(app.screen.query_one("#message").render())
+
+
 @pytest.fixture
 def outside_settings(outside: Path, monkeypatch: pytest.MonkeyPatch) -> RunSettings:
     """Settings for a run in a folder with no git repository around it."""
@@ -474,11 +537,11 @@ def outside_settings(outside: Path, monkeypatch: pytest.MonkeyPatch) -> RunSetti
 async def test_a_run_outside_a_repository_finishes_done_without_commits(
     outside: Path, outside_settings: RunSettings
 ) -> None:
+    outside_settings.commit_mode = CommitMode.TASK
     app = AlrApp(outside_settings)
     async with app.run_test() as pilot:
         await until(lambda: app.in_work_tree is not None)
 
-        assert app.query_one("#commit", Select).disabled
         assert app.query_one("#commit-note", Static).display
         assert "no git repository: nothing will be committed" in str(
             app.query_one("#commit-note", Static).render()
@@ -854,7 +917,7 @@ def closed_logs(monkeypatch: pytest.MonkeyPatch) -> list[RunLog]:
 
 
 def _logged_settings(repo: Path, tasks: str) -> RunSettings:
-    settings = _settings(repo, tasks)
+    settings = _settings(repo, tasks, commit_mode=CommitMode.TASK)
     settings.logging = True
     return settings
 
@@ -1071,7 +1134,7 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
         await until(lambda: app.state is AppState.READY)
 
         await _tab_to(app, pilot, "commit")
-        await pilot.press("enter", "down", "enter")
+        await pilot.press("enter", "down", "down", "enter")
         await until(lambda: app.settings.commit_mode is CommitMode.RUN)
 
         await _tab_to(app, pilot, "logging")
@@ -1301,8 +1364,12 @@ async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
         assert _dropdowns_disabled(app) == (True, True)
 
 
+def _note_shown(app: AlrApp) -> bool:
+    return app.query_one("#commit-note", Static).display
+
+
 @pytest.mark.usefixtures("fake_claude")
-async def test_the_commit_dropdown_stays_disabled_outside_a_repository(
+async def test_the_commit_note_follows_the_dropdown_outside_a_repository(
     outside_settings: RunSettings,
 ) -> None:
     app = AlrApp(outside_settings)
@@ -1310,7 +1377,14 @@ async def test_the_commit_dropdown_stays_disabled_outside_a_repository(
         await until(lambda: app.in_work_tree is not None)
         await until(lambda: app.state is AppState.READY)
 
-        assert _dropdowns_disabled(app) == (True, False)
+        assert not _note_shown(app)
+
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "enter")
+        await until(lambda: _note_shown(app))
+
+        await pilot.press("enter", "up", "enter")
+        await until(lambda: not _note_shown(app))
 
         await pilot.press("s")
         await _finished(app)

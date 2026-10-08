@@ -126,6 +126,7 @@ class AlrApp(App[None]):
                     yield Static("Commit:", id="commit-label", classes="field")
                     yield Select(
                         [
+                            ("none", CommitMode.NONE),
                             ("per task", CommitMode.TASK),
                             ("after all", CommitMode.RUN),
                         ],
@@ -175,13 +176,16 @@ class AlrApp(App[None]):
         self.run_worker(self.launch_sequence(), exit_on_error=False)
 
     async def _check_work_tree(self) -> None:
-        """Without a work tree nothing can be committed, so the commit choice is moot."""
+        """Learn whether a work tree is around, so the note can say nothing will be committed."""
         self.in_work_tree = await work_tree_root() is not None
-        if self.in_work_tree:
-            return
+        self._show_commit_note()
 
-        self.query_one("#commit", Select).disabled = True
-        self.query_one("#commit-note", Static).display = True
+    def _show_commit_note(self) -> None:
+        """Warn only when a commit was asked for and there is no repository to hold it."""
+        asked = self.settings.commit_mode is not CommitMode.NONE
+        self.query_one("#commit-note", Static).display = (
+            asked and self.in_work_tree is False
+        )
 
     def _read_tasks(self) -> None:
         """Load the task file; an unreadable one is reported by the dialogs."""
@@ -332,10 +336,7 @@ class AlrApp(App[None]):
     def _lock_dropdowns(self) -> None:
         """A run copies the settings at Start, so later changes would only mislead."""
         locked = self.state in (AppState.RUNNING, AppState.FINISHED)
-        # Without a work tree the commit choice stays off in every state.
-        self.query_one("#commit", Select).disabled = (
-            locked or self.in_work_tree is False
-        )
+        self.query_one("#commit", Select).disabled = locked
         self.query_one("#logging", Select).disabled = locked
 
     def _refresh(self) -> None:
@@ -425,6 +426,7 @@ class AlrApp(App[None]):
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "commit" and isinstance(message.value, CommitMode):
             self.settings.commit_mode = message.value
+            self._show_commit_note()
 
         if message.select.id == "logging" and isinstance(message.value, bool):
             self.settings.logging = message.value

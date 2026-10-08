@@ -6,7 +6,7 @@ from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from alr.engine.commit import Repo, check_log_dir, open_repo
+from alr.engine.commit import CommitMode, Repo, check_log_dir, open_repo
 from alr.engine.loop import RunOptions, load_tasks
 from alr.errors import RepoError, TaskFileError
 from alr.record.events import Event
@@ -40,7 +40,7 @@ async def prepare(settings: RunSettings) -> Prepared:
     the values the run will use.
     """
     task_list = load_tasks(settings.tasks_file)
-    repo = await open_repo(settings.tasks_file)
+    repo = await _open_repo(settings)
     session_args = settings.session_args()
     log_path = await _check_log_folder(settings, repo)
     options = RunOptions(
@@ -60,6 +60,14 @@ async def prepare(settings: RunSettings) -> Prepared:
         raise
 
     return prepared
+
+
+async def _open_repo(settings: RunSettings) -> Repo | None:
+    """Look at the repository only when the run commits; with none git is never touched."""
+    if settings.commit_mode is CommitMode.NONE:
+        return None
+
+    return await open_repo(settings.tasks_file)
 
 
 async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | None:

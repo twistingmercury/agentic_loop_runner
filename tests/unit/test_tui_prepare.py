@@ -75,7 +75,8 @@ async def test_prepare_outside_a_repository_records_that_nothing_commits(
 async def test_prepare_in_a_repository_records_that_commits_happen(
     git_repo: Path,
 ) -> None:
-    prepared = await prepare(_settings(git_repo, logging=True))
+    settings = _settings(git_repo, logging=True, commit_mode=CommitMode.TASK)
+    prepared = await prepare(settings)
     prepared.close()
 
     ledger = next((git_repo / "run" / "logs").glob("*/run.jsonl"))
@@ -85,7 +86,9 @@ async def test_prepare_in_a_repository_records_that_commits_happen(
 async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    settings = _settings(
+        git_repo, gates=[Gate(cmd="true")], commit_mode=CommitMode.TASK
+    )
     before = Path(settings.tasks_file).read_text(encoding="utf-8")
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
 
@@ -93,6 +96,15 @@ async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
         await prepare(settings)
 
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == before
+
+
+async def test_prepare_with_none_never_opens_the_repository(git_repo: Path) -> None:
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+
+    prepared = await prepare(_settings(git_repo, commit_mode=CommitMode.NONE))
+
+    assert prepared.options.repo is None
+    assert prepared.options.commit_mode is CommitMode.NONE
 
 
 async def test_prepare_saves_edited_gates_once_every_check_passes(
@@ -115,7 +127,10 @@ async def test_prepare_log_folder_git_can_see_is_an_error(git_repo: Path) -> Non
     (git_repo / "visible").mkdir()
     tasks_file = write_file(git_repo / "visible" / "tasks.yaml", TASKS)
     settings = RunSettings(
-        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=True
+        tasks_file=tasks_file,
+        permissions=Permissions.SKIP,
+        logging=True,
+        commit_mode=CommitMode.TASK,
     )
 
     with pytest.raises(RepoError, match="add it to .gitignore"):

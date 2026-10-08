@@ -24,7 +24,7 @@ class RunSettings:
     tasks_file: str = ""
     sandbox_file: str = ""
     permissions: Permissions = Permissions.UNSET
-    commit_mode: CommitMode = CommitMode.TASK
+    commit_mode: CommitMode = CommitMode.NONE
     logging: bool = True
 
     reset_failed: bool = False
