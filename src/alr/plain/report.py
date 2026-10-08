@@ -4,7 +4,12 @@ from typing import TextIO
 
 from alr.engine.commit import Repo, check_clean, check_log_dir, find_repo
 from alr.engine.loop import load_tasks
-from alr.errors import FailedTasksError
+from alr.errors import (
+    INVALID_TASK_FILE,
+    FailedTasksError,
+    RefusedError,
+    TaskFileError,
+)
 from alr.tasks import COMPLETED, FAILED, Task, TaskList
 
 _RED = "\033[1;91m"
@@ -43,6 +48,10 @@ def load_tasks_report(out: TextIO, tasks_file: str) -> TaskList:
         out.write("Some tasks failed previous runs:\n")
         print_tasks(out, exc.task_list)
         raise
+    except TaskFileError as exc:
+        raise RefusedError(
+            INVALID_TASK_FILE, f"failed to start loop runner: {exc}"
+        ) from exc
 
 
 async def repo_for(

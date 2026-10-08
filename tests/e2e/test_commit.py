@@ -24,8 +24,11 @@ from e2e_helpers import (
     write_tasks_yaml,
 )
 
-DIRTY_TREE_ERROR = "error: --commit needs a clean work tree; commit, stash, or remove:"
-BROKEN_REPO_ERROR = "error: --commit: git rev-parse:"
+DIRTY_TREE_ERROR = (
+    "error: refused: dirty-tree: --commit needs a clean work tree; "
+    "commit, stash, or remove:"
+)
+BROKEN_REPO_ERROR = "error: refused: git-error: --commit: git rev-parse:"
 
 # The gates are shared by both tasks, so the one gate picks its file by what
 # the first task left behind: each commit then holds exactly one new file.
@@ -135,7 +138,7 @@ def test_commit_dirty_tree_refuses_to_start(repo: CommitRepo) -> None:
 
     res = repo.run("--commit", "task")
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
     assert repo.calls() == 0, "claude must not run"
     assert repo.tasks_path.read_text(encoding="utf-8") == TWO_WORK_TASKS
@@ -151,10 +154,10 @@ def test_commit_task_file_git_can_see_is_refused(repo: CommitRepo) -> None:
         env={"FAKECLAUDE_RECORD_FILE": str(repo.record_file)},
     )
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert (
-        "error: --commit needs the task file ignored by git or outside the repository: tasks.yaml\n"
-        in res.err
+        "error: refused: task-file-visible: --commit needs the task file ignored by git "
+        "or outside the repository: tasks.yaml\n" in res.err
     )
     assert repo.calls() == 0, "claude must not run"
     assert repo.subjects() == ["init"]
@@ -165,7 +168,7 @@ def test_commit_broken_repository_is_an_error_run(repo: CommitRepo) -> None:
 
     res = repo.run("--commit", "task")
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert BROKEN_REPO_ERROR in res.err
     assert repo.calls() == 0, "claude must not run"
 
@@ -175,7 +178,7 @@ def test_commit_broken_repository_is_an_error_dry_run(repo: CommitRepo) -> None:
 
     res = repo.dry_run()
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert BROKEN_REPO_ERROR in res.err
     assert "is valid" not in res.out
 
@@ -205,7 +208,7 @@ def test_commit_failed_gate_leaves_no_commit_and_blocks_the_rerun(
     repo.tasks_path.write_text(tasks_yaml, encoding="utf-8")
     again = repo.run("--commit", "task")
 
-    assert again.code == 1, again
+    assert again.code == 3, again
     assert f"{DIRTY_TREE_ERROR}\n?? one.txt\n" in again.err
     assert repo.calls() == 1, "the refused run must not start claude"
 
@@ -218,13 +221,12 @@ def test_commit_rejected_commit_fails_the_task(repo: CommitRepo) -> None:
 
     res = repo.run("--commit", "task")
 
-    assert res.code != 0, res
-    assert "hook-says-no" in res.err
-    assert "task 1: First task failed: commit failed: exit status 1" in res.err
+    assert res.code == 4, res
+    assert "task 1: First task failed: commit failed: hook-says-no" in res.err
     assert repo.subjects() == ["init"]
 
     after = read_tasks_yaml(repo.tasks_path)
-    assert task_errors(after)[1] == "commit failed: exit status 1"
+    assert task_errors(after)[1] == "commit failed: hook-says-no"
     assert task_states(after)[2] == "pending"
     assert repo.calls() == 1, "the run must stop before the second task"
 
@@ -294,6 +296,6 @@ def test_commit_dry_run_dirty(repo: CommitRepo) -> None:
 
     res = repo.dry_run()
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
     assert "is valid" not in res.out

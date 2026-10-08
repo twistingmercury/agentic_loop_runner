@@ -8,7 +8,7 @@ from pathlib import Path
 
 from alr.engine.commit import CommitMode, Repo, check_clean, check_log_dir, find_repo
 from alr.engine.loop import RunOptions, load_tasks
-from alr.errors import RepoError, TaskFileError
+from alr.errors import LOG_FOLDER_VISIBLE, RefusedError, TaskFileError
 from alr.record.events import Event
 from alr.record.runlog import Info, RunLog, run_dir
 from alr.tasks import TaskList, save_tasks
@@ -54,7 +54,7 @@ async def prepare(settings: RunSettings) -> Prepared:
         repo=repo,
         commit_mode=settings.commit_mode,
     )
-    log = None if log_path is None else _open_log(settings, log_path, repo)
+    log = None if log_path is None else _open_log(settings, log_path)
     prepared = Prepared(task_list, options, log)
     # Last, so a check or the log failing never leaves the task file rewritten.
     try:
@@ -82,10 +82,15 @@ async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | 
     path = run_dir(settings.log_folder(), datetime.now().astimezone())
     try:
         await check_log_dir(repo, str(path))
-    except RepoError as exc:
-        raise RepoError(
+    except RefusedError as exc:
+        # Any other refusal (a git failure) keeps its own reason.
+        if exc.reason != LOG_FOLDER_VISIBLE:
+            raise
+
+        raise RefusedError(
+            LOG_FOLDER_VISIBLE,
             f"the log folder {settings.log_folder()} is not ignored by git; "
-            "add it to .gitignore or turn logging off"
+            "add it to .gitignore or turn logging off",
         ) from exc
 
     return path
@@ -99,7 +104,7 @@ def _save_gates(settings: RunSettings, task_list: TaskList) -> None:
     save_tasks(settings.tasks_file, task_list)
 
 
-def _open_log(settings: RunSettings, path: Path, repo: Repo | None) -> RunLog:
+def _open_log(settings: RunSettings, path: Path) -> RunLog:
     skip = settings.permissions is Permissions.SKIP
     info = Info(
         version=metadata.version("alr"),
@@ -107,6 +112,6 @@ def _open_log(settings: RunSettings, path: Path, repo: Repo | None) -> RunLog:
         permissions="skip" if skip else "sandbox",
         sandbox_settings="" if skip else settings.sandbox_file,
         gate_timeout=settings.gate_timeout,
-        commit=repo is not None,
+        commit=settings.commit_mode.value,
     )
     return RunLog.open(path, info)

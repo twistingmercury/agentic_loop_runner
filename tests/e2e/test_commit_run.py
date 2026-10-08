@@ -34,7 +34,10 @@ TWO_WORK_TASKS = (
 )
 
 
-DIRTY_TREE_ERROR = "error: --commit needs a clean work tree; commit, stash, or remove:"
+DIRTY_TREE_ERROR = (
+    "error: refused: dirty-tree: --commit needs a clean work tree; "
+    "commit, stash, or remove:"
+)
 
 
 def git(repo: Path, *args: str) -> str:
@@ -74,7 +77,7 @@ def test_commit_run_dirty_tree_refuses_to_start(
 
     res = run_with(tasks_path, "--commit", "run")
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
     assert git(git_repo, "log", "--format=%s").splitlines() == ["init"]
     assert tasks_path.read_text(encoding="utf-8") == TWO_WORK_TASKS

@@ -4,7 +4,32 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from alr.tasks import Gate, Task
+from alr.tasks import Gate, RunResult, Task
+
+# Long enough to name what went wrong, short enough for one error line; the
+# task's own log keeps the full text.
+_REASON_LIMIT = 200
+
+
+class FirstLine:
+    """The first non-empty line a command printed, kept so a failure can say why."""
+
+    def __init__(self) -> None:
+        self._text = ""
+
+    def take(self, line: str) -> None:
+        """Keep line, trimmed, unless an earlier line was already kept."""
+        if self._text:
+            return
+
+        self._text = line.strip()[:_REASON_LIMIT]
+
+    def reason(self, error: str | None) -> str | None:
+        """Return the failure's reason: None for success, else the first line printed, else the exit text."""
+        if error is None:
+            return None
+
+        return self._text or error
 
 
 @dataclass(frozen=True)
@@ -74,10 +99,13 @@ class FrontEnd(Protocol):
         """Note the final state and duration."""
         ...
 
-    def run_done(self, error: str | None, seconds: float) -> None:
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
         """Note the end of the run.
 
         error is None only for a run that finished cleanly; otherwise it is the
-        text of whatever ended the run, a stop included.
+        text of whatever ended the run, a stop included. result names how it
+        ended and exit_code is the code alr will exit with.
         """
         ...

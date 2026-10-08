@@ -41,7 +41,7 @@ def test_help_flag() -> None:
 def test_missing_tasks() -> None:
     res = run_alr()
 
-    assert res.code == 1, res
+    assert res.code == 2, res
     assert "error: required flag --dir not set\n" in res.err
 
 

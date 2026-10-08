@@ -88,7 +88,7 @@ def test_view_stop_ends_a_blocked_run_as_stopped(
     finally:
         child.close(force=True)
 
-    assert child.exitstatus == 1
+    assert child.exitstatus == 130
     # A stopped run saves nothing, so the next run picks the task up again.
     assert tasks_path.read_text(encoding="utf-8") == before
     assert_no_tmp_file(tasks_path)

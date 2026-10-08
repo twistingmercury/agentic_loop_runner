@@ -26,7 +26,8 @@ from alr.engine.commit import (
     open_repo,
     work_tree_root,
 )
-from alr.errors import RepoError, RunCancelledError, RunError
+from alr.errors import CommitFailedError, RefusedError, RunCancelledError, RunError
+from alr.plain.frontend import PlainFrontEnd
 from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
 
 RUN_DIR = "20261001T140211"
@@ -109,11 +110,13 @@ async def test_open_repo_dirty_tree_is_refused(
     tasks_file = write_nested_file(_task_file(git_repo), "tasks: []\n")
     dirty(git_repo)
 
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await open_repo(str(tasks_file))
 
+    assert caught.value.reason == "dirty-tree"
     assert str(caught.value) == (
-        f"--commit needs a clean work tree; commit, stash, or remove:\n{want_line}"
+        "refused: dirty-tree: --commit needs a clean work tree; "
+        f"commit, stash, or remove:\n{want_line}"
     )
 
 
@@ -183,11 +186,13 @@ async def test_open_repo_task_file_must_be_ignored_or_outside(
 ) -> None:
     tasks_file = setup(git_repo, outside)
 
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await open_repo(tasks_file)
 
+    assert caught.value.reason == "task-file-visible"
     assert str(caught.value) == (
-        f"--commit needs the task file ignored by git or outside the repository: {want_rel}"
+        "refused: task-file-visible: --commit needs the task file ignored by git "
+        f"or outside the repository: {want_rel}"
     )
 
 
@@ -259,7 +264,7 @@ async def test_open_repo_from_subdirectory_covers_whole_tree(
     write_nested_file(git_repo / "stray.txt", "stray\n")
     monkeypatch.chdir(sub)
 
-    with pytest.raises(RepoError, match=r"\?\? stray\.txt"):
+    with pytest.raises(RefusedError, match=r"\?\? stray\.txt"):
         await open_repo(str(_task_file(git_repo)))
 
 
@@ -276,13 +281,14 @@ async def test_open_repo_from_subdirectory_checks_the_task_file_from_the_root(
     assert await open_repo(str(_task_file(git_repo))) == Repo(root=str(git_repo))
 
 
-async def test_open_repo_broken_repository_is_an_error(git_repo: Path) -> None:
+async def test_a_broken_repository_is_refused_with_git_error(git_repo: Path) -> None:
     _break_config(git_repo)
 
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await open_repo(str(_task_file(git_repo)))
 
-    assert "git rev-parse" in str(caught.value)
+    assert caught.value.reason == "git-error"
+    assert str(caught.value).startswith("refused: git-error: --commit: git rev-parse: ")
 
 
 async def test_open_repo_status_failure_carries_gits_message(
@@ -291,9 +297,10 @@ async def test_open_repo_status_failure_carries_gits_message(
     (git_repo / ".git" / "index").write_bytes(b"garbage")
 
     # Outside the tree, so the task file check does not touch the index first.
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await open_repo(str(outside / "tasks.yaml"))
 
+    assert caught.value.reason == "git-error"
     message = str(caught.value)
     assert "git status" in message
     # git's own complaint about the bad index, not just its exit status.
@@ -332,6 +339,11 @@ async def _open(tasks_file: Path) -> Repo:
 def _head_files(repo: Path) -> list[str]:
     """The files the newest commit changed."""
     return sorted(git(repo, "show", "--name-only", "--format=", "HEAD").split())
+
+
+def _head_staged(repo: Path) -> list[str]:
+    """The files staged for the next commit."""
+    return sorted(git(repo, "diff", "--cached", "--name-only").split())
 
 
 def _install_hook(repo: Path, script: str) -> None:
@@ -429,17 +441,48 @@ async def test_run_commit_failure_fails_task_and_stops_run(
     record = tmp_path / "record.log"
     monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(record))
     tasks_file = _task_file(git_repo)
-    want_error = "commit failed: exit status 1"
+    want_error = "commit failed: hook-says-no"
 
-    with pytest.raises(RunError) as caught:
+    with pytest.raises(CommitFailedError) as caught:
         await run_loop(
             _two_tasks(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
         )
 
+    assert caught.value.exit_code == 4
     assert str(caught.value) == f"task 1: First failed: {want_error}"
     assert commit_subjects(git_repo) == ["init"]
     assert len(record.read_text().splitlines()) == 1, "the second task must never run"
     assert _saved_states(tasks_file) == [(FAILED, want_error), (PENDING, "")]
+    assert _head_staged(git_repo) == ["one.txt"], "the work stays staged"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_commit_failure_reason_is_trimmed_to_200(git_repo: Path) -> None:
+    _install_hook(git_repo, "printf 'x%.0s' $(seq 300) >&2\nexit 1")
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(CommitFailedError):
+        await run_loop(
+            _two_tasks(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
+        )
+
+    error = _saved_states(tasks_file)[0][1]
+    assert error == "commit failed: " + "x" * 200
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_commit_failure_without_output_says_the_exit(
+    git_repo: Path,
+) -> None:
+    _install_hook(git_repo, "exit 1")
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(CommitFailedError):
+        await run_loop(
+            _two_tasks(_work_gate("one.txt")), tasks_file, repo=await _open(tasks_file)
+        )
+
+    assert _saved_states(tasks_file)[0] == (FAILED, "commit failed: exit status 1")
 
 
 # The task file is rewritten after every task and git must never see it, so
@@ -483,9 +526,10 @@ async def test_run_commit_after_the_session_committed_itself(git_repo: Path) -> 
 async def test_run_failed_add_fails_the_task(git_repo: Path) -> None:
     tasks_file = _task_file(git_repo)
     task_list = _gated_task(_work_gate("one.txt"), Gate(cmd="touch .git/index.lock"))
-    want_error = "commit failed: exit status 128"
+    lock = (git_repo / ".git" / "index.lock").resolve()
+    want_error = f"commit failed: fatal: Unable to create '{lock}': File exists."
 
-    with pytest.raises(RunError) as caught:
+    with pytest.raises(CommitFailedError) as caught:
         await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
 
     assert str(caught.value) == f"task 1: First failed: {want_error}"
@@ -678,11 +722,13 @@ async def test_check_log_dir_nil_repo_checks_nothing() -> None:
 async def test_check_log_dir_inside_the_tree_must_be_ignored(git_repo: Path) -> None:
     repo = await _open(_task_file(git_repo))
 
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await check_log_dir(repo, str(git_repo / "logs" / RUN_DIR))
 
+    assert caught.value.reason == "log-folder-visible"
     assert str(caught.value) == (
-        "--commit needs the log directory ignored by git or outside the repository: logs"
+        "refused: log-folder-visible: --commit needs the log directory ignored "
+        "by git or outside the repository: logs"
     )
 
 
@@ -710,11 +756,12 @@ async def test_check_log_dir_relative_path_from_a_subdirectory(
 
     await check_log_dir(repo, str(Path("..", "..", "logs", RUN_DIR)))
 
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await check_log_dir(repo, str(Path("..", "..", "elsewhere", RUN_DIR)))
 
     assert str(caught.value) == (
-        "--commit needs the log directory ignored by git or outside the repository: elsewhere"
+        "refused: log-folder-visible: --commit needs the log directory ignored "
+        "by git or outside the repository: elsewhere"
     )
 
 
@@ -807,7 +854,7 @@ async def test_run_after_all_later_failed_task_leaves_earlier_work_uncommitted(
         )
 
     _assert_work_left_uncommitted(git_repo)
-    assert _saved_states(tasks_file)[0] == (COMPLETED, "")
+    assert _saved_states(tasks_file)[0] == (PENDING, "")
 
 
 async def test_run_after_all_later_cancelled_task_leaves_earlier_work_uncommitted(
@@ -913,22 +960,129 @@ async def test_run_after_all_with_every_task_completed_makes_no_commit(
     assert commit_subjects(git_repo) == ["init"]
 
 
-@pytest.mark.usefixtures("fake_claude")
-async def test_run_after_all_commit_failure_stops_the_run(git_repo: Path) -> None:
-    _install_hook(git_repo, "echo hook-says-no >&2\nexit 1")
-    tasks_file = _task_file(git_repo)
-    repo = await _open(tasks_file)
+class _SnapshotFrontEnd(PlainFrontEnd):
+    """Notes what tasks.yaml holds each time a task finishes."""
 
-    with pytest.raises(RunError, match="commit failed"):
+    def __init__(self, tasks_file: Path) -> None:
+        super().__init__()
+        self.seen: list[list[tuple[str, str]]] = []
+        self._tasks_file = tasks_file
+
+    def task_finished(self, task: Task, error: str | None, seconds: float) -> None:
+        self.seen.append(_saved_states(self._tasks_file))
+        super().task_finished(task, error, seconds)
+
+
+def _save_first(task_list: TaskList, tasks_file: Path) -> None:
+    """Write the task file as the user left it, so a test can read it mid-run."""
+    tasks_file.parent.mkdir(parents=True, exist_ok=True)
+    tasks.save_tasks(str(tasks_file), task_list)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_saves_nothing_until_the_commit_lands(git_repo: Path) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _two_tasks(_NUMBERED)
+    _save_first(task_list, tasks_file)
+    front_end = _SnapshotFrontEnd(tasks_file)
+
+    await run_loop(
+        task_list,
+        tasks_file,
+        repo=await _open(tasks_file),
+        commit_mode=CommitMode.RUN,
+        front_end=front_end,
+    )
+
+    assert front_end.seen == [[(PENDING, ""), (PENDING, "")]] * 2, (
+        "the file must stay untouched until the commit lands"
+    )
+    assert _saved_states(tasks_file) == [(COMPLETED, ""), (COMPLETED, "")]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_failed_task_leaves_the_others_pending(git_repo: Path) -> None:
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(RunError, match="task 2: Second failed"):
         await run_loop(
-            _two_tasks(_NUMBERED),
+            _two_tasks(_WORK_ONCE),
             tasks_file,
-            repo=repo,
+            repo=await _open(tasks_file),
             commit_mode=CommitMode.RUN,
         )
 
+    states = _saved_states(tasks_file)
+    assert [state for state, _ in states] == [PENDING, FAILED]
+    assert states[1][1], "the failed task carries its reason"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_failed_commit_marks_only_the_last_task_failed(
+    git_repo: Path,
+) -> None:
+    _install_hook(git_repo, "echo hook-says-no >&2\nexit 1")
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _two_tasks(_NUMBERED),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    assert caught.value.exit_code == 4
     assert commit_subjects(git_repo) == ["init"]
-    assert _saved_states(tasks_file) == [(COMPLETED, ""), (COMPLETED, "")]
+    assert _saved_states(tasks_file) == [
+        (PENDING, ""),
+        (FAILED, "commit failed: hook-says-no"),
+    ]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_resumed_run_keeps_earlier_completed_tasks(
+    git_repo: Path,
+) -> None:
+    resumed = _two_tasks(Gate(cmd="exit 1"))
+    resumed.tasks[0].state = COMPLETED
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(RunError, match="task 2: Second failed"):
+        await run_loop(
+            resumed,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    states = _saved_states(tasks_file)
+    assert states[0] == (COMPLETED, ""), (
+        "work committed by an earlier run stays completed"
+    )
+    assert states[1][0] == FAILED
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_stop_during_the_final_commit_leaves_all_pending(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_nested_file(
+        _task_file(git_repo),
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
+    )
+
+    await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        CommitMode.RUN,
+    )
+
+    assert _saved_states(tasks_file) == [(PENDING, "")], (
+        "the task passed its gates but its work was never committed"
+    )
 
 
 async def test_work_tree_root_names_the_repository(git_repo: Path) -> None:

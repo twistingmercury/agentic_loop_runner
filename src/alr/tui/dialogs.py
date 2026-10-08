@@ -22,10 +22,18 @@ from textual.widgets import (
 )
 
 from alr.durations import format_elapsed
-from alr.errors import AlrError
+from alr.errors import AlrError, RefusedError
 from alr.tasks import Gate, Task, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
 from alr.tui.settings import Permissions
+
+
+def error_text(exc: AlrError) -> str:
+    """Say what a domain error says; a refusal's reason is for the command line, so only its message shows."""
+    if isinstance(exc, RefusedError):
+        return exc.message
+
+    return str(exc)
 
 
 class _Dialog[R](ModalScreen[R | None]):
@@ -202,7 +210,7 @@ class FolderDialog(_Dialog[FolderCheck]):
         try:
             check = await check_folder(folder)
         except AlrError as exc:
-            self.query_one("#error", Static).update(str(exc))
+            self.query_one("#error", Static).update(error_text(exc))
             return
 
         self.dismiss(check)
@@ -266,7 +274,7 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
         try:
             check_sandbox(path)
         except AlrError as exc:
-            self.query_one("#error", Static).update(str(exc))
+            self.query_one("#error", Static).update(error_text(exc))
             return
 
         self.dismiss(PermissionChoice(Permissions.SANDBOX, path))

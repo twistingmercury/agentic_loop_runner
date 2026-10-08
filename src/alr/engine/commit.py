@@ -9,8 +9,14 @@ from pathlib import Path
 from alr.engine import proc
 from alr.engine.frontend import FrontEnd
 from alr.engine.gates import first_line
-from alr.errors import RepoError
-from alr.tasks import COMPLETED, FAILED, Task
+from alr.errors import (
+    DIRTY_TREE,
+    GIT_ERROR,
+    LOG_FOLDER_VISIBLE,
+    TASK_FILE_VISIBLE,
+    RefusedError,
+)
+from alr.tasks import Task
 
 # What git says when the working directory has no work tree: no repository at
 # all, or a bare repository or .git directory.
@@ -80,18 +86,15 @@ async def check_log_dir(repo: Repo | None, run_dir: str) -> None:
     if rel is None or await _ignored(repo, rel):
         return
 
-    raise RepoError(
-        f"--commit needs the log directory ignored by git or outside the repository: {Path(rel).parent}"
+    raise RefusedError(
+        LOG_FOLDER_VISIBLE,
+        f"--commit needs the log directory ignored by git or outside the repository: {Path(rel).parent}",
     )
 
 
-async def commit(repo: Repo, task: Task, front_end: FrontEnd) -> tuple[str, str]:
-    """Commit what the task left in the work tree, named after the task; return its final outcome."""
-    error = await _commit_changes(repo, task, front_end, [task.name])
-    if error is None:
-        return COMPLETED, ""
-
-    return FAILED, f"commit failed: {error}"
+async def commit(repo: Repo, task: Task, front_end: FrontEnd) -> str | None:
+    """Commit what the task left in the work tree, named after the task; return why git refused, or None."""
+    return await _commit_changes(repo, task, front_end, [task.name])
 
 
 async def commit_all(
@@ -165,7 +168,9 @@ async def _find_root() -> str | None:
     if any(message in stderr for message in _NOT_A_REPO):
         return None
 
-    raise RepoError(f"--commit: git rev-parse: {_git_message(returncode, stderr)}")
+    raise RefusedError(
+        GIT_ERROR, f"--commit: git rev-parse: {_git_message(returncode, stderr)}"
+    )
 
 
 def _git_message(returncode: int, stderr: str) -> str:
@@ -185,8 +190,9 @@ async def _check_task_file(repo: Repo, tasks_file: str) -> None:
     if rel is None or await _ignored(repo, rel):
         return
 
-    raise RepoError(
-        f"--commit needs the task file ignored by git or outside the repository: {rel}"
+    raise RefusedError(
+        TASK_FILE_VISIBLE,
+        f"--commit needs the task file ignored by git or outside the repository: {rel}",
     )
 
 
@@ -203,12 +209,15 @@ async def check_clean(repo: Repo) -> None:
         "--untracked-files=all",
     )
     if returncode != 0:
-        raise RepoError(f"--commit: git status: {_git_message(returncode, stderr)}")
+        raise RefusedError(
+            GIT_ERROR, f"--commit: git status: {_git_message(returncode, stderr)}"
+        )
 
     if dirty.strip():
         files = dirty.rstrip("\n")
-        raise RepoError(
-            f"--commit needs a clean work tree; commit, stash, or remove:\n{files}"
+        raise RefusedError(
+            DIRTY_TREE,
+            f"--commit needs a clean work tree; commit, stash, or remove:\n{files}",
         )
 
 
@@ -234,8 +243,9 @@ async def _ignored(repo: Repo, rel: str) -> bool:
     returncode, _, stderr = await _git(repo, "check-ignore", "-q", "--", rel)
     # Exit 0 is ignored and 1 is not ignored; anything else is a failure, not an answer.
     if returncode not in (0, 1):
-        raise RepoError(
-            f"--commit: git check-ignore: {_git_message(returncode, stderr)}"
+        raise RefusedError(
+            GIT_ERROR,
+            f"--commit: git check-ignore: {_git_message(returncode, stderr)}",
         )
 
     return returncode == 0

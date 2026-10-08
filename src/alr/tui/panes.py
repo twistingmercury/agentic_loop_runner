@@ -19,9 +19,9 @@ from alr.record.events import (
     TaskStarted,
 )
 from alr.durations import format_elapsed
-from alr.tasks import COMPLETED, FAILED, TaskList
+from alr.tasks import COMPLETED, FAILED, PASSED, TaskList
 
-_SYMBOLS = {COMPLETED: "✔", FAILED: "✖"}
+_SYMBOLS = {COMPLETED: "✔", PASSED: "✔", FAILED: "✖"}
 _PENDING = "·"
 _RUNNING = "▶"
 _MIN_NAME = 10

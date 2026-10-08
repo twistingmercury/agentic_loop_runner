@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from helpers import write_file
 
-from alr.errors import RepoError, TaskFileError
+from alr.errors import RefusedError
 from alr.plain.dryrun import dry_run
 
 VALID_TASKS_YAML = """shared:
@@ -75,9 +75,24 @@ async def test_dry_run_invalid_file(tmp_path: Path) -> None:
     )
 
     out = io.StringIO()
-    with pytest.raises(TaskFileError, match="state"):
+    with pytest.raises(RefusedError, match="state") as caught:
         await dry_run(out, tasks_file, "", "", False)
 
+    assert caught.value.reason == "invalid-task-file"
+    assert out.getvalue() == ""
+
+
+async def test_dry_run_commit_invalid_task_file_is_refused_once(
+    git_repo: Path,
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", "tasks: not-a-list\n")
+
+    out = io.StringIO()
+    with pytest.raises(RefusedError) as caught:
+        await dry_run(out, tasks_file, "", "", True)
+
+    assert caught.value.reason == "invalid-task-file"
+    assert str(caught.value).count("failed to parse tasks yaml") == 1
     assert out.getvalue() == ""
 
 
@@ -189,8 +204,12 @@ async def test_dry_run_commit_dirty_repository_is_an_error(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     out = io.StringIO()
-    with pytest.raises(RepoError, match="--commit needs a clean work tree"):
+    with pytest.raises(
+        RefusedError, match="--commit needs a clean work tree"
+    ) as caught:
         await dry_run(out, tasks_file, "", "", True)
+
+    assert caught.value.reason == "dirty-tree"
 
     assert "is valid" not in out.getvalue()
 
@@ -204,8 +223,10 @@ async def test_dry_run_commit_broken_repository_is_an_error(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     out = io.StringIO()
-    with pytest.raises(RepoError, match="--commit: git rev-parse: "):
+    with pytest.raises(RefusedError, match="--commit: git rev-parse: ") as caught:
         await dry_run(out, tasks_file, "", "", True)
+
+    assert caught.value.reason == "git-error"
 
     assert "is valid" not in out.getvalue()
 

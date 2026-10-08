@@ -1,7 +1,7 @@
 ---
-version: 18
+version: 19
 date: 2026-10-08
-notes: "The commit-modes criterion says a bare --commit and --commit-after-all are usage errors that exit 2, not exit 1 (ADR-024). Earlier: the commit flags are one flag, --commit {none,task,run}, default none, and --version also shows the OS and architecture (ADR-024); the flag table, the view's commit setting, and the commit-modes criterion say so. Earlier: removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022). --yolo replaces --skip-permissions with no alias (ADR-021)."
+notes: "Documents ADR-025's contract: every outcome has an exit code (0, 1, 2, 3, 4, 130, 143) and a logged reason; refusals name a reason; completed means complete, and a failed or stopped run mode run leaves nothing completed. A bad flag, neither or both permission flags, and --reset-failed with --dry-run exit 2, not 1. Earlier: The commit-modes criterion says a bare --commit and --commit-after-all are usage errors that exit 2, not exit 1 (ADR-024). Earlier: the commit flags are one flag, --commit {none,task,run}, default none, and --version also shows the OS and architecture (ADR-024); the flag table, the view's commit setting, and the commit-modes criterion say so. Earlier: removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022). --yolo replaces --skip-permissions with no alias (ADR-021)."
 ---
 
 # alr — Requirements
@@ -46,7 +46,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 5. Commit on request (`--commit task` for each completed task, `--commit run` once after the last; ADR-024) with gralph's startup checks and commit rule
 6. Build the session flags from `--sandbox-settings`, a `sandbox.json` found in the `--dir` run folder, or `--yolo`, with gralph's forced sandbox keys; require one choice on a real run
 7. Save the task file atomically after every task; stop the run on the first failed task; refuse to start when the file already holds a failed task
-8. Stop cleanly on SIGINT or SIGTERM: kill the running process group, leave the task and the file untouched, exit 1
+8. Stop cleanly on SIGINT or SIGTERM: kill the running process group, leave the task and the file untouched, exit 130 for SIGINT and 143 for SIGTERM (ADR-025)
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file
 10. Keep the logic that only plain mode runs clearly apart from the logic that only the full-screen path runs, with the shared rules in one place
 11. Port the full-screen path's engine side now: stream-json parsing, run events, and the run log writer, tested against a fake `claude`
@@ -60,6 +60,8 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
 20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
 21. Open a task file that holds failed tasks in the view and reset them to pending from the menu after a confirmation, or silently with `--reset-failed` in either mode
+22. Give every way a run can end its own exit code and a logged reason, so an outside program can tell them apart (ADR-025): 0 completed, 1 a task or gate failed, 2 a usage error, 3 refused to start (first stderr line `error: refused: <reason>: <message>`, no run log, nothing changed on disk), 4 a commit failed, 130 or 143 stopped. The run log's `run_finished` says the `result` and the `exit` code, and `run_started` says the commit mode (`none`, `task`, or `run`)
+23. Mark a task `completed` only when everything its commit mode asks of it succeeded: in `task` mode after its commit lands, in `run` mode only when the one commit lands, with `tasks.yaml` saved once at the end, so a failed or stopped `run` leaves nothing completed and can be discarded and repeated (ADR-025)
 
 ### Secondary Goals
 
@@ -94,7 +96,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
 | `--yolo`                    |       | New name for gralph's `--skip-permissions` (ADR-021). Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
-| `--commit {none,task,run}`  |       | New in alr (ADR-024). `none` (the default) never touches git; `task` commits each completed task after its gates pass; `run` makes one commit after the last task completes, and none on a failed or stopped run. Pre-selects the view's Commit dropdown. `--commit` with no value, and the old `--commit-after-all`, are usage errors |
+| `--commit {none,task,run}`  |       | New in alr (ADR-024). `none` (the default) never touches git; `task` commits each completed task after its gates pass; `run` makes one commit after the last task completes, and none on a failed or stopped run, which leaves nothing marked completed (ADR-025). Pre-selects the view's Commit dropdown. `--commit` with no value, and the old `--commit-after-all`, are usage errors |
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
 | `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
 
@@ -106,17 +108,17 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | Wire contract          | Stdin text and Claude argv identical to gralph's                                                | Golden test on stdin; argv recorded by the fake `claude`                    |
 | Outcome rule           | Same state and error for every result-line case                                                 | Ported `result_test.go` and `claude_result_test.go` cases                   |
 | Gate enforcement       | Completed only when every gate exits zero; timeouts honored; gates skipped on a failed session  | Ported gate unit and e2e tests with real shell commands                     |
-| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both exits 1; a folder's `sandbox.json` answers the choice, and `--yolo` overrides it | Ported sandbox unit and e2e tests |
-| Commit on request      | One commit per completed task; none for a failed task; a dirty tree refuses to start            | Ported commit tests against real git repositories in temporary folders     |
+| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both is a usage error that exits 2; a folder's `sandbox.json` answers the choice, and `--yolo` overrides it | Ported sandbox unit and e2e tests |
+| Commit on request      | One commit per completed task; none for a failed task; a dirty tree refuses to start (exit 3, reason `dirty-tree`); a failed commit marks the task `failed` and exits 4 | Ported commit tests against real git repositories in temporary folders     |
 | State persistence      | Atomic save after every task; file untouched on cancel                                          | Ported e2e tests check the file after each run                              |
-| Signal handling        | SIGINT and SIGTERM kill the whole process group; exit 1; no orphans                             | Ported signal e2e tests with the fake `claude` and a descendant process     |
-| Exit codes             | Zero only when every task completed                                                             | Ported e2e matrix                                                           |
+| Signal handling        | SIGINT and SIGTERM kill the whole process group; exit 130 (SIGINT) or 143 (SIGTERM); no orphans                             | Ported signal e2e tests with the fake `claude` and a descendant process     |
+| Exit codes             | 0 completed, 1 task or gate failed, 2 usage error, 3 refused (the line `error: refused: <reason>: <message>`, no run log, nothing changed), 4 commit failed, 130 or 143 stopped; the log's `run_finished` carries the `result` and `exit` | A unit test per code and reason; one e2e test per code (`test_outcomes.py`) |
 | Run log                | Same ledger lines and detail files as gralph for the same events; `run_started` has no `prompt_file` | Ported `runlog_test.go` cases                                          |
 | Path separation        | `engine` imports neither `plain` nor `stream`; `plain` and `stream` do not import each other    | A test that inspects the imports                                            |
 | View states            | Start disabled with a reason while something is missing; Running locks the settings and greys out the Folder, Permissions, Reset, and Quit buttons; Finished shows a summary and stays open | TUI unit tests under Textual's `run_test` and `Pilot`          |
 | Dialog rules           | A dialog opens only for an open step; nothing is written before Start except a confirmed reset | TUI unit tests                                                     |
-| Reset                  | A file with failed tasks opens with Start disabled and the reason shown; a confirmed reset saves them pending with no error text; `--reset-failed` does it silently and exits 1 with `--dry-run` | Engine, CLI, and TUI unit tests; e2e                |
-| Commit modes           | No git use, one commit per task, or one commit after the last task; none after a failed or stopped run; a bare `--commit` and `--commit-after-all` are usage errors that exit 2 | Unit tests against real git repositories; e2e                  |
+| Reset                  | A file with failed tasks opens with Start disabled and the reason shown; a confirmed reset saves them pending with no error text; `--reset-failed` does it silently and exits 2 with `--dry-run` | Engine, CLI, and TUI unit tests; e2e                |
+| Commit modes           | No git use, one commit per task, or one commit after the last task; none after a failed or stopped run, and in `run` mode no task saved `completed` until the commit lands; a bare `--commit` and `--commit-after-all` are usage errors that exit 2 | Unit tests against real git repositories; e2e                  |
 | Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
 | View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |
 | Skill install          | The bundled skill lands in `~/.claude/skills/gralph-docs-writer/`, replacing any copy           | Unit test with a temporary home; e2e                                        |

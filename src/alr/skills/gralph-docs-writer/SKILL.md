@@ -79,7 +79,8 @@ authorized.
    are rejected too. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
    IDs are unique and independent of order; Gralph runs tasks in file order.
-   Names are unique ignoring case and surrounding whitespace. `state` is
+   Names are unique ignoring case and surrounding whitespace, and each name is
+   a single line: a line break in a name is an error. `state` is
    `pending`, `completed`, or `failed`; leave it empty for new work, which
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
    write it; preserve it if present when updating an existing file. Write no

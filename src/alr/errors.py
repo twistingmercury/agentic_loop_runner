@@ -12,6 +12,16 @@ FAILED_TASKS_MESSAGE = (
     "fix the failed tasks and set their state to pending before running"
 )
 
+DIRTY_TREE = "dirty-tree"
+TASK_FILE_VISIBLE = "task-file-visible"
+LOG_FOLDER_VISIBLE = "log-folder-visible"
+FAILED_TASKS = "failed-tasks"
+INVALID_TASK_FILE = "invalid-task-file"
+INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"
+LOG_UNWRITABLE = "log-unwritable"
+GIT_ERROR = "git-error"
+LOCKED = "locked"
+
 
 def quote(text: str) -> str:
     """Wrap text in double quotes, escaping what needs it, for names in error messages."""
@@ -19,31 +29,38 @@ def quote(text: str) -> str:
 
 
 class AlrError(Exception):
-    """Base for every error alr reports as `error: <message>` with exit code 1."""
+    """Base for every error alr reports as `error: <message>`; exit_code is the code it exits with."""
+
+    exit_code = 1
 
 
 class UsageError(AlrError):
     """A flag is missing, conflicts with another, or has a bad value."""
+
+    exit_code = 2
+
+
+class RefusedError(AlrError):
+    """alr declined to start; nothing ran and nothing was written."""
+
+    exit_code = 3
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(f"refused: {reason}: {message}")
+        self.reason = reason
+        self.message = message
 
 
 class TaskFileError(AlrError):
     """The task file cannot be read, parsed, validated, or saved."""
 
 
-class FailedTasksError(AlrError):
+class FailedTasksError(RefusedError):
     """The task file already holds a failed task."""
 
     def __init__(self, task_list: TaskList) -> None:
-        super().__init__(FAILED_TASKS_MESSAGE)
+        super().__init__(FAILED_TASKS, FAILED_TASKS_MESSAGE)
         self.task_list = task_list
-
-
-class SandboxError(AlrError):
-    """The sandbox settings file is missing, unreadable, or not a JSON object."""
-
-
-class RepoError(AlrError):
-    """--commit cannot use the repository as it is."""
 
 
 class RunLogError(AlrError):
@@ -52,6 +69,12 @@ class RunLogError(AlrError):
 
 class RunError(AlrError):
     """A task failed, or its state could not be saved."""
+
+
+class CommitFailedError(RunError):
+    """A task's work passed its gates but git would not commit it."""
+
+    exit_code = 4
 
 
 class RunCancelledError(RunError):

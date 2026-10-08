@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from alr.durations import format_duration
-from alr.errors import RunLogError
+from alr.errors import LOG_UNWRITABLE, RefusedError, RunLogError
 from alr.record.events import (
     Activity,
     Committed,
@@ -23,7 +23,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import FAILED, Task
+from alr.tasks import Task
 
 # The record holds Claude's text and whatever a gate or git printed, so it is
 # private to the user.
@@ -41,7 +41,7 @@ class Info:
     permissions: str  # "sandbox" or "skip"
     sandbox_settings: str = ""  # the settings file's path, "" when not passed
     gate_timeout: str = ""  # the --gate-timeout value, "" when not passed
-    commit: bool = False
+    commit: str = "none"  # the requested commit mode: "none", "task", or "run"
 
 
 def run_dir(log_dir: Path, start: datetime) -> Path:
@@ -135,9 +135,6 @@ class RunLog:
         self._ledger: TextIO | None = None
         self._detail: TextIO | None = None
         self._detail_path: Path | None = None
-        # Says the last finished task failed, which is what tells a failed run
-        # from one stopped for any other reason.
-        self._failed = False
 
     @classmethod
     def open(
@@ -148,14 +145,17 @@ class RunLog:
     ) -> "RunLog":
         """Create path, or path-1, path-2 and so on when it exists, and start the
         ledger with the run_started line."""
-        path = _create_run_dir(path)
+        try:
+            path = _create_run_dir(path)
+        except RunLogError as exc:
+            raise RefusedError(LOG_UNWRITABLE, str(exc)) from exc
 
         log = cls(path, now)
         try:
             log._start(info)
-        except RunLogError:
+        except RunLogError as exc:
             log.close()
-            raise
+            raise RefusedError(LOG_UNWRITABLE, str(exc)) from exc
 
         return log
 
@@ -219,7 +219,6 @@ class RunLog:
         detail_path = self._path / f"task-{event.task.id}.log"
         self._detail = _open_append(detail_path)
         self._detail_path = detail_path
-        self._failed = False
         self._write_ledger(
             "task_started", {"task": event.task.id, "name": event.task.name}
         )
@@ -269,16 +268,16 @@ class RunLog:
         )
 
     def _task_finished(self, event: TaskFinished) -> None:
-        self._failed = event.task.state == FAILED
         self._step_finished("task_finished", event.task, event.seconds)
         detail, self._detail = self._detail, None
         _close(detail, self._detail_path or self._path)
 
     def _run_done(self, event: RunDone) -> None:
-        fields: dict[str, Any] = {"result": _run_result(event.error, self._failed)}
+        fields: dict[str, Any] = {"result": event.result.value}
         if event.error:
             fields["error"] = event.error
 
+        fields["exit"] = event.exit_code
         fields["duration"] = format_duration(event.seconds)
         self._write_ledger("run_finished", fields)
 
@@ -291,10 +290,3 @@ def _gate_result(event: GateFinished) -> str:
         return "failed"
 
     return "passed"
-
-
-def _run_result(error: str | None, failed: bool) -> str:
-    if error is None:
-        return "completed"
-
-    return "failed" if failed else "stopped"

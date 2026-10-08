@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** exit codes. A stop now exits 130 (SIGINT) or 143 (SIGTERM), not
+  1; a refusal to start exits 3, not 1; a usage error (a missing `--dir`,
+  neither or both of `--sandbox-settings` and `--yolo`, a run folder with no
+  `tasks.yaml`) exits 2; a failed commit exits 4. A failed task or gate still
+  exits 1.
+- **Breaking:** a refusal's first stderr line is now
+  `error: refused: <reason>: <message>`, with the reason `dirty-tree`,
+  `task-file-visible`, `log-folder-visible`, `failed-tasks`,
+  `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, or
+  `git-error`. A refusal writes no run log and changes nothing on disk, and
+  `--reset-failed` is applied only after the checks pass.
+- **Breaking:** `run_started.commit` in the run log is a string, `"none"`,
+  `"task"`, or `"run"`, where it was a boolean.
+- **Breaking:** `--commit run` saves nothing until the commit lands. If a task
+  or gate fails, that task is `failed` and the others that ran are `pending`; if
+  the commit fails, the last task is `failed` and the others `pending`; a stop
+  leaves every task that ran `pending`. A failed or stopped `run` leaves nothing
+  completed, so its leftover work can be discarded and the run repeated. The
+  README no longer tells you to commit it by hand.
+- **Breaking:** with `--commit task`, `completed` also means committed. A commit
+  that fails (git, a hook, a missing identity) marks the task `failed` with
+  `commit failed: <reason>`, leaves the work staged, and exits 4.
+- **Breaking:** a task name with a line break is rejected when the file loads,
+  with an error that names the task id.
+
+### Added
+
+- `run_finished` in the run log has `result` (`completed`, `failed`,
+  `commit_failed`, or `stopped`) and `exit`, the code alr returns.
+- In `run` mode a task whose gates passed is logged and shown as `passed` until
+  the commit lands.
+- A commit failure's reason is the first line of git's output, up to 200
+  characters; `task-N.log` keeps the full text.
+- The full-screen view exits with the same codes as plain mode.
+
 ## [0.0.10] - 2026-10-08
 
 ### Changed

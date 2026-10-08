@@ -3,15 +3,19 @@
 import asyncio
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import NamedTuple
 
 from alr.engine.commit import CommitMode, Repo, commit, commit_all
 from alr.engine.frontend import FrontEnd
 from alr.engine.gates import run_gates
 from alr.engine.result import last_result_line, outcome
+from alr.engine.stop import Stop
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
+    AlrError,
+    CommitFailedError,
     FailedTasksError,
     RunCancelledError,
     RunError,
@@ -21,8 +25,10 @@ from alr.errors import (
 from alr.tasks import (
     COMPLETED,
     FAILED,
+    PASSED,
     PENDING,
     Gate,
+    RunResult,
     Task,
     TaskList,
     parse_tasks,
@@ -34,6 +40,15 @@ __all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_tasks", "run"]
 # What a stop that carries no task of its own is recorded as; a stop inside a
 # task says "task N: name: stopped" through RunCancelledError.
 _STOPPED = "stopped"
+
+
+class _Outcome(NamedTuple):
+    """What a task ended as: the state and error to save."""
+
+    state: str
+    error: str
+    commit_failed: bool = False
+    """Whether the commit step is what failed, which ends the run with its own exit code."""
 
 
 @dataclass(frozen=True)
@@ -53,6 +68,9 @@ class RunOptions:
 
     commit_mode: CommitMode = CommitMode.NONE
     """When the repo is committed into: never, after each task, or once after the last."""
+
+    stop: Stop = field(default_factory=Stop)
+    """Which signal stopped the run; the caller that handles signals fills it in."""
 
 
 def read_tasks(path: str) -> TaskList:
@@ -104,17 +122,36 @@ def reset_failed(tasks_file: str) -> int:
 
 
 async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> None:
-    """Run every pending task in file order, saving the file after each one."""
+    """Run every pending task in file order, saving the file after each one.
+
+    In `run` commit mode the file is saved once, after the single commit.
+    """
     started = time.monotonic()
     error: str | None = None
+    result, exit_code = RunResult.COMPLETED, 0
     try:
         await _run_loop(task_list, options, front_end)
     except BaseException as exc:
         # Whatever ends the run is recorded, so a crash never reads as a clean finish.
         error = _error_text(exc)
+        result, exit_code = _ending(exc, options.stop)
         raise
     finally:
-        front_end.run_done(error, time.monotonic() - started)
+        front_end.run_done(error, time.monotonic() - started, result, exit_code)
+
+
+def _ending(exc: BaseException, stop: Stop) -> tuple[RunResult, int]:
+    """Name how the run ended and the code alr will exit with."""
+    if isinstance(exc, RunCancelledError | asyncio.CancelledError | KeyboardInterrupt):
+        return RunResult.STOPPED, stop.exit_code()
+
+    if isinstance(exc, CommitFailedError):
+        return RunResult.COMMIT_FAILED, exc.exit_code
+
+    if isinstance(exc, AlrError):
+        return RunResult.FAILED, exc.exit_code
+
+    return RunResult.FAILED, 1
 
 
 def _error_text(exc: BaseException) -> str:
@@ -129,6 +166,15 @@ def _error_text(exc: BaseException) -> str:
     return f"{name}: {exc}" if str(exc) else name
 
 
+def _defers_saving(options: RunOptions) -> bool:
+    """Report whether the run saves tasks.yaml once, at the end.
+
+    Only `run` mode with a repository: the one commit decides whether any task
+    is complete, so no task may be saved as completed before it lands.
+    """
+    return options.repo is not None and options.commit_mode is CommitMode.RUN
+
+
 async def _run_loop(
     task_list: TaskList, options: RunOptions, front_end: FrontEnd
 ) -> None:
@@ -138,17 +184,20 @@ async def _run_loop(
             front_end.task_skipped(task)
             continue
 
-        await _run_and_save(task, task_list, options, front_end)
+        await _run_and_save(task, task_list, options, front_end, ran)
         ran.append(replace(task))
 
-    await _commit_after_all(ran, options, front_end)
+    await _commit_after_all(task_list, ran, options, front_end)
 
 
 async def _commit_after_all(
-    ran: Sequence[Task], options: RunOptions, front_end: FrontEnd
+    task_list: TaskList,
+    ran: Sequence[Task],
+    options: RunOptions,
+    front_end: FrontEnd,
 ) -> None:
-    """Commit the whole run once; a failed run never gets here, so its work stays in the tree."""
-    if options.repo is None or options.commit_mode is not CommitMode.RUN:
+    """Commit the whole run once, then save it; a failed run never gets here, so its work stays in the tree."""
+    if options.repo is None or not _defers_saving(options):
         return
 
     if not ran:
@@ -157,10 +206,55 @@ async def _commit_after_all(
     try:
         error = await commit_all(options.repo, ran, front_end)
     except asyncio.CancelledError:
+        _finish_deferred(task_list, ran, options)
         raise RunCancelledError("stopped during the final commit") from None
 
     if error is not None:
-        raise RunError(f"commit failed: {error}")
+        raise _commit_failed(task_list, ran, options, error)
+
+    _save(ran[-1], task_list, options.tasks_file, None)
+
+
+def _commit_failed(
+    task_list: TaskList, ran: Sequence[Task], options: RunOptions, error: str
+) -> CommitFailedError:
+    """Save the run as a failed commit and return the error to raise.
+
+    The commit covered every task that ran and cannot say which one it choked
+    on, so the last one carries the failure and the others go back to pending.
+    """
+    failure = f"commit failed: {error}"
+    last = _listed(task_list, ran[-1])
+    last.state, last.error = FAILED, failure
+    _finish_deferred(task_list, ran[:-1], options, failed=last, failure=failure)
+    return CommitFailedError(failure)
+
+
+def _listed(task_list: TaskList, task: Task) -> Task:
+    """Return the task list's own entry for a task, whichever copy was passed."""
+    return next(listed for listed in task_list.tasks if listed.id == task.id)
+
+
+def _finish_deferred(
+    task_list: TaskList,
+    ran: Sequence[Task],
+    options: RunOptions,
+    failed: Task | None = None,
+    failure: str | None = None,
+) -> None:
+    """Save a deferred run that did not land: every task in ran goes back to pending.
+
+    Tasks completed before the run are not in ran, so they are never touched.
+    """
+    for task in ran:
+        listed = _listed(task_list, task)
+        listed.state, listed.error = PENDING, ""
+
+    anchor = failed or (ran[-1] if ran else None)
+    if anchor is None:
+        return
+
+    _save(anchor, task_list, options.tasks_file, failure)
 
 
 async def _run_and_save(
@@ -168,21 +262,56 @@ async def _run_and_save(
     task_list: TaskList,
     options: RunOptions,
     front_end: FrontEnd,
+    ran: Sequence[Task],
 ) -> None:
     # The front end gets copies, so nothing it keeps changes under it.
     front_end.task_started(replace(task))
     started = time.monotonic()
-    state, error = await _run_task(
+    ended = await _run_task(
         task, task_list.shared.prompt, task_list.gate_list(), options, front_end
     )
-    task.state, task.error = state, error
+    task.state, task.error = ended.state, ended.error
     failure = (
-        None if state == COMPLETED else f"task {task.id}: {task.name} failed: {error}"
+        None
+        if ended.state == COMPLETED
+        else f"task {task.id}: {task.name} failed: {ended.error}"
     )
-    _save(task, task_list, options.tasks_file, failure)
-    front_end.task_finished(replace(task), failure, time.monotonic() - started)
-    if failure is not None:
-        raise RunError(failure)
+    _save_ended(task, task_list, options, failure, ran)
+    front_end.task_finished(_shown(task, options), failure, time.monotonic() - started)
+    if failure is None:
+        return
+
+    if ended.commit_failed:
+        raise CommitFailedError(failure)
+
+    raise RunError(failure)
+
+
+def _save_ended(
+    task: Task,
+    task_list: TaskList,
+    options: RunOptions,
+    failure: str | None,
+    ran: Sequence[Task],
+) -> None:
+    """Save the file after a task, unless the run saves once at the end."""
+    if not _defers_saving(options):
+        _save(task, task_list, options.tasks_file, failure)
+        return
+
+    # A passed task waits for the commit; a failed one ends the run now.
+    if failure is None:
+        return
+
+    _finish_deferred(task_list, ran, options, failed=task, failure=failure)
+
+
+def _shown(task: Task, options: RunOptions) -> Task:
+    """Copy the task for the front end, saying `passed` where it is not yet complete."""
+    if task.state == COMPLETED and _defers_saving(options):
+        return replace(task, state=PASSED)
+
+    return replace(task)
 
 
 async def _run_task(
@@ -191,7 +320,7 @@ async def _run_task(
     gates: Sequence[Gate],
     options: RunOptions,
     front_end: FrontEnd,
-) -> tuple[str, str]:
+) -> _Outcome:
     """Run the task's session, the gates, and the commit; return the state and error to save."""
     stdin_text = f"{prompt}\n\n{task.text()}\n"
     argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
@@ -207,22 +336,27 @@ async def _run_task(
         replace(task, state=state, error=error), time.monotonic() - started
     )
     if state != COMPLETED:
-        return state, error
+        return _Outcome(state, error)
 
     state, error = await run_gates(
         replace(task), gates, options.gate_timeout, front_end
     )
     per_task = options.commit_mode is CommitMode.TASK
     if state != COMPLETED or options.repo is None or not per_task:
-        return state, error
+        return _Outcome(state, error)
 
     try:
-        return await commit(options.repo, replace(task), front_end)
+        reason = await commit(options.repo, replace(task), front_end)
     except asyncio.CancelledError:
         # Nothing is saved, so the next run picks the task up again.
         raise RunCancelledError(
             f"task {task.id}: {task.name}: stopped during commit"
         ) from None
+
+    if reason is None:
+        return _Outcome(COMPLETED, "")
+
+    return _Outcome(FAILED, f"commit failed: {reason}", commit_failed=True)
 
 
 def _save(

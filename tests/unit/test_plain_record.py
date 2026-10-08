@@ -24,7 +24,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Gate, Shared, Task, TaskList
+from alr.tasks import Gate, RunResult, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -78,6 +78,7 @@ async def test_each_step_records_its_event(tmp_path: Path) -> None:
     assert finished.error is None
     [done] = [e for e in events if isinstance(e, RunDone)]
     assert done.error is None
+    assert (done.result, done.exit_code) == (RunResult.COMPLETED, 0)
 
 
 async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(
@@ -287,7 +288,9 @@ async def test_failing_git_command_records_its_output_and_returns_the_exit_text(
     lines = _lines(events)
     assert "hook-refused" in lines[lines.index("→ commit First") + 1 :]
     [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.error == "task 1: First failed: commit failed: exit status 1"
+    assert finished.error == "task 1: First failed: commit failed: hook-refused"
+    [done] = [e for e in events if isinstance(e, RunDone)]
+    assert (done.result, done.exit_code) == (RunResult.COMMIT_FAILED, 4)
 
 
 async def test_cancel_during_git_stops_the_group_gently(tmp_path: Path) -> None:

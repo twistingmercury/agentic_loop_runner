@@ -14,7 +14,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import COMPLETED, FAILED, Gate, Shared, Task, TaskList
+from alr.tasks import COMPLETED, FAILED, PASSED, Gate, Shared, Task, TaskList
 from alr.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, GatesPane, TasksPane
 
 FIRST = Task(id=1, name="First", prompt="p")
@@ -44,6 +44,16 @@ async def test_tasks_pane_shows_each_task_and_its_state() -> None:
         ]
         assert pane.get_row_at(0)[0] == "✔"
         assert pane.get_row_at(1)[0] == "·"
+
+
+async def test_tasks_pane_shows_a_passed_task_as_done() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+
+        pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
+
+        assert pane.get_row_at(0)[0] == "✔"
 
 
 async def test_tasks_pane_marks_a_running_task() -> None:

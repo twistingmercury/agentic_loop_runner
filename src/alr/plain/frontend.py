@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from typing import BinaryIO
 
 from alr.engine import proc
-from alr.engine.frontend import SessionResult
+from alr.engine.frontend import FirstLine, SessionResult
 from alr.engine.gates import first_line
 from alr.record.events import (
     Activity,
@@ -21,7 +21,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Gate, Task
+from alr.tasks import Gate, RunResult, Task
 
 _READ_SIZE = 64 * 1024
 
@@ -93,7 +93,11 @@ class PlainFrontEnd:
         self._report(CommitStarted(task))
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        return await self._run_command(task, argv, cwd=cwd, gentle=True)
+        first = FirstLine()
+        error = await self._run_command(
+            task, argv, cwd=cwd, gentle=True, tap=first.take
+        )
+        return first.reason(error)
 
     def committed(self, task: Task, commit_hash: str) -> None:
         self._report(Committed(task, commit_hash))
@@ -101,8 +105,10 @@ class PlainFrontEnd:
     def task_finished(self, task: Task, error: str | None, seconds: float) -> None:
         self._report(TaskFinished(task, error, seconds))
 
-    def run_done(self, error: str | None, seconds: float) -> None:
-        self._report(RunDone(error, seconds))
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
+        self._report(RunDone(error, seconds, result, exit_code))
 
     async def _run_command(
         self,
@@ -111,6 +117,7 @@ class PlainFrontEnd:
         *,
         cwd: str | None = None,
         gentle: bool = False,
+        tap: Callable[[str], None] | None = None,
     ) -> str | None:
         """Run a gate or a git command: show its output as it comes and report each line."""
         # No stdin. Both outputs are piped so each line can reach the run log.
@@ -125,15 +132,19 @@ class PlainFrontEnd:
         # that outlives it and holds the pipes must not hold up the run.
         return await proc.finish(
             process,
-            _pump_outputs(process, self._raw_line(task)),
+            _pump_outputs(process, self._raw_line(task, tap)),
             gentle=gentle,
             bounded=True,
         )
 
-    def _raw_line(self, task: Task) -> Callable[[bytes], None]:
+    def _raw_line(
+        self, task: Task, tap: Callable[[str], None] | None = None
+    ) -> Callable[[bytes], None]:
         def report_line(line: bytes) -> None:
             text = line.decode("utf-8", errors="replace").rstrip("\r\n")
             self._report(Activity(task, text))
+            if tap is not None:
+                tap(text)
 
         return report_line
 

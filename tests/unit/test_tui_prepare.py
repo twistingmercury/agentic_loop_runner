@@ -7,7 +7,7 @@ import pytest
 from helpers import write_file, write_nested_file
 
 from alr.engine.commit import CommitMode, Repo, find_repo
-from alr.errors import RepoError, RunLogError, TaskFileError
+from alr.errors import RefusedError, RunLogError, TaskFileError
 from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
 from alr.tui import prepare as prepare_module
@@ -73,7 +73,7 @@ async def test_prepare_outside_a_repository_runs_without_commits(
     assert bool(looked_up) is (mode is not CommitMode.NONE)
 
 
-async def test_prepare_outside_a_repository_records_that_nothing_commits(
+async def test_prepare_records_the_none_mode_outside_a_repository(
     outside: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _outside_settings(outside, monkeypatch, logging=True)
@@ -82,25 +82,24 @@ async def test_prepare_outside_a_repository_records_that_nothing_commits(
     prepared.close()
 
     ledger = next((outside / "logs").glob("*/run.jsonl"))
-    assert '"commit":false' in ledger.read_text(encoding="utf-8")
+    assert '"commit":"none"' in ledger.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
-async def test_prepare_outside_a_repository_records_false_even_when_a_mode_asks(
+async def test_prepare_outside_a_repository_records_the_mode_that_was_asked(
     outside: Path, monkeypatch: pytest.MonkeyPatch, mode: CommitMode
 ) -> None:
-    # Pins the current behavior: the view logs whether a repository exists, while
-    # plain mode logs whether the mode asks, so the two differ outside a work tree.
+    # The log names the mode that was asked for, repository or not.
     settings = _outside_settings(outside, monkeypatch, logging=True, commit_mode=mode)
 
     prepared = await prepare(settings)
     prepared.close()
 
     ledger = next((outside / "logs").glob("*/run.jsonl"))
-    assert '"commit":false' in ledger.read_text(encoding="utf-8")
+    assert f'"commit":"{mode.value}"' in ledger.read_text(encoding="utf-8")
 
 
-async def test_prepare_in_a_repository_records_that_commits_happen(
+async def test_prepare_in_a_repository_records_the_commit_mode(
     git_repo: Path,
 ) -> None:
     settings = _settings(git_repo, logging=True, commit_mode=CommitMode.TASK)
@@ -108,7 +107,7 @@ async def test_prepare_in_a_repository_records_that_commits_happen(
     prepared.close()
 
     ledger = next((git_repo / "run" / "logs").glob("*/run.jsonl"))
-    assert '"commit":true' in ledger.read_text(encoding="utf-8")
+    assert '"commit":"task"' in ledger.read_text(encoding="utf-8")
 
 
 async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
@@ -120,9 +119,10 @@ async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
     before = Path(settings.tasks_file).read_text(encoding="utf-8")
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
 
-    with pytest.raises(RepoError, match="clean work tree"):
+    with pytest.raises(RefusedError, match="clean work tree") as caught:
         await prepare(settings)
 
+    assert caught.value.reason == "dirty-tree"
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == before
 
 
@@ -145,9 +145,10 @@ async def test_prepare_tells_a_tree_dirty_only_with_its_log_folder_to_ignore_it(
     (await prepare(settings)).close()
     settings = replace(settings, commit_mode=CommitMode.TASK)
 
-    with pytest.raises(RepoError, match="not ignored by git") as caught:
+    with pytest.raises(RefusedError, match="not ignored by git") as caught:
         await prepare(settings)
 
+    assert caught.value.reason == "log-folder-visible"
     assert "clean work tree" not in str(caught.value)
 
 
@@ -157,7 +158,7 @@ async def test_prepare_with_another_dirty_file_still_reports_the_dirty_tree(
     settings = _visible_settings(git_repo, commit_mode=CommitMode.TASK, logging=False)
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
 
-    with pytest.raises(RepoError, match="clean work tree"):
+    with pytest.raises(RefusedError, match="clean work tree"):
         await prepare(settings)
 
 
@@ -196,8 +197,29 @@ async def test_prepare_log_folder_git_can_see_is_an_error(git_repo: Path) -> Non
         commit_mode=CommitMode.TASK,
     )
 
-    with pytest.raises(RepoError, match="add it to .gitignore"):
+    with pytest.raises(RefusedError, match="add it to .gitignore") as caught:
         await prepare(settings)
+
+    assert caught.value.reason == "log-folder-visible"
+    assert caught.value.message == (
+        f"the log folder {settings.log_folder()} is not ignored by git; "
+        "add it to .gitignore or turn logging off"
+    )
+
+
+async def test_prepare_keeps_the_reason_when_git_fails_on_the_log_folder(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def failing(repo: Repo | None, run_dir: str) -> None:
+        raise RefusedError("git-error", "--commit: git check-ignore: boom")
+
+    monkeypatch.setattr(prepare_module, "check_log_dir", failing)
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(_settings(git_repo, logging=True, commit_mode=CommitMode.TASK))
+
+    assert caught.value.reason == "git-error"
+    assert "boom" in caught.value.message
 
 
 async def test_prepare_opens_the_run_log_in_an_ignored_folder(git_repo: Path) -> None:

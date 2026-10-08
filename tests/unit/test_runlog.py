@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.errors import RunLogError
+from alr.errors import RefusedError, RunLogError
 from alr.record.events import (
     Activity,
     CommitStarted,
@@ -24,7 +24,7 @@ from alr.record.events import (
     TaskStarted,
 )
 from alr.record.runlog import Info, RunLog, run_dir
-from alr.tasks import COMPLETED, FAILED, Gate, Task
+from alr.tasks import COMPLETED, FAILED, Gate, RunResult, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'
 
@@ -37,7 +37,7 @@ INFO = Info(
     tasks_file="run/tasks.yaml",
     permissions="sandbox",
     sandbox_settings="run/sandbox.json",
-    commit=True,
+    commit="task",
 )
 
 
@@ -85,7 +85,7 @@ def test_open_creates_private_folder_and_run_started(
     want = (
         "{" + STAMP + ',"event":"run_started","version":"v0.10.0",'
         '"tasks_file":"run/tasks.yaml","permissions":"sandbox",'
-        '"sandbox_settings":"run/sandbox.json","commit":true}'
+        '"sandbox_settings":"run/sandbox.json","commit":"task"}'
     )
     lines = ledger_lines(path)
     assert lines == [want]
@@ -105,9 +105,42 @@ def test_open_leaves_out_what_was_not_passed(tmp_path: Path) -> None:
     want = (
         "{" + STAMP + ',"event":"run_started","version":"dev",'
         '"tasks_file":"t.yaml","permissions":"skip","gate_timeout":"90s",'
-        '"commit":false}'
+        '"commit":"none"}'
     )
     assert ledger_lines(path) == [want]
+
+
+@pytest.mark.parametrize("mode", ["none", "task", "run"])
+def test_open_writes_the_commit_mode_as_a_string(tmp_path: Path, mode: str) -> None:
+    path = tmp_path / "run"
+
+    RunLog.open(path, replace(INFO, commit=mode), now=fixed_now).close()
+
+    assert json.loads(ledger_lines(path)[0])["commit"] == mode
+
+
+@pytest.mark.parametrize(
+    ("result", "exit_code"),
+    [
+        (RunResult.COMPLETED, 0),
+        (RunResult.FAILED, 1),
+        (RunResult.COMMIT_FAILED, 4),
+        (RunResult.STOPPED, 143),
+    ],
+)
+def test_run_finished_records_the_result_and_the_exit(
+    opened: tuple[RunLog, Path], result: RunResult, exit_code: int
+) -> None:
+    log, path = opened
+    error = None if result is RunResult.COMPLETED else "why"
+
+    log.record(RunDone(error, 1.0, result, exit_code))
+
+    line = json.loads(ledger_lines(path)[-1])
+    assert line["event"] == "run_finished"
+    assert line["result"] == result.value
+    assert line["exit"] == exit_code
+    assert line.get("error") == error
 
 
 def test_time_with_a_zero_offset_is_written_as_z(tmp_path: Path) -> None:
@@ -151,10 +184,12 @@ def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None
     blocker.write_text("a file, not a folder", encoding="utf-8")
     path = blocker / "nested" / "20261001T140211"
 
-    with pytest.raises(RunLogError) as raised:
+    with pytest.raises(RefusedError) as raised:
         RunLog.open(path, INFO, now=fixed_now)
 
+    assert raised.value.reason == "log-unwritable"
     assert str(raised.value) == (
+        "refused: log-unwritable: "
         f"cannot create the run log folder {path}: Not a directory"
     )
 
@@ -163,8 +198,10 @@ def test_open_log_dir_under_a_file_is_an_error(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_bytes(b"")
 
-    with pytest.raises(RunLogError):
+    with pytest.raises(RefusedError) as raised:
         RunLog.open(file / "logs" / "run", INFO, now=fixed_now)
+
+    assert raised.value.reason == "log-unwritable"
 
 
 def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
@@ -195,7 +232,7 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         "{" + STAMP + ',"event":"task_finished","task":1,'
         '"state":"completed","duration":"2m12s"}',
         "{" + STAMP + ',"event":"run_finished","result":"completed",'
-        '"duration":"2m13s"}',
+        '"exit":0,"duration":"2m13s"}',
     ]
     assert ledger_lines(path)[1:] == want
 
@@ -271,7 +308,7 @@ def test_record_failed_task_ends_the_run_as_failed(
         log,
         TaskStarted(task),
         TaskFinished(failed, run_error, 1.0),
-        RunDone(run_error, 1.0),
+        RunDone(run_error, 1.0, RunResult.FAILED, 1),
     )
 
     lines = ledger_lines(path)
@@ -282,14 +319,14 @@ def test_record_failed_task_ends_the_run_as_failed(
     assert lines[3] == (
         "{" + STAMP + ',"event":"run_finished","result":"failed",'
         '"error":"task 2: Second failed: gate \\"exit 3\\" failed: exit status 3",'
-        '"duration":"1s"}'
+        '"exit":1,"duration":"1s"}'
     )
 
 
 def _stopped(error: str, seconds: str) -> str:
     return (
         "{" + STAMP + ',"event":"run_finished","result":"stopped",'
-        f'"error":"{error}","duration":"{seconds}"}}'
+        f'"error":"{error}","exit":130,"duration":"{seconds}"}}'
     )
 
 
@@ -304,7 +341,9 @@ STOPPED_CASES = [
         [
             TaskStarted(FIRST),
             Activity(FIRST, "working"),
-            RunDone("task 1: First failed: signal: killed", 2.0),
+            RunDone(
+                "task 1: First failed: signal: killed", 2.0, RunResult.STOPPED, 130
+            ),
         ],
         _stopped("task 1: First failed: signal: killed", "2s"),
         3,
@@ -317,7 +356,7 @@ STOPPED_CASES = [
             TaskStarted(FIRST),
             TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
             TaskStarted(SECOND),
-            RunDone("stopped", 0.0),
+            RunDone("stopped", 0.0, RunResult.STOPPED, 130),
         ],
         _stopped("stopped", "0s"),
         5,

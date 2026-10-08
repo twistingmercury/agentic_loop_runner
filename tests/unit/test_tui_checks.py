@@ -6,7 +6,7 @@ import pytest
 from helpers import write_nested_file
 
 from alr.errors import (
-    SandboxError,
+    RefusedError,
     TaskFileError,
     UsageError,
 )
@@ -84,10 +84,10 @@ def test_check_sandbox_rejects_a_bad_settings_file(tmp_path: Path, text: str) ->
     path = tmp_path / "sandbox.json"
     path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(SandboxError):
+    with pytest.raises(RefusedError):
         check_sandbox(str(path))
 
 
 def test_check_sandbox_rejects_a_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(SandboxError):
+    with pytest.raises(RefusedError):
         check_sandbox(str(tmp_path / "nope.json"))

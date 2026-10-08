@@ -97,6 +97,39 @@ around the current directory, not the one around `-d`: the Claude sessions and
 the gates run in the current directory, so run `alr` from inside the repository
 they should edit.
 
+### Exit codes
+
+| Code  | Meaning                                                                                  |
+| ----- | ---------------------------------------------------------------------------------------- |
+| `0`   | Every task completed (or the dry run found the file valid)                                |
+| `1`   | A task or gate failed, or the run hit an error such as a failed save                      |
+| `2`   | Usage error: a bad or missing flag, or a run folder with no `tasks.yaml`                  |
+| `3`   | Refused to start; nothing ran and nothing was written, not even a run log                 |
+| `4`   | A commit failed; the task is `failed` and its work stays staged                           |
+| `130` | Stopped by SIGINT (Ctrl-C)                                                                |
+| `143` | Stopped by SIGTERM                                                                        |
+
+A refusal's first line on stderr is `error: refused: <reason>: <message>`, such as
+`error: refused: dirty-tree: --commit needs a clean work tree; commit, stash, or remove:`.
+The reason is one of:
+
+| Reason                     | Why alr will not start                                                    |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `dirty-tree`               | A committing run found uncommitted changes                                |
+| `task-file-visible`        | A committing run found the task file visible to git                       |
+| `log-folder-visible`       | A committing run found the log folder visible to git                      |
+| `failed-tasks`             | The task file holds a failed task; use `--reset-failed`                   |
+| `invalid-task-file`        | The task file cannot be read or is not valid                              |
+| `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                        |
+| `log-unwritable`           | The run log folder cannot be created or opened                            |
+| `git-error`                | git failed while alr looked at the repository                             |
+
+A failed commit's reason is the first line of git's (or the hook's) output, in the task's
+`error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The run log's
+`run_finished` line has the `result` (`completed`, `failed`, `commit_failed`, or `stopped`),
+the `error`, and the `exit` code. `run_started` has `"commit": "none"`, `"task"`, or `"run"`.
+A `--dry-run` that is refused exits 3 as well. The full-screen view exits with the same codes.
+
 A `run` commit shows in `git log` with the subject `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and
 a body that lists `<id>: <name>` for each task that ran. A `task` commit uses the task's name as its subject.
 
@@ -119,22 +152,21 @@ and the logs.
 After a failed or stopped run, the work tree holds the leftovers, and the next
 committing run refuses to start until the tree is clean; the error lists the
 files. A failed run leaves its task `failed` and needs `--reset-failed`. A
-stopped run leaves the interrupted task `pending`, which needs no reset. Clean
-up by mode:
+stopped run leaves the interrupted task `pending`, which needs no reset. In
+`task` mode a task is `completed` only after its commit lands. Clean up by mode:
 
 - `task`: each earlier task is already committed, so the leftovers are only the
   work of the failed or interrupted task. Discard it with `git reset` (this
   unstages and changes no files), then `git restore .` and `git clean -fd`.
   `git clean -fd` leaves the ignored task file and `logs/` alone. Then run
   again, with `--reset-failed` after a failure.
-- `run`: nothing is committed until the last task, so the leftovers also hold
-  the work of every task that already completed. alr never redoes a `completed`
-  task, so do not stash, restore, or clean that work. Commit it yourself first
-  with `git add -A && git commit`. That commit also takes any partial changes of
-  the failed or interrupted task, so delete those files by hand first if you do
-  not want them. Then run again, with `--reset-failed` after a failure. The
-  completed work is in your commit, and alr's `run` commit holds only the tasks
-  that run this time.
+- `run`: `tasks.yaml` is saved once, at the end, and no task is marked
+  `completed` until the one commit lands. A failed or stopped run leaves
+  nothing completed: the failed task is `failed` and every other task that ran
+  is back to `pending`. The leftovers are only work this run made, so discard
+  them the same way as in `task` mode, then run again, with `--reset-failed`
+  after a failure. Tasks completed by an earlier run stay completed; their work
+  is already in that run's commit.
 
 A real run logs to `<folder>/logs/<timestamp>/` in every commit mode (a dry run
 writes nothing). Plain mode always logs; the full-screen view has a Logging
@@ -151,7 +183,8 @@ Tasks run one at a time, in file order, each in a fresh `claude --print` session
 shared prompt and the task go to Claude on stdin. The runner owns task state: Claude
 reports its outcome as one JSON line at the end of its output. When a task completes,
 the file's `shared.gates` run, and the task counts as done only if every gate exits
-zero. The file is saved after every task, and the first failed task stops the run.
+zero. The file is saved after every task, and the first failed task stops the run. With
+`--commit run`, the file is saved once, at the end, after the one commit lands.
 
 Each task has an `id`, a `name`, a `prompt`, and an optional `state` of `pending`,
 `completed`, or `failed`.

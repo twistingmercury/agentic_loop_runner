@@ -152,7 +152,7 @@ def test_run_needs_one_permission_flag(
 
     run = run_with_flags(tmp_path, *(flag.format(settings=settings) for flag in flags))
 
-    assert run.res.code == 1, run.res
+    assert run.res.code == 2, run.res
     assert want in run.res.err
     assert run.records == [], "claude must not run"
     assert run.tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
@@ -187,8 +187,10 @@ def test_sandbox_bad_settings_file(
 
     run = run_with_flags(tmp_path, f"--sandbox-settings={path}", *mode)
 
-    assert run.res.code == 1, run.res
-    assert "error: --sandbox-settings: " in run.res.err
+    assert run.res.code == 3, run.res
+    assert (
+        "error: refused: invalid-sandbox-settings: --sandbox-settings: " in run.res.err
+    )
     assert want in run.res.err
     assert run.records == [], "claude must not run"
 
@@ -240,7 +242,7 @@ def test_dir_without_sandbox_json_needs_a_permission_flag(
 ) -> None:
     run, _ = run_folder(tmp_path, None)
 
-    assert run.res.code == 1, run.res
+    assert run.res.code == 2, run.res
     assert NEITHER_FLAG_ERROR in run.res.err
     assert run.records == [], "claude must not run"
 
@@ -273,7 +275,8 @@ def test_dir_bad_sandbox_json_starts_nothing(
 ) -> None:
     run, _ = run_folder(tmp_path, "null", *mode)
 
-    assert run.res.code == 1, run.res
+    assert run.res.code == 3, run.res
+    assert "error: refused: invalid-sandbox-settings: " in run.res.err
     assert "--sandbox-settings: must be a JSON object" in run.res.err
     assert run.records == [], "claude must not run"
     assert run.tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML

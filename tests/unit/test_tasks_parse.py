@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from alr import tasks
@@ -639,3 +641,32 @@ def test_parse_tasks_rejects_a_lone_surrogate(text: str, where: str) -> None:
         tasks.parse_tasks(text)
 
     assert where in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "brk", ["\n", "\r", "\r\n", "\x85", "\u2028", "\u2029", "\x0b", "\x0c", "\n\n"]
+)
+def test_a_task_name_with_a_line_break_is_rejected(brk: str) -> None:
+    # json.dumps writes the break as an escape: a raw one inside a quoted YAML
+    # scalar is folded to a space and would never reach the check.
+    name = json.dumps(f"one{brk}two")
+    text = (
+        f"shared: {{prompt: s}}\ntasks:\n  - id: 7\n    name: {name}\n    prompt: p\n"
+    )
+
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert str(exc.value) == "tasks[0] (id 7): name: must be a single line"
+
+
+@pytest.mark.parametrize("brk", ["\n", "\x85", "\u2028"])
+def test_a_task_name_with_a_trailing_line_break_is_rejected(brk: str) -> None:
+    # str.splitlines drops a trailing break, so "one\n" alone looks like one line.
+    name = json.dumps(f"one{brk}")
+    text = (
+        f"shared: {{prompt: s}}\ntasks:\n  - id: 7\n    name: {name}\n    prompt: p\n"
+    )
+
+    with pytest.raises(TaskFileError, match="name: must be a single line"):
+        tasks.parse_tasks(text)

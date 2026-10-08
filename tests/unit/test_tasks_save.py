@@ -257,9 +257,10 @@ def _round_trips(tmp_path: Path, name: str, prompt: str) -> tuple[str, str]:
 @pytest.mark.parametrize("char", ["\x85", "\u2028", "\u2029"])
 def test_save_tasks_round_trips_unicode_line_breaks(tmp_path: Path, char: str) -> None:
     # YAML reads these as line breaks and folds them, so they must be escaped.
+    # Only the prompt may hold a break: a task name must be a single line.
     text = f"line one\n{char}line two\n"
 
-    assert _round_trips(tmp_path, text, text) == (text, text)
+    assert _round_trips(tmp_path, "name", text) == ("name", text)
 
 
 def test_save_tasks_round_trips_random_strings(tmp_path: Path) -> None:
@@ -270,4 +271,9 @@ def test_save_tasks_round_trips_random_strings(tmp_path: Path) -> None:
         if not text.strip():
             continue
 
-        assert _round_trips(tmp_path, text, text) == (text, text), repr(text)
+        # A name cannot hold a line break, so only the prompt keeps them.
+        name = "".join(text.splitlines())
+        if not name.strip():
+            continue
+
+        assert _round_trips(tmp_path, name, text) == (name, text), repr(text)

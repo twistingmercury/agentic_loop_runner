@@ -18,11 +18,13 @@ from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
-from alr.record.events import RunDone, TaskStarted
+from alr.engine.stop import Stop
+from alr.record.events import RunDone, RunResult, TaskStarted
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
     ErrorDialog,
+    error_text,
     FileViewer,
     FolderDialog,
     GatesDialog,
@@ -107,6 +109,8 @@ class AlrApp(App[None]):
         self.settings = settings
         self.state = AppState.SETUP
         self.outcome = ""
+        self.exit_code = 0
+        """What `run_app` returns: the final run's code, 0 when no run ever ended."""
         self._stopping = False
         self._worker: Worker[None] | None = None
         self._started = 0.0
@@ -172,7 +176,6 @@ class AlrApp(App[None]):
         self._refresh()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.action_stop)
-        self._look_for_work_tree()
         self.run_worker(self.launch_sequence(), exit_on_error=False)
 
     def _look_for_work_tree(self) -> None:
@@ -274,7 +277,7 @@ class AlrApp(App[None]):
                 else check.task_list
             )
         except AlrError as exc:
-            self.push_screen(ErrorDialog(str(exc)))
+            self.push_screen(ErrorDialog(error_text(exc)))
             return
 
         if check.sandbox_file and self.settings.permissions is Permissions.UNSET:
@@ -309,7 +312,7 @@ class AlrApp(App[None]):
             reset_failed(self.settings.tasks_file)
             self._task_list = read_tasks(self.settings.tasks_file)
         except AlrError as exc:
-            self.push_screen(ErrorDialog(str(exc)))
+            self.push_screen(ErrorDialog(error_text(exc)))
             return
 
         self.query_one(TasksPane).load(self._task_list)
@@ -552,7 +555,14 @@ class AlrApp(App[None]):
         if self.state is not AppState.RUNNING:
             return
 
-        self._finish(RunDone(error, time.monotonic() - self._started))
+        # Only the user's Stop is a stop; anything else here is a run that died without a result.
+        if self._stopping:
+            result, exit_code = RunResult.STOPPED, Stop().exit_code()
+        else:
+            result, exit_code = RunResult.FAILED, 1
+
+        seconds = time.monotonic() - self._started
+        self._finish(RunDone(error, seconds, result, exit_code))
 
     def on_run_event(self, message: RunEvent) -> None:
         # Textual delivers the events queued before an exit after it has taken
@@ -580,6 +590,7 @@ class AlrApp(App[None]):
 
     def _finish(self, event: RunDone) -> None:
         self.state = AppState.FINISHED
+        self.exit_code = event.exit_code
         self.outcome = _outcome(event, self._stopping)
         self._stop_ticking()
         self.query_one("#progress", Static).update("")
@@ -608,7 +619,7 @@ def _permissions_label(permissions: Permissions) -> str:
 def _error_text(exc: BaseException) -> str:
     """Say what went wrong; only a domain error's own text is enough without its type."""
     if isinstance(exc, AlrError):
-        return str(exc)
+        return error_text(exc)
 
     name = type(exc).__name__
     return f"{name}: {exc}" if str(exc) else name
@@ -628,8 +639,8 @@ def _outcome(event: RunDone, stopping: bool) -> str:
 
 
 def run_app(settings: RunSettings) -> int:
-    """Run the view to the end; 0 only when the run finished clean."""
+    """Run the view to the end; it exits with the final run's code, from the table plain mode uses."""
     app = AlrApp(settings)
     # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
     app.run(mouse=False)
-    return 0 if app.outcome == "done" else 1
+    return app.exit_code

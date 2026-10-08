@@ -1,6 +1,7 @@
 """The run loop: loading the inputs, one session per pending task, a save after each."""
 
 import asyncio
+import signal
 from collections.abc import Callable
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from helpers import (
 from alr import tasks
 from alr.engine import loop
 from alr.engine.commit import CommitMode
+from alr.engine.stop import Stop
 from alr.errors import (
     FailedTasksError,
     RunError,
@@ -24,7 +26,15 @@ from alr.errors import (
     quote,
 )
 from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import COMPLETED, FAILED, PENDING, Shared, Task, TaskList
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    RunResult,
+    Shared,
+    Task,
+    TaskList,
+)
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -547,6 +557,7 @@ class _RecordingFrontEnd(PlainFrontEnd):
         super().__init__()
         self.crash = crash
         self.done: list[str | None] = []
+        self.endings: list[tuple[RunResult, int]] = []
 
     def task_started(self, task: Task) -> None:
         if self.crash is not None:
@@ -554,8 +565,11 @@ class _RecordingFrontEnd(PlainFrontEnd):
 
         super().task_started(task)
 
-    def run_done(self, error: str | None, seconds: float) -> None:
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
         self.done.append(error)
+        self.endings.append((result, exit_code))
 
 
 async def test_run_done_names_a_crash_and_the_crash_propagates(
@@ -604,3 +618,54 @@ async def test_run_done_reports_a_failed_task_and_a_clean_run(
 
     assert len(failed.done) == 1
     assert failed.done[0] is not None
+
+
+async def test_a_clean_run_ends_completed_with_exit_0(
+    record: Path, tmp_path: Path
+) -> None:
+    front_end = _RecordingFrontEnd()
+
+    await run_loop(
+        tasks.parse_tasks(TWO_PENDING_YAML),
+        tmp_path / "tasks.yaml",
+        front_end=front_end,
+    )
+
+    assert front_end.endings == [(RunResult.COMPLETED, 0)]
+
+
+async def test_a_failed_task_ends_failed_with_exit_1(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
+    front_end = _RecordingFrontEnd()
+
+    with pytest.raises(RunError):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+        )
+
+    assert front_end.endings == [(RunResult.FAILED, 1)]
+
+
+@pytest.mark.parametrize(
+    ("stop", "exit_code"),
+    [(Stop(), 130), (Stop(signal.SIGTERM), 143)],
+    ids=["sigint", "sigterm"],
+)
+async def test_a_stop_ends_stopped_with_the_signals_exit(
+    record: Path, tmp_path: Path, stop: Stop, exit_code: int
+) -> None:
+    front_end = _RecordingFrontEnd(crash=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+            stop=stop,
+        )
+
+    assert front_end.endings == [(RunResult.STOPPED, exit_code)]

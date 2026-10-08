@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from alr.errors import SandboxError, quote
+from alr.errors import INVALID_SANDBOX_SETTINGS, RefusedError, quote
 
 _FLAG = "--sandbox-settings"
 
@@ -36,8 +36,9 @@ def _read_settings(path: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
-        raise SandboxError(
-            f"{_FLAG}: file {quote(path)} is not accessible: {exc.strerror}"
+        raise RefusedError(
+            INVALID_SANDBOX_SETTINGS,
+            f"{_FLAG}: file {quote(path)} is not accessible: {exc.strerror}",
         ) from exc
 
 
@@ -51,14 +52,18 @@ def _force_sandbox(text: str) -> str:
         settings = json.loads(text, parse_constant=_reject_constant)
     except (ValueError, RecursionError) as exc:
         # Settings nested deeply enough overflow the parser.
-        raise SandboxError(f"{_FLAG}: must be a JSON object: {exc}") from exc
+        raise RefusedError(
+            INVALID_SANDBOX_SETTINGS, f"{_FLAG}: must be a JSON object: {exc}"
+        ) from exc
 
     if not isinstance(settings, dict):
-        raise SandboxError(f"{_FLAG}: must be a JSON object")
+        raise RefusedError(INVALID_SANDBOX_SETTINGS, f"{_FLAG}: must be a JSON object")
 
     sandbox = settings.get("sandbox", {})
     if not isinstance(sandbox, dict):
-        raise SandboxError(f"{_FLAG}: sandbox: must be a JSON object")
+        raise RefusedError(
+            INVALID_SANDBOX_SETTINGS, f"{_FLAG}: sandbox: must be a JSON object"
+        )
 
     sandbox["enabled"] = True
     sandbox["allowUnsandboxedCommands"] = False

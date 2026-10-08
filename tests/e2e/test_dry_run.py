@@ -25,8 +25,9 @@ def test_dry_run_invalid_file(tmp_path: Path, fake_claude: Path) -> None:
         shared_block() + "tasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
     )
 
-    assert res.code != 0, res
-    assert "failed to parse tasks yaml" in res.err
+    assert res.code == 3, res
+    assert "error: refused: invalid-task-file: " in res.err
+    assert res.err.count("failed to parse tasks yaml") == 1
     assert f"{tasks_path} is valid" not in res.out
 
 
@@ -62,7 +63,7 @@ def test_dry_run_flags_failed_task_and_exits_zero(
 def test_dry_run_missing_dir_flag() -> None:
     res = run_alr("--dry-run")
 
-    assert res.code == 1, res
+    assert res.code == 2, res
     # Usage follows the error and names every flag, so match the error line.
     assert "error: required flag --dir not set\n" in res.err
 
@@ -72,7 +73,7 @@ def test_dry_run_with_reset_failed_is_refused(tmp_path: Path) -> None:
 
     res = run_alr("-d", str(tmp_path), "--dry-run", "--reset-failed")
 
-    assert res.code == 1, res
+    assert res.code == 2, res
     assert (
         "error: --reset-failed cannot be used with --dry-run (a dry run writes nothing)\n"
         in res.err
@@ -102,7 +103,7 @@ def test_dry_run_invalid_gates(tmp_path: Path, fake_claude: Path) -> None:
 
     res, tasks_path = run_dry_run(tmp_path, tasks_yaml)
 
-    assert res.code != 0, res
+    assert res.code == 3, res
     assert (
         "failed to parse tasks yaml: shared.gates[0]: command: unknown key; a gate has only cmd"
         in res.err

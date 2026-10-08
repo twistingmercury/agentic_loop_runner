@@ -17,6 +17,7 @@ from helpers import (
 
 from alr.engine import loop, proc
 from alr.engine.commit import Repo, open_repo
+from alr.engine.frontend import FirstLine
 from alr.engine.sandbox import bypass_args
 from alr.errors import RunError
 from alr.record.events import (
@@ -476,3 +477,35 @@ async def test_a_git_command_reads_end_of_file_from_stdin(tmp_path: Path) -> Non
 
     assert error is None
     assert _lines(events) == ["done"]
+
+
+def test_first_line_keeps_the_first_non_empty_line() -> None:
+    first = FirstLine()
+
+    for line in ["", "   ", "  hook-says-no  ", "second line"]:
+        first.take(line)
+
+    assert first.reason("exit status 1") == "hook-says-no"
+
+
+def test_first_line_trims_a_long_line_to_200_characters() -> None:
+    first = FirstLine()
+
+    first.take("x" * 300)
+
+    assert first.reason("exit status 1") == "x" * 200
+
+
+def test_first_line_reason_is_none_for_success() -> None:
+    first = FirstLine()
+    first.take("warning: something")
+
+    assert first.reason(None) is None
+
+
+def test_first_line_reason_falls_back_to_the_exit_text() -> None:
+    first = FirstLine()
+
+    first.take("")
+
+    assert first.reason("exit status 1") == "exit status 1"

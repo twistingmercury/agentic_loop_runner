@@ -4,6 +4,7 @@ import contextlib
 import os
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -14,6 +15,19 @@ from alr.errors import TaskFileError, quote
 PENDING = "pending"
 FAILED = "failed"
 COMPLETED = "completed"
+# Only ever logged, never saved: in `run` mode a task whose gates passed is not
+# complete until the one commit lands.
+PASSED = "passed"
+
+
+class RunResult(StrEnum):
+    """How a run ended, as the run log and the exit code tell it."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    COMMIT_FAILED = "commit_failed"
+    STOPPED = "stopped"
+
 
 _STATES = (PENDING, COMPLETED, FAILED)
 _DURATION_HINT = "must be a duration string such as 90s or 10m"
@@ -228,6 +242,12 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     task_id = _task_id(i, fields)
     where = _where(i, task_id)
     name = _text(where, fields, "name", required=True)
+
+    # The name becomes a commit subject and a one-line log field; splitlines
+    # knows every Unicode line break, and drops a trailing one, hence the compare.
+    if name.splitlines() != [name]:
+        raise TaskFileError(f"{where}: name: must be a single line")
+
     prompt = _text(where, fields, "prompt", required=True)
     state = _text(where, fields, "state")
     if state != "" and state not in _STATES:
