@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from helpers import (
+    HandClock,
     fake_claude_records,
     git,
     saved_tasks,
@@ -34,7 +35,7 @@ from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
 from alr.tui.app import AlrApp, AppState
-from alr.record.events import Activity, TaskStarted
+from alr.record.events import Activity, CommitStarted, TaskStarted
 from alr.tasks import Task
 from alr.tui.adapter import RunEvent
 from alr.tui.panes import ActivityPane, TasksPane
@@ -1396,3 +1397,221 @@ async def test_tab_skips_the_greyed_out_buttons(
 
         await pilot.press("ctrl+c")
         await _finished(app)
+
+
+def _status_line(app: AlrApp) -> str:
+    return str(app.query_one("#progress", Static).render())
+
+
+async def test_the_status_line_is_empty_before_start(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert _status_line(app) == ""
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_shows_the_task_and_session(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo), clock=HandClock())
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+
+        assert _status_line(app) == "task 1 of 2 · session · 0.0s · run 0.0s"
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_shows_the_running_gate(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    pid_file = tmp_path / "gate.pid"
+    app = AlrApp(_settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30")))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        pid = int(await wait_for_text(pid_file))
+        await until(lambda: "gate 1 of 1: echo $$" in _status_line(app))
+
+        assert _status_line(app).startswith("task 1 of 2 · gate 1 of 1: ")
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+        await wait_until_gone(pid)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_ticks_with_the_clock(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    clock = HandClock()
+    app = AlrApp(_settings(git_repo), clock=clock)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+
+        # No event comes while the session blocks, so only the timer can redraw.
+        clock.now += 65
+        await until(lambda: _status_line(app).endswith("1m 5s · run 1m 5s"))
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_is_cleared_when_the_summary_appears(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, WORKING_TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        assert _status_line(app) == ""
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("size", [(80, 24), (110, 32)], ids=["80x24", "110x32"])
+async def test_the_status_line_sits_whole_between_the_panes(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, size: tuple[int, int]
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo), clock=HandClock())
+    async with app.run_test(size=size) as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+        await pilot.pause()
+
+        line = app.query_one("#progress").region
+        assert line.height == 1
+        assert app.query_one("#tasks").region.bottom <= line.y
+        assert line.bottom <= app.query_one("#activity").region.y
+        assert len(_status_line(app)) <= line.width - 2
+        assert app.query_one("#tasks").region.height > 3
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+def _time_cell(app: AlrApp, row: int) -> str:
+    return str(app.query_one(TasksPane).get_cell_at((row, 3)))
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_running_task_time_ticks_with_the_clock(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    clock = HandClock()
+    app = AlrApp(_settings(git_repo), clock=clock)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: _time_cell(app, 0) == "0.0s")
+
+        # No event comes while the session blocks, so only the timer can redraw.
+        clock.now += 65
+        await until(lambda: _time_cell(app, 0) == "1m 5s")
+        assert _time_cell(app, 1) == ""
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_counts_only_the_pending_tasks(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    three = (TASKS + "  - id: 3\n    name: Third\n    prompt: p\n").replace(
+        "prompt: p\n", "prompt: p\n    state: completed\n", 1
+    )
+    app = AlrApp(_settings(git_repo, three), clock=HandClock())
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+
+        assert _status_line(app) == "task 1 of 2 · session · 0.0s · run 0.0s"
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_status_line_updates_when_an_event_arrives(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo), clock=HandClock())
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: "session" in _status_line(app))
+
+        # The clock does not move and no second passes: only the event can redraw.
+        app.post_message(RunEvent(CommitStarted(Task(1, "First", "p"))))
+        await pilot.pause()
+
+        assert _status_line(app) == "task 1 of 2 · commit · 0.0s · run 0.0s"
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_ticker_stops_when_the_run_ends(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo, WORKING_TASKS), clock=HandClock())
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        assert app._ticker is None
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_ticker_stops_when_the_app_unmounts(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(git_repo), clock=HandClock())
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app._ticker is not None)
+        ticker = app._ticker
+        app.exit()
+        await until(lambda: not app.is_running)
+
+    assert (app._ticker, ticker is not None) == (None, True)
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("size", [(80, 24), (110, 32)], ids=["80x24", "110x32"])
+async def test_a_long_gate_is_cut_so_the_timers_stay_on_the_line(
+    git_repo: Path, tmp_path: Path, size: tuple[int, int]
+) -> None:
+    pid_file = tmp_path / "gate.pid"
+    padding = "x" * 120
+    clock = HandClock()
+    app = AlrApp(
+        _settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30 # {padding}")),
+        clock=clock,
+    )
+    async with app.run_test(size=size) as pilot:
+        await pilot.press("s")
+        pid = int(await wait_for_text(pid_file))
+        await until(lambda: "gate 1 of 1: echo $$" in _status_line(app))
+        clock.now += 65
+        await until(lambda: _status_line(app).endswith("1m 5s · run 1m 5s"))
+
+        line = _status_line(app)
+        assert len(line) <= app.query_one("#progress").content_size.width
+        assert "… · 1m 5s · run 1m 5s" in line
+
+        await pilot.press("ctrl+c")
+        await _finished(app)
+        await wait_until_gone(pid)

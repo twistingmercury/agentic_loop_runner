@@ -1,6 +1,8 @@
 """The three panes of the main window; each knows events, never the engine."""
 
+import time
 from collections import deque
+from collections.abc import Callable
 
 from textual.events import Resize
 from textual.message import Message
@@ -23,6 +25,8 @@ _SYMBOLS = {COMPLETED: "✔", FAILED: "✖"}
 _PENDING = "·"
 _RUNNING = "▶"
 _MIN_NAME = 10
+# Room for any time under a hundred hours, such as "10h 59m 59s".
+_TIME_WIDTH = 11
 # Always kept free: the bar appears once the rows outgrow the pane, after the cut was made.
 _SCROLLBAR = 2
 
@@ -36,7 +40,7 @@ def _cut(name: str, width: int) -> str:
 
 
 class TasksPane(DataTable[str]):
-    """One row per task: its state, id, and name."""
+    """One row per task: its state, id, name, and how long it took."""
 
     class Selected(Message):
         """The user moved to a task; the activity pane follows."""
@@ -46,10 +50,16 @@ class TasksPane(DataTable[str]):
             self.task_id = task_id
             self.name = name
 
-    def __init__(self, *, id: str | None = None) -> None:
+    def __init__(
+        self, *, id: str | None = None, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         super().__init__(id=id)
         self._names: dict[str, str] = {}
         """The whole name of each task, for the cut to start from."""
+        # A test passes its own clock so the running time moves without waiting.
+        self._clock = clock
+        self._running_task: tuple[str, float] | None = None
+        """The running task's row key and when it started."""
 
     def on_mount(self) -> None:
         self.border_title = "Tasks"
@@ -58,17 +68,20 @@ class TasksPane(DataTable[str]):
         self.add_column("", key="state", width=1)
         self.add_column("ID", key="id", width=2)
         self.add_column("Task", key="name", width=_MIN_NAME)
+        self.add_column("Time", key="time", width=_TIME_WIDTH)
 
     def load(self, task_list: TaskList) -> None:
         """Fill the table from the file's tasks, as they stand now."""
         self.clear()
+        self._running_task = None
         self._names = {str(task.id): task.name for task in task_list.tasks}
         longest = max((len(key) for key in self._names), default=2)
         self.columns[ColumnKey("id")].width = max(2, longest)
         width = self._name_width()
         for task in task_list.tasks:
             symbol = _SYMBOLS.get(task.state, _PENDING)
-            self.add_row(symbol, str(task.id), _cut(task.name, width), key=str(task.id))
+            name = _cut(task.name, width)
+            self.add_row(symbol, str(task.id), name, "", key=str(task.id))
 
         self._fit(width)
 
@@ -99,10 +112,22 @@ class TasksPane(DataTable[str]):
     def apply(self, event: Event) -> None:
         if isinstance(event, TaskStarted):
             self._set_state(event.task.id, _RUNNING)
+            self._running_task = (str(event.task.id), self._clock())
+            self.tick()
             self._follow(event.task.id)
 
         if isinstance(event, TaskFinished):
             self._set_state(event.task.id, _SYMBOLS.get(event.task.state, _PENDING))
+            self._running_task = None
+            self._set_time(str(event.task.id), event.seconds)
+
+    def tick(self) -> None:
+        """Count the running task's time up; the view calls this once a second."""
+        if self._running_task is None:
+            return
+
+        key, started = self._running_task
+        self._set_time(key, self._clock() - started)
 
     def on_data_table_row_highlighted(self, message: DataTable.RowHighlighted) -> None:
         key = message.row_key.value
@@ -122,6 +147,9 @@ class TasksPane(DataTable[str]):
 
     def _set_state(self, task_id: int, symbol: str) -> None:
         self.update_cell(str(task_id), "state", symbol)
+
+    def _set_time(self, key: str, seconds: float) -> None:
+        self.update_cell(key, "time", format_elapsed(seconds))
 
 
 # A task that prints tens of thousands of lines would freeze every redraw; the run log keeps them all.

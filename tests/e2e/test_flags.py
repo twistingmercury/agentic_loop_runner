@@ -26,7 +26,7 @@ def test_help_flag() -> None:
     for flag in (
         "--dir",
         "--sandbox-settings",
-        "--skip-permissions",
+        "--yolo",
         "--gate-timeout",
         "--commit",
         "--dry-run",
@@ -43,6 +43,17 @@ def test_missing_tasks() -> None:
 
     assert res.code == 1, res
     assert "error: required flag --dir not set\n" in res.err
+
+
+def test_skip_permissions_is_an_unknown_flag(tmp_path: Path, fake_claude: Path) -> None:
+    """--yolo replaced it; exit 2 and the unknown-flag line keep the old name from coming back as an alias."""
+    tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
+
+    res = run_alr("--skip-permissions", f"--dir={tasks_path.parent}")
+
+    assert res.code == 2, res
+    assert "unrecognized arguments: --skip-permissions\n" in res.err
+    assert tasks_path.read_text(encoding="utf-8") == TWO_TASKS_YAML
 
 
 def run_two_tasks(folder: Path, *flags: str) -> tuple[Result, str]:

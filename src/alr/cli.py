@@ -45,9 +45,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 
     try:
         tasks_file = resolve_dir(args.dir)
-        sandbox_settings = resolve_sandbox(
-            args.dir, args.sandbox_settings, args.skip_permissions
-        )
+        sandbox_settings = resolve_sandbox(args.dir, args.sandbox_settings, args.yolo)
         # An explicitly empty value counts as passed, and is bad.
         if args.gate_timeout is not None:
             check_gate_timeout(args.gate_timeout)
@@ -62,7 +60,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             return 1
 
         commit_mode = check_commit_flags(args.commit, args.commit_after_all)
-        session = session_args(sandbox_settings, args.skip_permissions, args.dry_run)
+        session = session_args(sandbox_settings, args.yolo, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -114,11 +112,11 @@ def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> 
     """Open the full-screen view with what the flags already answer."""
     commit_mode = check_commit_flags(args.commit, args.commit_after_all)
     # Validates a given settings file and the both-flags conflict; no run starts here.
-    session_args(sandbox_file, args.skip_permissions, dry_run=True)
+    session_args(sandbox_file, args.yolo, dry_run=True)
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
-        permissions=_permissions(sandbox_file, args.skip_permissions),
+        permissions=_permissions(sandbox_file, args.yolo),
         commit_mode=commit_mode or CommitMode.PER_TASK,
         gate_timeout=args.gate_timeout or "",
         reset_failed=args.reset_failed,
@@ -161,7 +159,7 @@ def _parser() -> argparse.ArgumentParser:
         "--dir",
         metavar="",
         default="",
-        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings overrides the folder's sandbox.json",
+        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings or --yolo overrides the folder's sandbox.json",
     )
     parser.add_argument(
         "--dry-run",
@@ -189,10 +187,10 @@ def _parser() -> argparse.ArgumentParser:
         "--sandbox-settings",
         metavar="",
         default="",
-        help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --skip-permissions",
+        help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --yolo",
     )
     parser.add_argument(
-        "--skip-permissions",
+        "--yolo",
         action="store_true",
         help="Run sessions with no sandbox and no permission checks (claude --dangerously-skip-permissions); what they do is on you",
     )
@@ -228,7 +226,7 @@ def resolve_sandbox(dir: str, sandbox_settings: str, skip: bool) -> str:
     """Return the sandbox settings path, taking the run folder's sandbox.json when no flag chose.
 
     The folder only ever supplies the sandboxed choice: either explicit
-    permission flag wins, and --skip-permissions is how a run opts out.
+    permission flag wins, and --yolo is how a run opts out.
     """
     if not dir or sandbox_settings or skip:
         return sandbox_settings
@@ -271,9 +269,7 @@ def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
     session and needs neither, but its sandbox file is still checked.
     """
     if sandbox_file and skip:
-        raise UsageError(
-            "--sandbox-settings and --skip-permissions cannot be used together"
-        )
+        raise UsageError("--sandbox-settings and --yolo cannot be used together")
 
     if sandbox_file:
         return sandbox_args(sandbox_file)
@@ -285,7 +281,7 @@ def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
         return []
 
     raise UsageError(
-        "pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox"
+        "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
     )
 
 

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A status line in the full-screen view that ticks every second while a run
+  goes, such as `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`.
+- A Time column in the Tasks pane: the running task counts up, and each
+  finished task keeps its time.
+- `GateStarted` and `CommitStarted` run events, which drive the status line.
+  The run log ignores them.
+
+### Changed
+
+- `--skip-permissions` is now `--yolo`: a short, honest name for running
+  sessions with no sandbox. It works as before and still wins over a folder's
+  `sandbox.json`. The permissions dialog still offers "Skip permissions (no
+  sandbox)", the settings strip shows `Permissions: skip`, and the run log still
+  records `"permissions": "skip"`.
+- `alr` no longer aims for gralph compatibility. It began as a port of gralph,
+  and its flags, formats, and behavior now change as its own needs require
+  (ADR-022).
+
+### Removed
+
+- `--skip-permissions`, with no alias; it is now an unknown-flag error. Command
+  lines that use it, including gralph ones, must use `--yolo`.
+
 ## [0.0.7] - 2026-10-08
 
 ### Added

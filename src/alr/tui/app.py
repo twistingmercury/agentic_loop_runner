@@ -3,6 +3,7 @@
 import asyncio
 import signal
 import time
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Header, Select, Static
+from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
@@ -29,8 +31,9 @@ from alr.tui.dialogs import (
     SummaryDialog,
 )
 from alr.tui.panes import ActivityPane, GatesPane, TasksPane
-from alr.tui.prepare import prepare
-from alr.tasks import FAILED, Task, TaskList
+from alr.tui.prepare import Prepared, prepare
+from alr.tui.progress import Progress
+from alr.tasks import FAILED, PENDING, Task, TaskList
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -82,6 +85,7 @@ class AlrApp(App[None]):
     #tasks { width: 3fr; min-width: 28; }
     #gates { width: 2fr; }
     #activity { width: 100%; height: 3fr; }
+    #progress { height: 1; padding: 0 1; }
     """
     BINDINGS = [
         Binding("s", "start", "Start"),
@@ -96,7 +100,9 @@ class AlrApp(App[None]):
         Binding("x", "menu('sandbox')", "Sandbox file"),
     ]
 
-    def __init__(self, settings: RunSettings) -> None:
+    def __init__(
+        self, settings: RunSettings, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         super().__init__()
         self.settings = settings
         self.state = AppState.SETUP
@@ -105,6 +111,10 @@ class AlrApp(App[None]):
         self._worker: Worker[None] | None = None
         self._started = 0.0
         self._task_list: TaskList | None = None
+        # Drives the status line and the task times; a test passes its own so nothing waits.
+        self._clock = clock
+        self._progress: Progress | None = None
+        self._ticker: Timer | None = None
         self.in_work_tree: bool | None = None
         """None until the launch check has answered."""
 
@@ -149,8 +159,9 @@ class AlrApp(App[None]):
             yield Button("(q)uit", id="menu-quit")
         with Vertical(id="panes"):
             with Horizontal(id="top"):
-                yield TasksPane(id="tasks")
+                yield TasksPane(id="tasks", clock=self._clock)
                 yield GatesPane(id="gates")
+            yield Static("", id="progress")
             yield _activity_pane()
         yield Static("", id="status")
 
@@ -191,6 +202,10 @@ class AlrApp(App[None]):
 
     def _show_tasks(self) -> None:
         """Show the tasks before Start."""
+        # Queued at mount, this can land after a quick Start; a reload then would wipe the run's rows.
+        if self.state in (AppState.RUNNING, AppState.FINISHED):
+            return
+
         # The launch worker may not have read the file yet; whichever runs first reads it.
         if self._task_list is None:
             self._read_tasks()
@@ -310,6 +325,8 @@ class AlrApp(App[None]):
             self.settings.gates = gates
 
     def on_unmount(self) -> None:
+        # The status line goes with the screen, so no tick may come after it.
+        self._stop_ticking()
         asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
 
     def _lock_dropdowns(self) -> None:
@@ -448,6 +465,7 @@ class AlrApp(App[None]):
             return
 
         self.query_one(TasksPane).load(prepared.task_list)
+        self._start_ticking(prepared)
         front_end = StreamFrontEnd(make_report(self.post_message, prepared.record))
         try:
             await run(prepared.task_list, prepared.options, front_end)
@@ -456,6 +474,30 @@ class AlrApp(App[None]):
             pass
         finally:
             prepared.close()
+
+    def _start_ticking(self, prepared: Prepared) -> None:
+        """Follow the run on the status line, which counts up every second."""
+        pending = sum(task.state == PENDING for task in prepared.task_list.tasks)
+        gates = len(prepared.task_list.gate_list())
+        self._progress = Progress(pending, gates, clock=self._clock)
+        self._ticker = self.set_interval(1, self._tick)
+
+    def _tick(self) -> None:
+        """Redraw the status line and the running task's time, so they move between events."""
+        if self._progress is None:
+            return
+
+        line = self.query_one("#progress", Static)
+        # The line is one row tall; whatever wraps is hidden, and the timers come last.
+        line.update(self._progress.text(width=line.content_size.width))
+        self.query_one(TasksPane).tick()
+
+    def _stop_ticking(self) -> None:
+        if self._ticker is not None:
+            self._ticker.stop()
+
+        self._ticker = None
+        self._progress = None
 
     def _back_to_ready(self, exc: Exception) -> None:
         """A check failed before the run began; show why and let the user try again."""
@@ -492,6 +534,10 @@ class AlrApp(App[None]):
 
     def on_run_event(self, message: RunEvent) -> None:
         event = message.event
+        if self._progress is not None:
+            self._progress.feed(event)
+            self._tick()
+
         self.query_one(TasksPane).apply(event)
         if isinstance(event, TaskStarted):
             # Not left to the highlight message: it is silent when the row was already highlighted.
@@ -508,6 +554,8 @@ class AlrApp(App[None]):
     def _finish(self, event: RunDone) -> None:
         self.state = AppState.FINISHED
         self.outcome = _outcome(event, self._stopping)
+        self._stop_ticking()
+        self.query_one("#progress", Static).update("")
         self.query_one("#status", Static).update(
             f"{self.outcome} in {format_elapsed(event.seconds)}"
         )

@@ -19,9 +19,11 @@ from alr.engine.sandbox import bypass_args
 from alr.errors import RunError
 from alr.record.events import (
     Activity,
+    CommitStarted,
     Committed,
     Event,
     GateFinished,
+    GateStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -366,3 +368,35 @@ async def test_nothing_staged_reports_no_committed(git_repo: Path) -> None:
 
     assert _of(events, Committed) == []
     assert "→ commit First" not in _lines(events)
+
+
+async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(
+    tmp_path: Path,
+) -> None:
+    gate = Gate(cmd="echo hi")
+
+    events = await _run(_task_list(gate), tmp_path / "tasks.yaml")
+
+    [started] = _of(events, GateStarted)
+    assert started.gate == gate
+    assert started.task.id == 1
+    marker = events.index(Activity(started.task, "→ gate echo hi"))
+    assert events.index(started) == marker + 1
+    assert events.index(started) < events.index(_of(events, GateFinished)[0])
+
+
+async def test_commit_started_is_reported_once_after_its_marker_and_before_committed(
+    git_repo: Path,
+) -> None:
+    tasks_file = git_repo / "run" / "tasks.yaml"
+    repo = await open_repo(str(tasks_file))
+
+    events = await _run(
+        _task_list(Gate(cmd="echo work > one.txt")), tasks_file, repo=repo
+    )
+
+    [started] = _of(events, CommitStarted)
+    assert started.task.id == 1
+    marker = events.index(Activity(started.task, "→ commit First"))
+    assert events.index(started) == marker + 1
+    assert events.index(started) < events.index(_of(events, Committed)[0])

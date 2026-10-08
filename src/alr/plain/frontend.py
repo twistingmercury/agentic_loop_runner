@@ -10,9 +10,11 @@ from alr.engine.frontend import SessionResult
 from alr.engine.gates import first_line
 from alr.record.events import (
     Activity,
+    CommitStarted,
     Committed,
     Event,
     GateFinished,
+    GateStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -68,6 +70,7 @@ class PlainFrontEnd:
         # Flushed, so the line stays ahead of the gate's own output.
         print(f"gate: {gate.cmd}", flush=True)
         self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
+        self._report(GateStarted(task, gate))
         # No stdin, and stdout and stderr inherited, so the output passes straight through.
         try:
             process = await proc.start(["sh", "-c", gate.cmd])
@@ -92,6 +95,7 @@ class PlainFrontEnd:
         # so the line stays ahead of git's own output.
         print(f"commit: {first_line(task.name)}", flush=True)
         self._report(Activity(task, "→ commit " + first_line(task.name)))
+        self._report(CommitStarted(task))
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
         # stdout and stderr inherited, so git's output passes straight through.
