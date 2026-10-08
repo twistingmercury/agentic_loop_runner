@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-10-08
+
+### Added
+
+- Full-screen terminal view (Textual), now the default on a terminal. It has a
+  Tasks pane, a Gates & commits pane, and a full-width Task pane that follows the
+  running task. It is keyboard-only, with hotkeys in the menu names.
+- Setup dialogs for the folder, permissions, and gates, and a summary pop-up
+  when a run ends.
+- Runs outside a git repository (no commits; the view shows a note).
+- `--commit-after-all` to make one commit at the end instead of one per task.
+- `--reset-failed` (and a Reset menu item in the view) to put failed tasks back
+  to pending. It cannot be combined with `--dry-run`.
+- `--install-skill` to copy the bundled `gralph-docs-writer` skill.
+- Plain mode now writes a run log (`run.jsonl` and `task-N.log`) like the view
+  does.
+- Elapsed times show as hours, minutes, and seconds.
+
+### Changed
+
+- `--no-tui` is now `--plain`.
+- Logs always go to `<dir>/logs/<timestamp>/`, in both modes. Two runs started
+  in the same second get a `-1`/`-2` suffix.
+- The task file is always `<dir>/tasks.yaml`; plain mode requires `-d`.
+- The run events and run log writer moved into `alr.record`.
+- The unit tests run in parallel with pytest-xdist (`make test` and the Docker
+  build use `-n auto`); the e2e tests stay serial.
+
+### Removed
+
+- `-t/--tasks`.
+- `--log-dir`.
+
+### Fixed
+
+- Racy and root-only unit tests.
+- The plain-mode tee re-copying a long partial line.
+
 ## [0.0.6] - 2026-10-06
 
 ### Added
