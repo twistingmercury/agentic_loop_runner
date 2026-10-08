@@ -58,7 +58,7 @@ class TasksPane(DataTable[str]):
         """The whole name of each task, for the cut to start from."""
         # A test passes its own clock so the running time moves without waiting.
         self._clock = clock
-        self._running: tuple[str, float] | None = None
+        self._running_task: tuple[str, float] | None = None
         """The running task's row key and when it started."""
 
     def on_mount(self) -> None:
@@ -73,7 +73,7 @@ class TasksPane(DataTable[str]):
     def load(self, task_list: TaskList) -> None:
         """Fill the table from the file's tasks, as they stand now."""
         self.clear()
-        self._running = None
+        self._running_task = None
         self._names = {str(task.id): task.name for task in task_list.tasks}
         longest = max((len(key) for key in self._names), default=2)
         self.columns[ColumnKey("id")].width = max(2, longest)
@@ -112,21 +112,21 @@ class TasksPane(DataTable[str]):
     def apply(self, event: Event) -> None:
         if isinstance(event, TaskStarted):
             self._set_state(event.task.id, _RUNNING)
-            self._running = (str(event.task.id), self._clock())
+            self._running_task = (str(event.task.id), self._clock())
             self.tick()
             self._follow(event.task.id)
 
         if isinstance(event, TaskFinished):
             self._set_state(event.task.id, _SYMBOLS.get(event.task.state, _PENDING))
-            self._running = None
+            self._running_task = None
             self._set_time(str(event.task.id), event.seconds)
 
     def tick(self) -> None:
         """Count the running task's time up; the view calls this once a second."""
-        if self._running is None:
+        if self._running_task is None:
             return
 
-        key, started = self._running
+        key, started = self._running_task
         self._set_time(key, self._clock() - started)
 
     def on_data_table_row_highlighted(self, message: DataTable.RowHighlighted) -> None:

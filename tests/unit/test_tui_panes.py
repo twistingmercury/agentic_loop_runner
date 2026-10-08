@@ -127,6 +127,14 @@ async def test_tasks_pane_stops_counting_once_the_task_finishes() -> None:
         assert _time_cell(pane, 0) == "3.0s"
 
 
+async def test_tasks_pane_ticks_before_any_task_is_loaded() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.tick()
+
+        assert pane.row_count == 0
+
+
 async def test_tasks_pane_leaves_pending_and_already_done_times_empty() -> None:
     done = Task(id=1, name="First", prompt="p", state=COMPLETED)
     pane = TasksPane()
