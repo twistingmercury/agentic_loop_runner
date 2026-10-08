@@ -5,6 +5,7 @@ dist/
 **/.local/
 **/.scratch/
 **/.bin/
+**/.claude/worktrees/
 docs/code_reviews/
 
 __pycache__/
