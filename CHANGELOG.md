@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GateStarted` and `CommitStarted` run events, which drive the status line.
   The run log ignores them.
 
+### Changed
+
+- `--skip-permissions` is now `--yolo`: a short, honest name for running
+  sessions with no sandbox. It works as before and still wins over a folder's
+  `sandbox.json`. The view still says "Skip permissions", and the run log still
+  records `"permissions": "skip"`.
+
+### Removed
+
+- `--skip-permissions`, with no alias; it is now an unknown-flag error. Command
+  lines that use it, including gralph ones, must use `--yolo`.
+
 ## [0.0.7] - 2026-10-08
 
 ### Added

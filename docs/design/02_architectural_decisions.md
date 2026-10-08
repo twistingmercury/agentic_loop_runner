@@ -1,7 +1,7 @@
 ---
-version: 18
+version: 19
 date: 2026-10-08
-notes: "Adds ADR-020: the view shows a ticking status line and a Time column, driven by the new GateStarted and CommitStarted events and alr.tui.progress."
+notes: "Adds ADR-021: the bypass flag is --yolo, with no --skip-permissions alias; ADR-009 gets an amendment note and the inherited gralph ADR-014 row names ADR-021."
 ---
 
 # alr — Architectural Decisions
@@ -49,6 +49,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [018](#adr-018-failed-tasks-are-reset-from-the-menu-or-with---reset-failed)    | Failed tasks are reset from the menu or with --reset-failed         | Accepted | 2026-10-07 |
 | [019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes) | The run log always goes in the run folder's logs folder, in both modes | Accepted | 2026-10-07 |
 | [020](#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column) | The view shows a ticking status line and a Time column | Accepted | 2026-10-08 |
+| [021](#adr-021-the-bypass-flag-is---yolo) | The bypass flag is `--yolo` | Accepted | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -66,7 +67,7 @@ column says which `alr` ADR carries the change.
 | ADR-006    | Failed task blocks run until manual reset                     |                                  |
 | ADR-007    | Unix only, process group lifecycle management                 |                                  |
 | ADR-013    | The runner runs the gates after a completed session           |                                  |
-| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request | ADR-009: found in the run folder |
+| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request | ADR-009: found in the run folder; ADR-021: the flag is `--yolo` |
 | ADR-015    | The runner commits a completed task on request                |                                  |
 | ADR-016    | The runner logs a run on request                              | ADR-008: no `prompt_file`; ADR-019: the ledger and the run folder |
 | ADR-019    | One gate list per task file                                   | ADR-008: `shared.gates`          |
@@ -447,6 +448,9 @@ A `sandbox.json` in a `-d` run folder is the run's `--sandbox-settings`.
 - A settings file in a run folder is applied without being named on the command line, so it is as trusted as the
   folder's `tasks.yaml`, which is already code the run executes
 - The only way to run a folder that holds a `sandbox.json` unsandboxed is `--skip-permissions`
+
+*Amended by [ADR-021](#adr-021-the-bypass-flag-is---yolo):* `--skip-permissions` is now `--yolo`, with no alias. Read
+`--skip-permissions` above as `--yolo`; the rules are unchanged.
 
 ### ADR-010: Unit tests under `make test`, e2e tests in a container
 
@@ -949,5 +953,39 @@ events also could not tell the view when a gate or a commit began, only when a g
 - Two more event types that every consumer of `Event` must handle or ignore
 - One more row of screen space taken from the Task pane
 - The tick redraws the screen every second for the whole run
+
+### ADR-021: The bypass flag is `--yolo`
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+gralph's flag for running sessions without a sandbox is `--skip-permissions`. It is long, and it reads like a minor
+setting, when it actually hands Claude the whole machine with `--dangerously-skip-permissions`. The switch is unsafe,
+and its name should say so in a word a user will remember. `alr` is still pre-1.0, so the break is cheap now.
+
+**Decision:**
+
+- **The flag is `--yolo`.** It does what `--skip-permissions` did: sessions run with `--dangerously-skip-permissions`,
+  it wins over a folder's `sandbox.json` with no error (ADR-009), and with `--sandbox-settings` it is a usage error. Its
+  help text says what it does and that what the sessions do is on the user.
+- **No alias.** `--skip-permissions` is not accepted; it is an unknown-flag error, like `--no-tui` and `--log-dir`. One
+  name keeps the help, the errors, and the docs simple.
+- **Only the flag changes.** The view's permissions dialog keeps its "Skip permissions (no sandbox)" choice, and the run
+  log keeps `"permissions": "skip"`, so logs from earlier runs read the same.
+
+**Consequences:**
+
+*Positive:*
+
+- A short, honest name for an unsafe switch: nobody passes `--yolo` thinking it is harmless
+- One name for the flag everywhere a user types it
+
+*Negative:*
+
+- Another break from gralph: a gralph command line using `--skip-permissions` must change to `--yolo`
+- The flag (`--yolo`) and the words in the view and the run log (`skip`) no longer match
 
 **Next:** [System Architecture](03_system_architecture.md)

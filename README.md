@@ -78,7 +78,7 @@ so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 | `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
 | `--dry-run`                 |       | Validate and report only                                                                 |
 | `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
-| `--skip-permissions`        |       | Run sessions with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json`  |
+| `--yolo`                    |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
 | `--commit`                  |       | Commit each completed task after its gates pass                                          |
 | `--reset-failed`            |       | Set every failed task back to pending before the run, without asking                     |
 | `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
@@ -88,7 +88,7 @@ so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 | `--version`                 | `-v`  | Print the version                                                                        |
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
-`--skip-permissions`; the full-screen view asks in a dialog when neither is given.
+`--yolo`; the full-screen view asks in a dialog when neither is given.
 `--commit` and `--commit-after-all` cannot be used together.
 
 A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).

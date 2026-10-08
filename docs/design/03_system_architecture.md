@@ -1,7 +1,7 @@
 ---
-version: 18
+version: 19
 date: 2026-10-08
-notes: "The stream front end emits GateStarted and CommitStarted, which the run log ignores; alr.tui gains progress.py, a ticking status line between the panes, and a Time column in the Tasks pane (ADR-020)."
+notes: "The bypass flag is --yolo, not --skip-permissions, in the module map, the session flags, and the startup order (ADR-021)."
 ---
 
 # alr — System Architecture
@@ -107,7 +107,7 @@ src/alr/
     result.py      last-line JSON result and the outcome rule
     gates.py       gate order, effective timeout, first failure fails the task
     commit.py      repository checks, add -A, the commit rule, the per-task and after-all modes
-    sandbox.py     the run folder's sandbox.json, session flags from sandbox settings or skip-permissions
+    sandbox.py     the run folder's sandbox.json, session flags from sandbox settings or --yolo
     proc.py        process groups, kill on cancel, git's gentle stop
   plain/
     frontend.py    echo the prompt, tee Claude's stdout, pass output through,
@@ -224,7 +224,7 @@ How gralph's packages map onto this:
 - Find the run folder's settings file: `<folder>/sandbox.json` when it is a regular file, so `--dir` can supply
   `--sandbox-settings` (ADR-009)
 - Build the session flags: for `--sandbox-settings`, merge the file with the three forced sandbox keys and return
-  `--permission-mode acceptEdits --settings <merged JSON>`; for `--skip-permissions`, return
+  `--permission-mode acceptEdits --settings <merged JSON>`; for `--yolo`, return
   `--dangerously-skip-permissions`
 - Check the repository for either commit mode: clean work tree, task file ignored or outside the repository
 
@@ -438,7 +438,7 @@ sequenceDiagram
 
 1. With `--install-skill`: copy the bundled skill, print its path, and exit 0
 2. Resolve `--dir`: the task file is `<folder>/tasks.yaml`, then fill an unset `--sandbox-settings` with
-   `<folder>/sandbox.json` when that is a regular file and `--skip-permissions` was not passed. A folder with no
+   `<folder>/sandbox.json` when that is a regular file and `--yolo` was not passed. A folder with no
    `tasks.yaml` exits 1
 3. Check `--gate-timeout` if passed
 4. Pick the front end: full-screen when stdin and stdout are terminals, `--plain` is absent, and the run is not a
@@ -446,7 +446,7 @@ sequenceDiagram
 5. Check plain mode's required flag, `--dir`. The full-screen view asks for a missing one in a dialog instead
 6. `--commit` together with `--commit-after-all` is a usage error
 7. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or
-   `--skip-permissions` on a real run; a dry run needs neither but still checks a settings file it is given
+   `--yolo` on a real run; a dry run needs neither but still checks a settings file it is given
 8. Dry run, plain real run, or the full-screen view. A plain real run logs to `<folder>/logs` and, when it commits with
    that folder visible to git, exits 1 with the `check_log_dir` error (ADR-019). With `--reset-failed`, a real run sets failed tasks back to pending
    silently before it loads the file (the view does it when it first reads the file); `--reset-failed` with `--dry-run`

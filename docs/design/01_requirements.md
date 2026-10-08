@@ -1,7 +1,7 @@
 ---
-version: 14
+version: 15
 date: 2026-10-08
-notes: "Item 12 adds the ticking status line and the Tasks pane's Time column (ADR-020)."
+notes: "--yolo replaces gralph's --skip-permissions, with no alias; the flag table, the session flags step, the success criteria, and the known differences say so (ADR-021)."
 ---
 
 # alr — Requirements
@@ -44,7 +44,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 3. Decide a session's outcome from the last non-blank, non-fence line of its output, as gralph does
 4. Run the file's `shared.gates` after a completed session, each with a time limit, and complete the task only when every gate exits zero
 5. Commit a completed task on request (`--commit`) with gralph's startup checks and commit rule
-6. Build the session flags from `--sandbox-settings`, a `sandbox.json` found in the `--dir` run folder, or `--skip-permissions`, with gralph's forced sandbox keys; require one choice on a real run
+6. Build the session flags from `--sandbox-settings`, a `sandbox.json` found in the `--dir` run folder, or `--yolo`, with gralph's forced sandbox keys; require one choice on a real run
 7. Save the task file atomically after every task; stop the run on the first failed task; refuse to start when the file already holds a failed task
 8. Stop cleanly on SIGINT or SIGTERM: kill the running process group, leave the task and the file untouched, exit 1
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file
@@ -93,7 +93,7 @@ The flags below are accepted, with gralph's meaning and startup order.
 | `--gate-timeout <duration>` |       | Duration such as `90s`, `10m`, or `1h30m`; overrides every gate's own timeout            |
 | `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
-| `--skip-permissions`        |       | Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
+| `--yolo`                    |       | New name for gralph's `--skip-permissions` (ADR-021). Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
 | `--commit`                  |       | Commit each completed task after its gates pass; pre-selects per task in the view        |
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
 | `--commit-after-all`        |       | New in alr. One commit after the last task completes; none on a failed or stopped run; pre-selects after all in the view; with `--commit` is a usage error |
@@ -106,6 +106,7 @@ Known differences from gralph in this step:
 - `-t/--tasks` is not accepted: it is an unknown-flag error, and the task file is always `<folder>/tasks.yaml` (ADR-017). Gralph command lines that use `-t` must use `-d`
 - `--log-dir` is not accepted: it is an unknown-flag error, and the run log always goes to `<folder>/logs` (ADR-019)
 - `--no-tui`, gralph's flag for plain output, is not accepted: it is an unknown-flag error, and `--plain` replaces it
+- `--skip-permissions` is not accepted: it is an unknown-flag error, and `--yolo` replaces it with no alias (ADR-021). Gralph command lines that use `--skip-permissions` must use `--yolo`
 - `-p/--prompt` is not accepted. It is an unknown-flag error, as in gralph v0.11.0 and later
 - Inside a git work tree the view always commits, and offers per task or after all tasks as its two choices; outside one it runs without commits and says so; plain mode still commits only with a flag
 - The view's dialogs differ from gralph's wizard: modal pop-ups over a main window, a Start button, a commit setting in the strip rather than a yes/no step, a Logging dropdown on by default, no gate-timeout step, and a read-only file viewer
@@ -122,7 +123,7 @@ Known differences from gralph in this step:
 | Wire contract          | Stdin text and Claude argv identical to gralph's                                                | Golden test on stdin; argv recorded by the fake `claude`                    |
 | Outcome rule           | Same state and error for every result-line case                                                 | Ported `result_test.go` and `claude_result_test.go` cases                   |
 | Gate enforcement       | Completed only when every gate exits zero; timeouts honored; gates skipped on a failed session  | Ported gate unit and e2e tests with real shell commands                     |
-| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both exits 1; a folder's `sandbox.json` answers the choice, and `--skip-permissions` overrides it | Ported sandbox unit and e2e tests |
+| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both exits 1; a folder's `sandbox.json` answers the choice, and `--yolo` overrides it | Ported sandbox unit and e2e tests |
 | Commit on request      | One commit per completed task; none for a failed task; a dirty tree refuses to start            | Ported commit tests against real git repositories in temporary folders     |
 | State persistence      | Atomic save after every task; file untouched on cancel                                          | Ported e2e tests check the file after each run                              |
 | Signal handling        | SIGINT and SIGTERM kill the whole process group; exit 1; no orphans                             | Ported signal e2e tests with the fake `claude` and a descendant process     |
