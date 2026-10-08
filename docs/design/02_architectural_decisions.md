@@ -1208,7 +1208,11 @@ identical.
 | Stopped | 130 (SIGINT), 143 (SIGTERM) | result `stopped` | none |
 
 Refusal reasons: `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`,
-`locked`. The text after the reason is the existing message. A refusal writes no run log: nothing ran, and a log for a
+`invalid-sandbox-settings`, `log-unwritable`, `git-error`, `locked`. Whenever alr can tell for sure why it will not
+start, it names the reason; a refusal never falls back to a bare exit 1. `git-error` covers git failing while alr looks
+at the repository (`rev-parse`, `status`, `check-ignore`), `invalid-sandbox-settings` an unreadable or invalid sandbox
+settings file, and `log-unwritable` a run log folder that cannot be created or opened at startup (a log write that fails
+mid-run is a run failure, exit 1, and its text carries the cause). The text after the reason is the existing message. A refusal writes no run log: nothing ran, and a log for a
 "log folder visible" refusal would create the dirt it refused over.
 
 *Log fields.*

@@ -14,7 +14,7 @@
 
 - Run `make test` (ruff format, ruff check --fix, then the unit tests) before every commit. The e2e suite runs with `make build` (a container, against the built wheel).
 - Exit codes: `0` completed, `1` task or gate failed, `2` usage error, `3` refused to start, `4` commit failed, `130` SIGINT, `143` SIGTERM.
-- A refusal's first stderr line is exactly `error: refused: <reason>: <message>`, with the reasons `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`, `locked`. The `<message>` is the existing message text, unchanged.
+- A refusal's first stderr line is exactly `error: refused: <reason>: <message>`, with the reasons `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, `git-error`, `locked`. A refusal always names its reason. The `<message>` is the existing message text, unchanged.
 - A refusal writes no run log and changes nothing on disk.
 - `run_finished.result` is one of `completed`, `failed`, `commit_failed`, `stopped`. `run_started.commit` is one of `"none"`, `"task"`, `"run"`.
 - A commit failure reason is the first non-empty line of git's combined output, trimmed to 200 characters; `task-N.log` keeps the full text.
@@ -73,7 +73,6 @@ from alr.errors import (
     CommitFailedError,
     FailedTasksError,
     RefusedError,
-    RepoError,
     RunError,
     UsageError,
 )
@@ -85,7 +84,7 @@ def test_exit_codes() -> None:
     assert UsageError("x").exit_code == 2
     assert RefusedError("dirty-tree", "x").exit_code == 3
     assert CommitFailedError("x").exit_code == 4
-    assert RepoError("x").exit_code == 1
+    assert RunError("x").exit_code == 1
 
 
 def test_a_refusal_names_its_reason_and_keeps_the_message() -> None:
@@ -134,6 +133,9 @@ TASK_FILE_VISIBLE = "task-file-visible"
 LOG_FOLDER_VISIBLE = "log-folder-visible"
 FAILED_TASKS = "failed-tasks"
 INVALID_TASK_FILE = "invalid-task-file"
+INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"
+LOG_UNWRITABLE = "log-unwritable"
+GIT_ERROR = "git-error"
 LOCKED = "locked"
 
 
@@ -399,7 +401,7 @@ git commit -m "Record how a run ended and which commit mode ran in the run log"
 
 **Interfaces:**
 - Consumes: `RefusedError`, reason constants (Task 1).
-- Produces: `check_clean`, `_check_task_file`, `check_log_dir` raise `RefusedError` with `DIRTY_TREE`, `TASK_FILE_VISIBLE`, `LOG_FOLDER_VISIBLE`. `RepoError` stays for git probe failures (`git rev-parse`, `git status`, `git check-ignore` failing), which keep exit 1.
+- Produces: `check_clean`, `_check_task_file`, `check_log_dir` raise `RefusedError` with `DIRTY_TREE`, `TASK_FILE_VISIBLE`, `LOG_FOLDER_VISIBLE`. The git probe failures (`git rev-parse`, `git status`, `git check-ignore` failing) also raise `RefusedError`, reason `GIT_ERROR`; `RepoError` is then unused and is deleted.
 - Produces: `load_tasks_report` raises `RefusedError(INVALID_TASK_FILE, <the existing text>)` for an unreadable or invalid file, and `FailedTasksError` as before.
 
 - [ ] **Step 1: Write the failing tests**
@@ -443,9 +445,11 @@ In `tests/unit/test_plain_dryrun.py`: an invalid file and a dirty tree with `com
 Run: `uv run pytest tests/unit/test_commit.py tests/unit/test_plain_start.py tests/unit/test_plain_dryrun.py -v`
 Expected: FAIL (`RepoError` raised; the order check fails).
 
+Also add, in `tests/unit/test_commit.py`, `test_a_broken_repository_is_refused_with_git_error` (change the existing `test_open_repo_broken_repository_is_an_error` and `..._status_failure_carries_gits_message` to expect `RefusedError` with reason `git-error`), in `tests/unit/test_cli.py` a bad `--sandbox-settings` file exiting 3 with first stderr line starting `error: refused: invalid-sandbox-settings: `, and in `tests/unit/test_plain_start.py` an unwritable `logs/` folder (make `logs` a regular file) raising `RefusedError` with reason `log-unwritable`.
+
 - [ ] **Step 3: Implement**
 
-`commit.py`: swap the three `raise RepoError(...)` that refuse for `raise RefusedError(REASON, "<same text without the leading --commit needs ... change>")`. Keep each message text exactly as written today (it begins with `--commit needs ...`), passing it as `message`.
+`commit.py`: swap every `raise RepoError(...)` for a `RefusedError`; the three that refuse (dirty tree, task file, log dir) get their reasons and the git probe failures get `GIT_ERROR`, each as `raise RefusedError(REASON, "<same text without the leading --commit needs ... change>")`. Keep each message text exactly as written today (it begins with `--commit needs ...`), passing it as `message`.
 
 `report.py`, wrap the load:
 
@@ -479,7 +483,7 @@ def load_tasks_report(out: TextIO, tasks_file: str) -> TaskList:
 
 where `_read_for_start` calls `read_tasks` and turns a `TaskFileError` into the same `RefusedError(INVALID_TASK_FILE, ...)`. Delete the old `try/except TaskFileError` block. A failed task no longer stops the run before the repo checks; `--reset-failed` is applied only after they pass, and without `--reset-failed` a failed task still refuses with `failed-tasks`.
 
-`dryrun.py` needs no change beyond what `load_tasks_report` now raises; check `cli._main` returns `exc.exit_code` for it (Task 1 did). `tui/prepare.py`: catch `RefusedError` instead of `RepoError` in `_check_log_folder`. `tui/app.py::_error_text`: for a `RefusedError` return `exc.message`, so the dialogs show the text they showed before.
+`engine/sandbox.py`: `SandboxError` becomes a `RefusedError` with `INVALID_SANDBOX_SETTINGS` (delete the class, raise `RefusedError` where it was raised). `record/runlog.py`: `RunLog.open` wraps its `RunLogError` from `_create_run_dir` and `_start` in `RefusedError(LOG_UNWRITABLE, ...)` (the message stays); a `RunLogError` raised by `record` later in a run stays a run failure, exit 1. `dryrun.py` needs no change beyond what `load_tasks_report` now raises; check `cli._main` returns `exc.exit_code` for it (Task 1 did). `tui/prepare.py`: catch `RefusedError` instead of `RepoError` in `_check_log_folder`. `tui/app.py::_error_text`: for a `RefusedError` return `exc.message`, so the dialogs show the text they showed before.
 
 - [ ] **Step 4: Run to verify they pass**, then `make test`.
 
@@ -878,4 +882,4 @@ git commit -m "Document the exit codes, the run log fields, and run mode's new l
 ## Self-review notes
 
 - **Spec coverage:** the contract table (Tasks 1, 2, 4, 5, 9), refusals and their order (4), log fields (3), `task` lifecycle (5), `run` lifecycle (6), name validation (7), the view's lookup (8), docs (10), testing and review (9, 11). Stage 2 items (lock, own session, `PR_SET_PDEATHSIG`, pre-add ignore re-check, the `locked` refusal) are in the stage 2 plan.
-- **Known gaps, to confirm with the user:** (a) `RepoError` for a git probe failure (`git rev-parse`, `git status`, `git check-ignore`) and `SandboxError`, `RunLogError` keep exit 1, because the ADR gives them no reason word; (b) the full-screen view's own exit code stays 0 or 1.
+- **Known gap, to confirm with the user:** the full-screen view's own exit code stays 0 or 1.

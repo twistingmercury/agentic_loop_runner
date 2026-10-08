@@ -243,7 +243,7 @@ async def _find_git_dir(root: str) -> str:
         ["git", "rev-parse", "--absolute-git-dir"], cwd=root, gentle=True
     )
     if returncode != 0:
-        raise RepoError(f"--commit: git rev-parse: {_git_message(returncode, stderr)}")
+        raise RefusedError(GIT_ERROR, f"--commit: git rev-parse: {_git_message(returncode, stderr)}")
 
     return stdout.strip()
 ```
@@ -385,7 +385,7 @@ async def recheck_ignored(
         return reason
 ```
 
-`loop.py` builds the guard once per commit with `functools.partial(recheck_ignored, options.repo, options.tasks_file, options.run_dir)` and passes it to `commit` and `commit_all`. A `RepoError` from a failing `git check-ignore` propagates as before. `plain/start.py` sets `run_dir=str(path)` in `RunOptions` (use the folder `RunLog.open` actually created: `RunLog` exposes it, add a `path` property if it does not); `tui/prepare.py` sets `run_dir=None if log_path is None else str(log_path)`.
+`loop.py` builds the guard once per commit with `functools.partial(recheck_ignored, options.repo, options.tasks_file, options.run_dir)` and passes it to `commit` and `commit_all`. A failing `git check-ignore` raises `RefusedError` with reason `git-error`, as stage 1 made it. `plain/start.py` sets `run_dir=str(path)` in `RunOptions` (use the folder `RunLog.open` actually created: `RunLog` exposes it, add a `path` property if it does not); `tui/prepare.py` sets `run_dir=None if log_path is None else str(log_path)`.
 
 - [ ] **Step 4: Run to verify they pass**, then `make test`.
 
