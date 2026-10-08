@@ -172,8 +172,23 @@ class AlrApp(App[None]):
         self._refresh()
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.action_stop)
-        self.run_worker(self._check_work_tree(), exit_on_error=False)
+        self._look_for_work_tree()
         self.run_worker(self.launch_sequence(), exit_on_error=False)
+
+    def _look_for_work_tree(self) -> None:
+        """Start the work-tree lookup, but only once a commit mode asks and nothing has answered.
+
+        With `none` git is never touched, so the lookup waits for the user to
+        pick a mode that commits. A failed lookup leaves the answer open; Start
+        opens the repository itself and reports its error.
+        """
+        if (
+            self.settings.commit_mode is CommitMode.NONE
+            or self.in_work_tree is not None
+        ):
+            return
+
+        self.run_worker(self._check_work_tree(), exit_on_error=False)
 
     async def _check_work_tree(self) -> None:
         """Learn whether a work tree is around, so the note can say nothing will be committed."""
@@ -181,7 +196,11 @@ class AlrApp(App[None]):
         self._show_commit_note()
 
     def _show_commit_note(self) -> None:
-        """Warn only when a commit was asked for and there is no repository to hold it."""
+        """Warn only when a commit was asked for and there is no repository to hold it.
+
+        Decided from the current mode and answer, so a lookup that finishes
+        after the user changed the mode still leaves the note right.
+        """
         asked = self.settings.commit_mode is not CommitMode.NONE
         self.query_one("#commit-note", Static).display = (
             asked and self.in_work_tree is False
@@ -426,6 +445,7 @@ class AlrApp(App[None]):
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "commit" and isinstance(message.value, CommitMode):
             self.settings.commit_mode = message.value
+            self._look_for_work_tree()
             self._show_commit_note()
 
         if message.select.id == "logging" and isinstance(message.value, bool):

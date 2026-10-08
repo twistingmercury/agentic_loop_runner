@@ -30,7 +30,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from alr.errors import RunLogError
+from alr.errors import RepoError, RunLogError
 from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
 from alr.tasks import Gate, parse_tasks
@@ -557,7 +557,7 @@ async def test_a_run_outside_a_repository_finishes_done_without_commits(
 async def test_a_run_inside_a_repository_keeps_the_commit_choice(
     git_repo: Path,
 ) -> None:
-    app = AlrApp(_settings(git_repo))
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
     async with app.run_test() as pilot:
         await until(lambda: app.in_work_tree is not None)
         await pilot.pause()
@@ -1352,7 +1352,7 @@ def _dropdowns_disabled(app: AlrApp) -> tuple[bool, bool]:
 async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await until(lambda: app.in_work_tree is not None)
+        await until(lambda: app.state is AppState.READY)
         await pilot.pause()
 
         assert _dropdowns_disabled(app) == (False, False)
@@ -1374,7 +1374,6 @@ async def test_the_commit_note_follows_the_dropdown_outside_a_repository(
 ) -> None:
     app = AlrApp(outside_settings)
     async with app.run_test() as pilot:
-        await until(lambda: app.in_work_tree is not None)
         await until(lambda: app.state is AppState.READY)
 
         assert not _note_shown(app)
@@ -1390,6 +1389,133 @@ async def test_the_commit_note_follows_the_dropdown_outside_a_repository(
         await _finished(app)
 
         assert _dropdowns_disabled(app) == (True, True)
+
+
+class _Lookups:
+    """A stand-in for the work-tree lookup that counts its calls and can be held open."""
+
+    def __init__(self, answer: str | None) -> None:
+        self.calls = 0
+        self.answer = answer
+        self.release = asyncio.Event()
+
+    async def hold(self) -> str | None:
+        self.calls += 1
+        await self.release.wait()
+        return self.answer
+
+    async def __call__(self) -> str | None:
+        self.calls += 1
+        return self.answer
+
+
+def _patch_lookup(monkeypatch: pytest.MonkeyPatch, answer: str | None) -> _Lookups:
+    lookups = _Lookups(answer)
+    monkeypatch.setattr(app_module, "work_tree_root", lookups)
+    return lookups
+
+
+async def _pick_commit(app: AlrApp, pilot: Pilot, *moves: str) -> None:
+    """Open the Commit dropdown, move from the current option by the given keys, then choose."""
+    await _tab_to(app, pilot, "commit")
+    await pilot.press("enter", *moves, "enter")
+
+
+async def test_none_never_looks_at_the_repository_inside_one(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, str(git_repo))
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.NONE))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert lookups.calls == 0
+        assert app.in_work_tree is None
+        assert not _note_shown(app)
+
+
+async def test_none_never_looks_at_the_repository_outside_one(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert lookups.calls == 0
+        assert not _note_shown(app)
+
+
+async def test_the_launch_lookup_runs_for_per_task_and_shows_the_note_outside(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    outside_settings.commit_mode = CommitMode.TASK
+    app = AlrApp(outside_settings)
+    async with app.run_test():
+        await until(lambda: app.in_work_tree is not None)
+
+        assert lookups.calls == 1
+        assert _note_shown(app)
+
+
+async def test_picking_per_task_outside_a_repository_looks_it_up_and_shows_the_note(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        assert lookups.calls == 0
+
+        await _pick_commit(app, pilot, "down")
+        await until(lambda: _note_shown(app))
+
+        assert lookups.calls == 1
+
+        await _pick_commit(app, pilot, "up")
+        await until(lambda: app.settings.commit_mode is CommitMode.NONE)
+
+        assert not _note_shown(app)
+
+
+async def test_a_lookup_finishing_after_the_switch_back_to_none_shows_no_note(
+    outside_settings: RunSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lookups = _patch_lookup(monkeypatch, None)
+    monkeypatch.setattr(app_module, "work_tree_root", lookups.hold)
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _pick_commit(app, pilot, "down")
+        await until(lambda: lookups.calls == 1)
+        await _pick_commit(app, pilot, "up")
+        await until(lambda: app.settings.commit_mode is CommitMode.NONE)
+
+        lookups.release.set()
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert not _note_shown(app)
+
+
+async def test_a_failing_lookup_does_not_crash_the_view(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken() -> str | None:
+        raise RepoError("--commit: git rev-parse: boom")
+
+    monkeypatch.setattr(app_module, "work_tree_root", broken)
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.pause()
+
+        assert app.in_work_tree is None
+        assert not _note_shown(app)
 
 
 MENU = ["folder", "permissions", "gates", "reset", "tasks", "sandbox", "quit"]
