@@ -59,7 +59,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             _report_missing(parser, missing)
             return 1
 
-        commit_mode = check_commit_flags(args.commit, args.commit_after_all)
+        commit_mode = CommitMode(args.commit)
         session = session_args(sandbox_settings, args.yolo, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -110,16 +110,14 @@ def wants_tui(args: argparse.Namespace) -> bool:
 
 def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> int:
     """Open the full-screen view with what the flags already answer."""
-    commit_mode = check_commit_flags(args.commit, args.commit_after_all)
-    # Validates a given settings file and the both-flags conflict; no run starts here.
+    commit_mode = CommitMode(args.commit)
+    # Validates a given settings file; no run starts here.
     session_args(sandbox_file, args.yolo, dry_run=True)
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
         permissions=_permissions(sandbox_file, args.yolo),
-        commit_mode=commit_mode
-        if commit_mode is not CommitMode.NONE
-        else CommitMode.TASK,
+        commit_mode=commit_mode,
         gate_timeout=args.gate_timeout or "",
         reset_failed=args.reset_failed,
     )
@@ -198,13 +196,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--commit",
-        action="store_true",
-        help="Commit each completed task with git after its gates pass, with the task name as the message; in a repository, the work tree must be clean",
-    )
-    parser.add_argument(
-        "--commit-after-all",
-        action="store_true",
-        help="Commit once, after the last task completes, instead of after each task; a failed or stopped run makes no commit",
+        metavar="",
+        choices=[mode.value for mode in CommitMode],
+        default=CommitMode.NONE.value,
+        help="When to commit with git: none (default) never touches git; task commits each completed task after its gates pass, with the task name as the message, and in a repository the work tree must be clean; run makes one commit after the last task, and a failed or stopped run makes no commit",
     )
     return parser
 
@@ -242,17 +237,6 @@ def check_gate_timeout(value: str) -> None:
         parse_timeout(value)
     except ValueError as exc:
         raise UsageError(f"--gate-timeout: {exc}") from exc
-
-
-def check_commit_flags(commit: bool, after_all: bool) -> CommitMode:
-    """Turn the two commit flags into the mode they ask for; asking for both is an error."""
-    if commit and after_all:
-        raise UsageError("--commit and --commit-after-all cannot be used together")
-
-    if after_all:
-        return CommitMode.RUN
-
-    return CommitMode.TASK if commit else CommitMode.NONE
 
 
 def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:
