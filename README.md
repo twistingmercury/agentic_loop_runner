@@ -63,7 +63,7 @@ the menu button names show their keys (there is no footer): `s` starts a run (th
 then reads `Stop (^c)`), Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
 and gates dialogs (Folder, Permissions, Reset, and Quit grey out during a run), `r` resets failed tasks to pending (after you confirm), `t` and `x`
 show `tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a dialog. The Gates
-button does nothing while a run is going. The Activity pane shows only the last 5,000 lines of a
+button does nothing while a run is going. The Task pane shows only the last 5,000 lines of a
 task, with no warning; the run log keeps every line. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use

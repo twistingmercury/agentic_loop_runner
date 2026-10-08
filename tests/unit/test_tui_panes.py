@@ -264,11 +264,11 @@ async def test_activity_pane_lands_at_the_bottom_on_a_task_switch() -> None:
 async def test_activity_pane_title_names_the_task_it_shows() -> None:
     pane = ActivityPane()
     async with Host(pane).run_test():
-        assert pane.border_title == "Activity"
+        assert pane.border_title == "Task"
 
         pane.show(2, "Second")
 
-        assert pane.border_title == "Activity: 2 Second"
+        assert pane.border_title == "Task: 2 Second"
 
 
 async def test_tasks_pane_moves_its_highlight_to_the_started_task() -> None:

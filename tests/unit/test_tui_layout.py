@@ -79,7 +79,7 @@ async def test_the_settings_in_the_strip_are_labelled(
     ("pane", "title"),
     [
         ("#tasks", "Tasks"),
-        ("#activity", "Activity: 1 A"),
+        ("#activity", "Task: 1 A"),
         ("#gates", "Gates & commits"),
     ],
 )

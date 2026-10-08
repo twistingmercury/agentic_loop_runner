@@ -135,7 +135,7 @@ class ActivityPane(RichLog):
     """The selected task's activity lines, wrapped to the pane's width."""
 
     def on_mount(self) -> None:
-        self.border_title = "Activity"
+        self.border_title = "Task"
 
     def __init__(self) -> None:
         # Markup and highlight off, so a line with square brackets prints raw; the default
@@ -154,7 +154,7 @@ class ActivityPane(RichLog):
             return
 
         self._shown = task_id
-        self.border_title = f"Activity: {task_id} {name}"
+        self.border_title = f"Task: {task_id} {name}"
         self._redraw()
 
     def on_resize(self, event: Resize) -> None:

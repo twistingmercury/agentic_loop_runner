@@ -1,7 +1,7 @@
 ---
-version: 16
+version: 17
 date: 2026-10-07
-notes: "ADR-013, ADR-015, and ADR-019 say Logging is a setting (a dropdown), and document the -1 folder suffix, the unreported folder name, the unsuffixed check_log_dir check, the idle Gates button, and the 5,000-line Activity limit."
+notes: "ADR-015 titles the activity pane Task. ADR-013, ADR-015, and ADR-019 say Logging is a setting (a dropdown), and document the -1 folder suffix, the unreported folder name, the unsuffixed check_log_dir check, the idle Gates button, and the 5,000-line Activity limit."
 ---
 
 # alr — Architectural Decisions
@@ -607,12 +607,12 @@ One main window and modal dialogs on top of it.
   own row beneath. Under it is a menu row of flat, one-row buttons that carry their hotkeys in their names, `(f)older
   (p)ermissions (g)ates (r)eset (t)asks sandbo(x) (q)uit`, since Textual has no menu-bar widget; there is no footer. Then
   come three titled panes: Tasks (3fr) and Gates & commits (2fr) side by side in a top row of about 40% of the height,
-  and Activity across the full width below, about 60%. Long task names end in an ellipsis, and the tasks pane scrolls
+  and Task (the activity pane) across the full width below, about 60%. Long task names end in an ellipsis, and the tasks pane scrolls
   and keeps the running task visible. A status bar closes the screen. The layout fits 80x24 and 110x32.
 - **Activity pane.** It shows the lines of one task and follows the running task: when a task starts, the tasks pane
   moves its highlight to that row and the activity pane clears and shows that task's lines. The arrow keys can
   highlight another task to read its lines (every task's last 5,000 lines are kept); the next task start moves the highlight
-  again. The title names the task, `Activity: 3 Add the folder dialog`. Long lines wrap, print raw (no markup), and are
+  again. The title names the task, `Task: 3 Add the folder dialog`. Long lines wrap, print raw (no markup), and are
   redrawn from the kept raw lines when the pane is resized. Each task keeps only its last 5,000 lines in the pane;
   older ones drop without a notice, while the run log keeps every line.
 - **Elapsed times.** The summary pop-up, the status line, and the gate times show elapsed time with

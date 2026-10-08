@@ -754,12 +754,12 @@ async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> Non
         app.post_message(RunEvent(TaskStarted(first)))
         app.post_message(RunEvent(Activity(first, "one says hi")))
         await _until(lambda: _activity_lines(app) == ["one says hi"])
-        assert activity.border_title == "Activity: 1 First"
+        assert activity.border_title == "Task: 1 First"
 
         app.post_message(RunEvent(TaskStarted(second)))
         await _until(lambda: tasks.cursor_row == 1)
         await _until(lambda: _activity_lines(app) == [])
-        assert activity.border_title == "Activity: 2 Second"
+        assert activity.border_title == "Task: 2 Second"
 
         app.post_message(RunEvent(Activity(second, "two says hi")))
         await _until(lambda: _activity_lines(app) == ["two says hi"])
@@ -767,7 +767,7 @@ async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> Non
         tasks.focus()
         await pilot.press("up")
         await _until(lambda: _activity_lines(app) == ["one says hi"])
-        assert activity.border_title == "Activity: 1 First"
+        assert activity.border_title == "Task: 1 First"
 
         app.post_message(RunEvent(Activity(second, "two again")))
         await pilot.pause()
@@ -806,7 +806,7 @@ async def test_browsing_another_task_gives_way_to_the_next_task_start(
 
         tasks.focus()
         await pilot.press("down")
-        await _until(lambda: activity.border_title == "Activity: 2 Second")
+        await _until(lambda: activity.border_title == "Task: 2 Second")
         app.post_message(RunEvent(Activity(second, "two says hi")))
         app.post_message(RunEvent(Activity(first, "one again")))
         await _until(lambda: _activity_lines(app) == ["two says hi"])
@@ -815,7 +815,7 @@ async def test_browsing_another_task_gives_way_to_the_next_task_start(
         app.post_message(RunEvent(Activity(third, "three says hi")))
         await _until(lambda: tasks.cursor_row == 2)
         await _until(lambda: _activity_lines(app) == ["three says hi"])
-        assert activity.border_title == "Activity: 3 Third"
+        assert activity.border_title == "Task: 3 Third"
 
         tasks.move_cursor(row=1)
         await _until(lambda: _activity_lines(app) == ["two says hi"])
@@ -844,7 +844,7 @@ async def test_a_late_row_zero_highlight_does_not_pull_the_activity_back(
         await pilot.pause()
 
         assert tasks.cursor_row == 1
-        assert activity.border_title == "Activity: 2 Second"
+        assert activity.border_title == "Task: 2 Second"
         assert _activity_lines(app) == ["two says hi"]
 
 
