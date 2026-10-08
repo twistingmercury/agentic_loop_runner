@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import os
+import platform
+import re
 import signal
 import sys
 import time
@@ -124,6 +126,20 @@ def test_version_prints_one_line(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert out.startswith("alr version: ")
     assert out.count("\n") == 1
+    assert re.fullmatch(r"alr version: \S+ [a-z]+/\S+\n", out)
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "expected"),
+    [("Linux", "x86_64", "linux/x86_64"), ("Darwin", "arm64", "darwin/arm64")],
+)
+def test_version_line_shows_os_and_arch(
+    monkeypatch: pytest.MonkeyPatch, system: str, machine: str, expected: str
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: system)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+
+    assert cli._version_line().endswith(f" {expected}")
 
 
 def test_missing_required_flags_are_each_named(

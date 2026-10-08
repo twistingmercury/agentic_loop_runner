@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import platform
 import signal
 import sys
 from collections.abc import Callable, Coroutine
@@ -34,10 +35,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def _version_line() -> str:
+    """Return the --version line: the version, then the OS and architecture."""
+    system = platform.system().lower()
+    return f"alr version: {metadata.version('alr')} {system}/{platform.machine()}"
+
+
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     """Apply the startup checks in gralph's order, then start the dry run or the real run."""
     if args.version:
-        print(f"alr version: {metadata.version('alr')}")
+        print(_version_line())
         return 0
 
     if args.install_skill:
