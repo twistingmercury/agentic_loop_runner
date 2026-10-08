@@ -237,7 +237,8 @@ def test_commit_hook_output_is_in_the_task_log(
 
     assert res.code == 0, res
     assert repo.subjects() == ["First task", "init"]
-    assert "hook-said-this" in res.out
+    # Git sends a hook's stdout to its own stderr.
+    assert "hook-said-this" in res.err
     assert "hook-said-this" in read_task_log(repo.tasks_path, 1)
 
 
