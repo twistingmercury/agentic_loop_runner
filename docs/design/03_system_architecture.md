@@ -1,7 +1,7 @@
 ---
-version: 22
+version: 23
 date: 2026-10-08
-notes: "Gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023); the plain and stream sections say so, and the front-end table is re-padded. Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023). Earlier: the front-end table lists GateStarted and CommitStarted for both front ends (plain prints the same lines and sends the events too, ADR-020); the status line's form and truncation are ADR-020's, stated here; plain output is no longer described as gralph's (ADR-022)."
+notes: "The commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
 ---
 
 # alr — System Architecture
@@ -106,7 +106,7 @@ src/alr/
     loop.py        load the task file, the run loop, save after each task
     result.py      last-line JSON result and the outcome rule
     gates.py       gate order, effective timeout, first failure fails the task
-    commit.py      repository checks, add -A, the commit rule, the per-task and after-all modes
+    commit.py      repository checks, add -A, the commit rule, the none, task, and run modes
     sandbox.py     the run folder's sandbox.json, session flags from sandbox settings or --yolo
     proc.py        process groups, kill on cancel, git's gentle stop
   plain/
@@ -214,10 +214,11 @@ How gralph's packages map onto this:
   non-blank, non-fence line that is JSON with `"state": "completed"`
 - After a completed session, run the file's `shared.gates` in order, each as `sh -c <cmd>` with no stdin and a time
   limit (`--gate-timeout`, else the gate's `timeout`, else 10 minutes); stop at the first failure
-- With `--commit`, after the gates pass: `git add -A`, then `git commit -m <task name>` when anything is staged
-- With `--commit-after-all`, make no commit per task; once every task has completed, run `git add -A` and one
+- With `--commit none` (the default), never touch git
+- With `--commit task`, after the gates pass: `git add -A`, then `git commit -m <task name>` when anything is staged
+- With `--commit run`, make no commit per task; once every task has completed, run `git add -A` and one
   `git commit` titled `alr: <n> tasks completed` with the `<id>: <name>` of each task in the body. A failed or stopped
-  run makes no commit (ADR-014)
+  run makes no commit (ADR-014, ADR-024)
 - Save the task file after every task; stop the run at the first failed task
 - Measure the duration of each session, gate, task, and the run
 - On cancellation, kill the running process group and change nothing; git gets SIGTERM, up to 2 seconds, then SIGKILL
@@ -226,7 +227,7 @@ How gralph's packages map onto this:
 - Build the session flags: for `--sandbox-settings`, merge the file with the three forced sandbox keys and return
   `--permission-mode acceptEdits --settings <merged JSON>`; for `--yolo`, return
   `--dangerously-skip-permissions`
-- Check the repository for either commit mode: clean work tree, task file ignored or outside the repository
+- Check the repository for `task` and `run`: clean work tree, task file ignored or outside the repository
 
 **Key Characteristics:**
 
@@ -298,14 +299,14 @@ How gralph's packages map onto this:
 
 **Responsibilities:**
 
-- Show one main window: a settings strip (`Commit:` and `Logging:` dropdowns, the permissions label, and the Start
+- Show one main window: a settings strip (`Commit:` and `Logging:` dropdowns, the Commit one offering none, per task, and after all, starting from `--commit` and defaulting to none, the permissions label, and the Start
   button), a menu row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and
   commits side by side on top, a one-row status line, the activity pane across the full width below, then a status bar
 - While a run goes, show where it is on the status line, which ticks every second (ADR-020):
   `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`, joined by ` · `: `task n of N` (N counts only the
   tasks pending at Start), the step (`session`, `gate i of n: <first line of the command>`, or `commit`), the step's
   time, and `run <time>`. When the line is wider than the widget, the step text is cut with a trailing `…` so the
-  timers always show. Between tasks, and before an after-all commit begins, the line is only `task n of N · run <time>`.
+  timers always show. Between tasks, and before a `run`-mode commit begins, the line is only `task n of N · run <time>`.
   `alr.tui.progress` builds the text from the run events; the line is empty before the first task starts and after
   the run ends
 - Give the Tasks pane a `Time` column: the running task's time counts up every second, a finished task keeps the time
@@ -323,8 +324,9 @@ How gralph's packages map onto this:
   leave it open; until Start, reopen any dialog from the menu
 - Validate each answer with the functions a run uses, and keep the error in the dialog: `tasks.yaml` loads, the settings
   file loads
-- Find out at launch whether the working directory is in a git work tree; when it is not, disable the commit setting
-  with the note "no git repository: nothing will be committed" and run without commits (ADR-014)
+- Find out at launch whether the working directory is in a git work tree; when it is not and a commit mode other than
+  none is chosen, show the note "no git repository: nothing will be committed" and run without commits (ADR-014,
+  ADR-024)
 - Fill the same values the flags fill, then on Start run the usual startup checks, save the gates to `tasks.yaml` only
   if they pass, and start the engine as a worker (ADR-012)
 - Turn each run event into a Textual message through the adapter, which holds only the function that posts messages, and
@@ -398,7 +400,7 @@ sequenceDiagram
             Engine ->> Plain: run gate, one at a time
             Plain -->> Engine: exit
         end
-        opt gates passed and --commit
+        opt gates passed and --commit task
             Engine ->> Plain: run git add -A, then git commit
             Plain -->> Engine: exit
         end
@@ -452,7 +454,7 @@ sequenceDiagram
 4. Pick the front end: full-screen when stdin and stdout are terminals, `--plain` is absent, and the run is not a
    `--dry-run`; otherwise plain
 5. Check plain mode's required flag, `--dir`. The full-screen view asks for a missing one in a dialog instead
-6. `--commit` together with `--commit-after-all` is a usage error
+6. `--commit` takes `none`, `task`, or `run`; any other value, a bare `--commit`, and the removed `--commit-after-all` are usage errors (ADR-024)
 7. Build the session flags: exactly one of `--sandbox-settings` (given, or found in the run folder) or
    `--yolo` on a real run; a dry run needs neither but still checks a settings file it is given
 8. Dry run, plain real run, or the full-screen view. A plain real run logs to `<folder>/logs` and, when it commits with
@@ -484,7 +486,7 @@ having to match it word for word (ADR-007).
 | `TaskFileError`     | The task file cannot be read, parsed, validated (including `shared.prompt`), or saved |
 | `FailedTasksError`  | The task file already holds a failed task                                             |
 | `SandboxError`      | The sandbox settings file is missing, unreadable, or not a JSON object                |
-| `RepoError`         | `--commit` finds a dirty work tree, a tracked task file, or a broken git              |
+| `RepoError`         | `--commit task` or `run` finds a dirty work tree, a tracked task file, or a broken git              |
 | `RunLogError`       | The run log cannot be opened or written                                               |
 | `RunError`          | A task failed (after its state was saved), or its state cannot be saved               |
 | `RunCancelledError` | The run was stopped by a signal; a kind of `RunError`                                 |
@@ -572,6 +574,6 @@ graph LR
 | alr writes the filesystem   | Installed skill               | Only with `--install-skill`: the bundled folder is copied over `~/.claude/skills/gralph-docs-writer/`                                                                                                     |
 | alr starts Claude           | Combined prompt on stdin      | Fixed argv: `--print`, the front end's flags, the session flags                                                                                                                                           |
 | alr starts a gate           | `cmd` text from the task file | `sh -c <cmd>` in alr's working directory, unsandboxed, no stdin; only the exit code is used                                                                                                               |
-| alr starts git              | `add -A`, `commit -m <name>`  | From the work tree root, unsandboxed, hooks run; per task, or once after the last task with `--commit-after-all`; never push, reset, stash, or `--no-verify`                                              |
+| alr starts git              | `add -A`, `commit -m <name>`  | From the work tree root, unsandboxed, hooks run; per task, or once after the last task with `--commit run`; never push, reset, stash, or `--no-verify`                                              |
 | Claude returns to alr       | Stdout, stderr, exit code     | Only the last result line and the exit code decide the outcome                                                                                                                                            |
 | alr and its child processes | Signals                       | Each child runs in its own process group; on cancel the group is killed; git gets SIGTERM, up to 2 seconds, then SIGKILL                                                                                  |

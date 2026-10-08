@@ -1,7 +1,7 @@
 ---
-version: 11
+version: 12
 date: 2026-10-08
-notes: "The System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim: alr began as a port of gralph and has evolved beyond it (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+notes: "The overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -52,7 +52,7 @@ flowchart TD
     alr -->|"one fresh session per task, prompt on stdin"| claude
     claude -->|"output ending in a JSON result line"| alr
     alr -->|"sh -c, after a completed session"| gates
-    alr -->|"add -A and commit, with --commit"| git
+    alr -->|"add -A and commit, with --commit task or run"| git
 
     classDef blue fill:#9ec5f4,stroke:#6e7781,color:#333333
     classDef green fill:#9fd8a8,stroke:#6e7781,color:#333333
@@ -62,7 +62,7 @@ flowchart TD
     style programs fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
-For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.gates` run and, with `--commit`, is committed. The task file is saved after every task. A failed task stops the run.
+For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.gates` run and, with `--commit task`, is committed (`--commit run` makes one commit after the last task). The task file is saved after every task. A failed task stops the run.
 
 ## System Model
 

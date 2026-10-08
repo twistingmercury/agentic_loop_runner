@@ -49,7 +49,7 @@ alr -d .local/feature --dry-run
 alr -d .local/feature --sandbox-settings ~/sandbox.json
 
 # Run a folder that holds tasks.yaml and sandbox.json, and commit each task.
-alr -d .local/feature --commit
+alr -d .local/feature --commit task
 
 # Install the bundled task-file skill into ~/.claude/skills and exit.
 alr --install-skill
@@ -70,9 +70,9 @@ pane ticks every second and says where the run is, such as
 `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s` (the task out of the tasks
 pending at Start, the step, the step's time, and the run's time). In a narrow window the step is
 cut with `…` so the times still show. The line is only `task n of N · run <time>` between tasks.
-The Tasks pane's Time column counts the running task up and keeps each finished task's time. Inside a git work tree the
-view always commits, per task by default (outside one it runs without commits and says
-so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
+The Tasks pane's Time column counts the running task up and keeps each finished task's time. The view's Commit dropdown
+offers none (the default), per task, and after all, and starts from `--commit` (outside a git work tree a run
+without commits says so), and it keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
@@ -81,17 +81,16 @@ so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 | `--dry-run`                 |       | Validate and report only                                                                 |
 | `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--yolo`                    |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
-| `--commit`                  |       | Commit each completed task after its gates pass                                          |
+| `--commit {none,task,run}`  |       | When to commit: `none` (the default) never touches git, `task` commits each completed task after its gates pass, `run` commits once after the last task (a failed or stopped run makes no commit) |
 | `--reset-failed`            |       | Set every failed task back to pending before the run, without asking                     |
-| `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
 | `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
 | `--plain`                   |       | Use plain output instead of the full-screen view                                         |
 | `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
-| `--version`                 | `-v`  | Print the version                                                                        |
+| `--version`                 | `-v`  | Print the version, the OS, and the architecture                                          |
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 `--yolo`; the full-screen view asks in a dialog when neither is given.
-`--commit` and `--commit-after-all` cannot be used together.
+`--commit` needs a value; a bare `--commit` and the old `--commit-after-all` are usage errors.
 
 A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
 Plain mode always logs; the full-screen view has a Logging dropdown, on by default. When the

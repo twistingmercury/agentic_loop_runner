@@ -1,7 +1,7 @@
 ---
-version: 16
+version: 17
 date: 2026-10-08
-notes: "Removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022); the non-goals, the constraints, and the assumptions say so. --yolo replaces --skip-permissions with no alias (ADR-021)."
+notes: "The commit flags are one flag, --commit {none,task,run}, default none, and --version also shows the OS and architecture (ADR-024); the flag table, the view's commit setting, and the commit-modes criterion say so. Earlier: removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022). --yolo replaces --skip-permissions with no alias (ADR-021)."
 ---
 
 # alr — Requirements
@@ -43,7 +43,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 2. Parse and validate the one task file with gralph's field rules and clear error messages that name the task and field: a required `shared` block (a required `prompt` and optional `gates`), and `tasks` with `id`, `name`, `prompt`, optional `state` (`pending`, `completed`, `failed`) and `error`. A top-level `gates` key or any other unknown top-level or `shared` key is an error
 3. Decide a session's outcome from the last non-blank, non-fence line of its output, as gralph does
 4. Run the file's `shared.gates` after a completed session, each with a time limit, and complete the task only when every gate exits zero
-5. Commit a completed task on request (`--commit`) with gralph's startup checks and commit rule
+5. Commit on request (`--commit task` for each completed task, `--commit run` once after the last; ADR-024) with gralph's startup checks and commit rule
 6. Build the session flags from `--sandbox-settings`, a `sandbox.json` found in the `--dir` run folder, or `--yolo`, with gralph's forced sandbox keys; require one choice on a real run
 7. Save the task file atomically after every task; stop the run on the first failed task; refuse to start when the file already holds a failed task
 8. Stop cleanly on SIGINT or SIGTERM: kill the running process group, leave the task and the file untouched, exit 1
@@ -54,7 +54,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 13. Start a run only when the user presses Start, with Start disabled and the reason shown while something is missing
 14. Ask for a missing folder, permission choice, or gate list in modal dialogs over the main window, using gralph's wizard rules, and let any dialog be reopened until Start
 15. Open `tasks.yaml` and `sandbox.json` read-only from the menu
-16. Offer a commit setting of one commit per task (the default) or one commit after all tasks, with commits always on inside a git work tree, and run without commits (with a note) outside one
+16. Offer a commit setting of none (the default), one commit per task, or one commit after all tasks, starting from `--commit`, and run without commits (with a note when one was asked for) outside a git work tree
 17. Offer a permissions setting of the folder's `sandbox.json` (the default when it exists) or skip permissions, never defaulting to unsandboxed
 18. Log every real run to `<folder>/logs/<timestamp>/` in both modes: plain mode always, the view through a Logging dropdown that is on by default. When the run commits inside a git work tree, refuse to start (plain mode) or block Start (the view) if that folder is not git-ignored. If two runs start in the same second, the later run's folder gets a `-1` suffix (then `-2`), and the final name is not reported to the caller
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
@@ -87,16 +87,15 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 
 | Flag                        | Short | Notes                                                                                   |
 | --------------------------- | ----- | --------------------------------------------------------------------------------------- |
-| `--version`                 | `-v`  | Prints the version                                                                      |
+| `--version`                 | `-v`  | Prints the version, then the OS and architecture, such as `alr version: 0.0.9 linux/x86_64` |
 | `--dir <folder>`            | `-d`  | Run folder holding `tasks.yaml` and, optionally, `sandbox.json`; required in plain mode, and the view asks when it is missing; `--sandbox-settings` overrides the settings file |
 | `--dry-run`                 |       | Validate and report only. The old alr short form `-d` now means `--dir`, as in gralph   |
 | `--gate-timeout <duration>` |       | Duration such as `90s`, `10m`, or `1h30m`; overrides every gate's own timeout            |
 | `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
 | `--yolo`                    |       | New name for gralph's `--skip-permissions` (ADR-021). Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
-| `--commit`                  |       | Commit each completed task after its gates pass; pre-selects per task in the view        |
+| `--commit {none,task,run}`  |       | New in alr (ADR-024). `none` (the default) never touches git; `task` commits each completed task after its gates pass; `run` makes one commit after the last task completes, and none on a failed or stopped run. Pre-selects the view's Commit dropdown. `--commit` with no value, and the old `--commit-after-all`, are usage errors |
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
-| `--commit-after-all`        |       | New in alr. One commit after the last task completes; none on a failed or stopped run; pre-selects after all in the view; with `--commit` is a usage error |
 | `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
 
 ## Success Criteria
@@ -117,7 +116,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | View states            | Start disabled with a reason while something is missing; Running locks the settings and greys out the Folder, Permissions, Reset, and Quit buttons; Finished shows a summary and stays open | TUI unit tests under Textual's `run_test` and `Pilot`          |
 | Dialog rules           | A dialog opens only for an open step; nothing is written before Start except a confirmed reset | TUI unit tests                                                     |
 | Reset                  | A file with failed tasks opens with Start disabled and the reason shown; a confirmed reset saves them pending with no error text; `--reset-failed` does it silently and exits 1 with `--dry-run` | Engine, CLI, and TUI unit tests; e2e                |
-| Commit modes           | One commit per task, or one commit after the last task; none after a failed or stopped run; both flags together exit 1 | Unit tests against real git repositories; e2e                  |
+| Commit modes           | No git use, one commit per task, or one commit after the last task; none after a failed or stopped run; a bare `--commit` and `--commit-after-all` exit 1 | Unit tests against real git repositories; e2e                  |
 | Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
 | View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |
 | Skill install          | The bundled skill lands in `~/.claude/skills/gralph-docs-writer/`, replacing any copy           | Unit test with a temporary home; e2e                                        |
