@@ -1,7 +1,7 @@
 ---
-version: 23
+version: 24
 date: 2026-10-08
-notes: "The commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
+notes: "The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
 ---
 
 # alr — System Architecture
@@ -92,7 +92,7 @@ the run is not a `--dry-run` (ADR-013). Every other run uses the plain front end
 
 ## Package Layout
 
-```
+```text
 src/alr/
   main.py          entry point: runs cli, sets the exit code
   cli.py           flags, startup checks in gralph's order, routing, the run folder lookup
@@ -299,9 +299,10 @@ How gralph's packages map onto this:
 
 **Responsibilities:**
 
-- Show one main window: a settings strip (`Commit:` and `Logging:` dropdowns, the Commit one offering none, per task, and after all, starting from `--commit` and defaulting to none, the permissions label, and the Start
-  button), a menu row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and
-  commits side by side on top, a one-row status line, the activity pane across the full width below, then a status bar
+- Show one main window: a settings strip (`Commit:` and `Logging:` dropdowns, the Commit one offering none, per task,
+  and after all, starting from `--commit` and defaulting to none, the permissions label, and the Start button), a menu
+  row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and commits side by side
+  on top, a one-row status line, the activity pane across the full width below, then a status bar
 - While a run goes, show where it is on the status line, which ticks every second (ADR-020):
   `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`, joined by ` · `: `task n of N` (N counts only the
   tasks pending at Start), the step (`session`, `gate i of n: <first line of the command>`, or `commit`), the step's
@@ -324,9 +325,12 @@ How gralph's packages map onto this:
   leave it open; until Start, reopen any dialog from the menu
 - Validate each answer with the functions a run uses, and keep the error in the dialog: `tasks.yaml` loads, the settings
   file loads
-- Find out at launch whether the working directory is in a git work tree; when it is not and a commit mode other than
-  none is chosen, show the note "no git repository: nothing will be committed" and run without commits (ADR-014,
-  ADR-024)
+- Find out whether the working directory is in a git work tree, but only when a commit mode other than none is
+  chosen: at launch when `--commit` passes `task` or `run`, otherwise when the user picks one in the Commit dropdown.
+  With `none` git is never run, and the note is never shown. Once the answer is in, it is kept and not looked up again.
+  A lookup that fails leaves the note hidden and the view running, and the next pick tries again; Start opens the
+  repository and reports its own errors. When there is no work tree and a commit mode other than none is chosen, show
+  the note "no git repository: nothing will be committed" and run without commits (ADR-014, ADR-024)
 - Fill the same values the flags fill, then on Start run the usual startup checks, save the gates to `tasks.yaml` only
   if they pass, and start the engine as a worker (ADR-012)
 - Turn each run event into a Textual message through the adapter, which holds only the function that posts messages, and

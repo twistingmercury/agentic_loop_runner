@@ -1,7 +1,7 @@
 ---
-version: 23
+version: 24
 date: 2026-10-08
-notes: "Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture. ADR-014, ADR-013, ADR-019, ADR-001 and ADR-007's examples carry amendment notes or corrected sentences. Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+notes: "Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -695,27 +695,31 @@ Add an engine commit mode, `per_task` (the existing behavior) or `after_all`. (A
 - **Same checks.** The startup checks are the ones `--commit` has: a clean work tree, and a task file that is ignored or
   outside the repository.
 - **Flags.** `--commit` keeps its meaning, one commit per task. A new `--commit-after-all` asks for the second mode.
-  Passing both is a usage error. Plain mode accepts both, since the engine is shared.
+  Passing both is a usage error. Plain mode accepts both, since the engine is shared. (Amended by ADR-024: one
+  `--commit {none,task,run}` replaces both flags, with no alias for `--commit-after-all`.)
 - **In the TUI** the commit setting is a choice of the two modes, per task by default, with no way to turn commits off
   while there is a work tree. A passed flag pre-selects its mode. (Amended by ADR-024: the dropdown also offers none,
   and none is the default.)
 - **No work tree.** When the working directory is not inside a git work tree there is nothing to commit to. The setting
   is disabled with the note "no git repository: nothing will be committed", and the run makes no commits, as plain mode
-  does with `--commit` outside a repository.
+  does with `--commit` outside a repository. (Amended by ADR-024: the setting is not disabled. The dropdown stays usable,
+  the note shows only when a mode other than none is chosen, and with none the view never looks for a work tree.)
 
 **Consequences:**
 
 *Positive:*
 
 - One commit per feature is possible without squashing afterward
-- `--commit` and every command line that uses it behave as before
+- `--commit` and every command line that uses it behave as before (Amended by ADR-024: a bare `--commit` is now a usage
+  error, and `--commit task` is the old `--commit`.)
 
 *Negative:*
 
 - After a failed or stopped run, the completed tasks' work is uncommitted, and the dirty-tree check blocks the next
   start until it is committed or discarded
 - Outside a git work tree the view runs but commits nothing, so the changes stay in the folder; only the note beside the
-  commit setting says so
+  commit setting says so (Amended by ADR-024: with the default none there is no note at all, and the note shows only
+  when a mode other than none is chosen)
 - Resuming an after-all run after committing the earlier work by hand gives a commit title with a smaller `n` and a
   body that lists only the tasks that ran in the resumed session
 
@@ -886,7 +890,7 @@ meant two sets of rules.
   never logs, because it writes nothing.
 - **Committing runs.** When a plain run commits (`--commit task` or `--commit run`; ADR-024) inside a work tree and the log
   folder is visible to git, the run refuses to start with the engine's `check_log_dir` error. Outside a work tree, or
-  without a commit flag, there is nothing to check.
+  with `--commit none` (the default), there is nothing to check.
 - **Shared record code.** The run events and the run log writer move from `alr.stream` to a neutral package,
   `alr.record`, which imports only `alr.tasks`, `alr.errors`, and the standard library. `alr.plain`, `alr.stream`, and
   `alr.tui` may import it; `alr.engine` may not.
@@ -1131,6 +1135,12 @@ One flag, `--commit {none,task,run}`, default `none`.
   its Commit dropdown offers none, per task, and after all. The dropdown starts from the flag and locks once Start is
   pressed. Outside a git work tree the dropdown stays usable, and the note "no git repository: nothing will be
   committed" shows when a mode other than none is chosen.
+- **The view's work-tree lookup.** The view looks for a work tree only when a mode other than none is chosen: at launch
+  when the flag gives `task` or `run`, or when the user picks one of them in the dropdown. With `none` git is never
+  touched at mount, the note is never shown, and no lookup runs until the user picks `task` or `run`. Once the lookup
+  has answered, the answer is kept and no lookup is repeated. Picking `none` again hides the note at once, and a lookup
+  still running cannot show it. A failed lookup leaves the note hidden and the view running, and the next pick of
+  `task` or `run` tries again. Start still opens the repository for `task` and `run` only, and reports its own errors.
 - **No alias.** The old `--commit-after-all` and a bare `--commit` with no value are usage errors, as `--no-tui`, `-t`,
   `--log-dir`, and `--skip-permissions` already are.
 - **`--version`.** It also prints the OS and architecture after the version, such as `alr version: 0.0.9 linux/x86_64`.
