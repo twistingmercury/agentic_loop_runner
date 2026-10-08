@@ -19,6 +19,7 @@
 - `run_finished.result` is one of `completed`, `failed`, `commit_failed`, `stopped`. `run_started.commit` is one of `"none"`, `"task"`, `"run"`.
 - A commit failure reason is the first non-empty line of git's combined output, trimmed to 200 characters; `task-N.log` keeps the full text.
 - Breaking changes are allowed pre-1.0 (ADR-022). Do not add aliases or compatibility shims.
+- The run's gate is `./build/build.sh`, which runs the whole e2e suite after every task. A task that changes behaviour an existing `tests/e2e/` test asserts updates that test in the same task; Task 9 only adds the new `test_outcomes.py`.
 - Code rules: never-nester, a blank line after every `if` block, comments explain why, no inline lint suppressions, keep every existing docstring.
 - The packages `engine`, `plain`, `record`, `stream`, `tui` stay apart (`tests/unit/test_import_boundaries.py`). Shared names go in `alr/tasks.py` or `alr/errors.py`.
 - Work on branch `feature/outcomes`. Nobody but the user runs `git push`. Commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
@@ -181,9 +182,9 @@ class CommitFailedError(RunError):
 
 In `cli.py`, replace every `return 1` that reports an `AlrError` with `return exc.exit_code` (in `_main`, `_install_skill`, `_run`), change `_report_missing`'s caller to `return 2`, and leave `_INTERRUPTED` (`KeyboardInterrupt` and a stop) for Task 2.
 
-- [ ] **Step 4: Run to verify they pass**, then `make test`.
+- [ ] **Step 4: Run to verify they pass**, then `make test`, then `make build`.
 
-Expected: the new tests pass. Existing tests that assert the `FailedTasksError` message or `error: ` text for a failed-task file now fail on the `refused: failed-tasks: ` prefix; update their expected text (only the prefix changes).
+Expected: the new tests pass. Eleven existing e2e tests assert exit 1 for usage errors and now expect 2 (`test_dir.py::test_dir_missing_tasks_file`, `test_dry_run.py::test_dry_run_missing_dir_flag` and `..._with_reset_failed_is_refused`, `test_flags.py::test_missing_tasks`, `test_gates.py` bad `--gate-timeout` (two cases), `test_sandbox.py` permission-flag cases (five)); update them. Existing tests that assert the `FailedTasksError` message or `error: ` text for a failed-task file now fail on the `refused: failed-tasks: ` prefix; update their expected text (only the prefix changes).
 
 - [ ] **Step 5: Commit**
 
