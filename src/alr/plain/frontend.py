@@ -50,8 +50,8 @@ class PlainFrontEnd:
         # gralph prints the prompt with Println, so its trailing newline is followed by one more.
         print(stdin_text, flush=True)
         try:
-            # stderr is inherited, so it reaches the terminal untouched.
-            process = await proc.start(argv, stdin=PIPE, stdout=PIPE)
+            # Both outputs are piped so each line can reach the run log.
+            process = await proc.start(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE)
         except OSError as exc:
             return SessionResult(text="", error=proc.start_failed_text(argv[0], exc))
 
@@ -137,13 +137,18 @@ async def _pump(
     chunks: list[bytes],
     on_line: Callable[[bytes], None],
 ) -> None:
-    """Feed stdin and tee stdout at the same time, so a full pipe never blocks the session."""
-    if process.stdin is None or process.stdout is None:
-        raise RuntimeError("the session was started without stdin and stdout pipes")
+    """Feed stdin and tee both outputs at the same time, so a full pipe never blocks the session.
+
+    Only stdout is kept in chunks: the engine parses the result line from it,
+    and stderr must never end up there.
+    """
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        raise RuntimeError("the session was started without stdin and output pipes")
 
     await asyncio.gather(
         proc.feed_stdin(process.stdin, stdin),
         _tee(process.stdout, sys.stdout.buffer, on_line, chunks),
+        _tee(process.stderr, sys.stderr.buffer, on_line),
     )
 
 

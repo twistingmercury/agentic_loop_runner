@@ -117,6 +117,56 @@ async def test_claude_stdout_lines_arrive_in_order_with_the_last_unterminated(
     assert _lines(events) == ["one", "two", RESULT]
 
 
+async def test_claude_stderr_reaches_the_terminal_and_the_record_not_the_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "warn one\r\nwarn two")
+
+    events = await _run(tmp_path / "tasks.yaml")
+
+    captured = capfd.readouterr()
+    assert "warn one\r\nwarn two" in captured.err
+    assert "warn" not in captured.out
+    lines = _lines(events)
+    assert lines[-2:] == ["warn one", "warn two"]
+    assert RESULT in lines
+
+
+async def test_claude_stderr_stays_out_of_the_session_result(
+    fake_claude: Path,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "noise\n")
+    task = Task(id=1, name="First", prompt="p1")
+
+    result = await PlainFrontEnd().run_session(
+        task, [str(fake_claude / "claude")], "prompt"
+    )
+
+    assert result.error is None
+    assert result.text == RESULT + "\n"
+    assert "noise" in capfd.readouterr().err
+
+
+async def test_a_session_writing_a_lot_to_both_streams_does_not_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Far more than a pipe plus the stream buffer holds; the fake writes stdout first, then stderr.
+    big = "x" * 100_000
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", f"{big}\n{RESULT}")
+    monkeypatch.setenv("FAKECLAUDE_STDERR_BYTES", str(1_000_000))
+
+    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml"), timeout=30)
+
+    lines = _lines(events)
+    assert lines.count("e" * 99) == 10_000
+    assert big in lines
+    assert RESULT in lines
+
+
 async def test_the_gate_marker_names_only_the_first_line(tmp_path: Path) -> None:
     events = await _run(tmp_path / "tasks.yaml", Gate(cmd="echo hi\necho there"))
 
