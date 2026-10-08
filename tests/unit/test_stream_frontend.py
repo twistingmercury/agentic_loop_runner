@@ -452,3 +452,27 @@ async def test_a_gate_that_exited_in_time_does_not_time_out_on_an_escaped_descen
     assert finished.timed_out is False
     assert finished.error is None
     assert "hi" in _lines(events)
+
+
+async def test_a_gate_reads_end_of_file_from_stdin(tmp_path: Path) -> None:
+    gate = Gate(cmd="read x; echo got=$x")
+
+    events = await asyncio.wait_for(_run(_task_list(gate), tmp_path / "tasks.yaml"), 10)
+
+    assert "got=" in _lines(events)
+
+
+async def test_a_git_command_reads_end_of_file_from_stdin(tmp_path: Path) -> None:
+    events: list[Event] = []
+    task = Task(1, "First", "p1")
+
+    # cat stands in for git: it ends only when stdin does.
+    error = await asyncio.wait_for(
+        StreamFrontEnd(events.append).run_git(
+            task, ["sh", "-c", "cat; echo done"], str(tmp_path)
+        ),
+        10,
+    )
+
+    assert error is None
+    assert _lines(events) == ["done"]

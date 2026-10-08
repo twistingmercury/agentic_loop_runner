@@ -393,3 +393,49 @@ async def test_a_gate_that_exited_in_time_does_not_time_out_on_an_escaped_descen
     assert finished.timed_out is False
     assert finished.error is None
     assert "hi" in _lines(events)
+
+
+async def test_a_gate_writing_a_lot_to_both_streams_does_not_block(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # Far more than a pipe holds, on stderr first while stdout is still open:
+    # reading the streams one after the other would leave the gate stuck.
+    gate = Gate(
+        cmd="head -c 1000000 /dev/zero | tr '\\0' a >&2; "
+        "head -c 1000000 /dev/zero | tr '\\0' b"
+    )
+
+    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", gate), 10)
+
+    captured = capfd.readouterr()
+    assert captured.err == "a" * 1_000_000
+    assert "b" * 1_000_000 in captured.out
+    lines = _lines(events)
+    assert "a" * 1_000_000 in lines
+    assert "b" * 1_000_000 in lines
+
+
+async def test_a_gate_reads_end_of_file_from_stdin(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    gate = Gate(cmd="read x; echo got=$x")
+
+    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", gate), 10)
+
+    assert "got=\n" in capfd.readouterr().out
+    assert "got=" in _lines(events)
+
+
+async def test_a_git_command_reads_end_of_file_from_stdin(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    task = Task(id=1, name="First", prompt="p1")
+
+    # cat stands in for git: it ends only when stdin does.
+    error = await asyncio.wait_for(
+        PlainFrontEnd().run_git(task, ["sh", "-c", "cat; echo done"], str(tmp_path)),
+        10,
+    )
+
+    assert error is None
+    assert capfd.readouterr().out == "done\n"
