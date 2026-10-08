@@ -367,10 +367,12 @@ def test_a_second_signal_does_not_leave_git_running(
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
 
 
-@pytest.fixture
-def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Capture the session flags a real run starts with, without running it."""
-    seen: list[list[str]] = []
+def _capture_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[list[str]], list[CommitMode]]:
+    """Replace the real run with one that records its session flags and commit mode."""
+    sessions: list[list[str]] = []
+    modes: list[CommitMode] = []
 
     async def fake_start(
         tasks_file: str,
@@ -380,9 +382,17 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         reset_failed: bool,
         sandbox_settings: str = "",
     ) -> None:
-        seen.append(session)
+        sessions.append(session)
+        modes.append(commit)
 
     monkeypatch.setattr(cli, "start", fake_start)
+    return sessions, modes
+
+
+@pytest.fixture
+def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Capture the session flags a real run starts with, without running it."""
+    seen, _ = _capture_start(monkeypatch)
     return seen
 
 
@@ -525,19 +535,7 @@ def test_a_bad_commit_value_lists_the_choices(
 def test_plain_start_gets_the_commit_mode(
     flags: list[str], want: CommitMode, monkeypatch: pytest.MonkeyPatch, folder: Path
 ) -> None:
-    modes: list[CommitMode] = []
-
-    async def fake_start(
-        tasks_file: str,
-        gate_timeout: str,
-        session: list[str],
-        commit: CommitMode,
-        reset_failed: bool,
-        sandbox_settings: str = "",
-    ) -> None:
-        modes.append(commit)
-
-    monkeypatch.setattr(cli, "start", fake_start)
+    _, modes = _capture_start(monkeypatch)
 
     assert cli.main(["-d", str(folder), "--yolo", "--plain", *flags]) == 0
     assert modes == [want]
