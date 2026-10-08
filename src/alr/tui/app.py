@@ -555,6 +555,11 @@ class AlrApp(App[None]):
         self._finish(RunDone(error, time.monotonic() - self._started))
 
     def on_run_event(self, message: RunEvent) -> None:
+        # Textual delivers the events queued before an exit after it has taken
+        # the screens down, when there is nothing left to draw them on.
+        if not self.is_running:
+            return
+
         event = message.event
         if self._progress is not None:
             self._progress.feed(event)

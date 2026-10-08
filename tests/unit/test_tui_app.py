@@ -1173,6 +1173,19 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
         await until(lambda: app.state is not AppState.READY)
 
 
+async def test_a_run_event_that_arrives_after_the_app_stopped_is_ignored(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test():
+        await until(lambda: app.state is AppState.READY)
+
+    # Textual still delivers the messages queued before the exit, after it has
+    # taken the screens down; a run that was mid-flight posts them up to the end.
+    first = Task(id=1, name="First", prompt="p")
+    app.on_run_event(RunEvent(Activity(first, "late")))
+
+
 async def _tab_to(app: AlrApp, pilot: Pilot, widget_id: str) -> None:
     """Tab along the real focus chain until the widget has focus; fail if it never does."""
     for _ in range(20):
