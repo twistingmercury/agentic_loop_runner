@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `task-N.log` gets each line as it completes. The terminal shows the same
   output as before, but a gate now sees a pipe, not a terminal, and stdout and
   stderr can interleave slightly differently. The log's format is unchanged.
+  A gate or git command that leaves a background process holding its output
+  no longer holds the run up beyond 2 seconds after it exits.
 
 ## [0.0.8] - 2026-10-08
 

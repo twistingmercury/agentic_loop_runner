@@ -1,7 +1,7 @@
 ---
-version: 21
+version: 22
 date: 2026-10-08
-notes: "Adds ADR-023: plain mode records gate, git, and session-stderr output in the run log; ADR-019 is amended and its sentences about the old limit corrected. Earlier: ADR-022: alr has evolved beyond gralph and is a tool, not an agent; it supersedes the drop-in parts of ADR-001 and ADR-007 and the agent-layer plans of ADR-001 to ADR-004 and ADR-012 (their status lines point to it); ADR-017 drops the known-differences pointer; ADR-020 gets the status line's exact form in place."
+notes: "ADR-023 gets the bounded-read rule for gates and git (cut off 2 seconds after the process exits, pipes closed; the session is read to the end) and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output in the run log; ADR-019 is amended and its sentences about the old limit corrected. Earlier: ADR-022: alr has evolved beyond gralph and is a tool, not an agent; it supersedes the drop-in parts of ADR-001 and ADR-007 and the agent-layer plans of ADR-001 to ADR-004 and ADR-012 (their status lines point to it); ADR-017 drops the known-differences pointer; ADR-020 gets the status line's exact form in place."
 ---
 
 # alr — Architectural Decisions
@@ -1062,6 +1062,15 @@ In plain mode the gates, git, and Claude's stderr wrote straight to the terminal
 - **Report each line as `Activity`.** Each completed line (and a last line with no newline) is reported as an `Activity`
   event, so the run log writer puts it in `task-<id>.log`. The stream front end already does the same for the view.
   Only stdout is kept for the result line; stderr never reaches it.
+- **Bounded reads for gates and git.** Once a gate or git command has exited, its output is read for at most 2 seconds
+  more (the grace period in `alr.engine.proc`). Then the read is cut off and the process's pipes are closed. A gate that
+  starts a dev server or a daemon in the background, or one that leaves the process group with `setsid`, can keep the
+  pipes open after its own exit. Before this change the gate inherited the terminal, so nothing waited for the pipe.
+  With pipes and no limit, the run would hang until the gate's time limit stopped it. The gate's exit status is its
+  result. Lines completed before the cut-off are reported. A partial line still waiting for its newline is dropped (it
+  has already reached the terminal), and output a leftover process writes later is not logged.
+- **The session is read to the end.** Its output is not cut off, because the result line is in that output and the
+  outcome rule reads it.
 - **The log format does not change.** `run.jsonl` and the `task-<id>.log` line shapes are as before; the file only has
   more lines.
 
@@ -1073,6 +1082,8 @@ This amends ADR-019 (its plain detail log), and keeps the interface ADR-022 name
 
 - The outside agent sees why a gate or a commit failed from the log alone
 - Plain and stream front ends now record the same kinds of output
+- A gate that starts a background process (a dev server, say) no longer hangs or times out; the run moves on about 2
+  seconds after the gate exits
 
 *Negative:*
 
@@ -1080,6 +1091,13 @@ This amends ADR-019 (its plain detail log), and keeps the interface ADR-022 name
 - A gate that checks for a terminal (`isatty`) now sees a pipe, so it may drop color or progress output
 - Stdout and stderr are read separately, so on the terminal they can interleave slightly differently than with a shared
   terminal
+- Output a leftover background process writes after a gate's or git's cut-off is not logged, and a partial line at the
+  cut-off is dropped
+- A session that leaves a background process holding its output still holds the run up, since the session is read to
+  the end
+- A progress bar that redraws its line with carriage returns shows normally on the terminal, but `task-<id>.log` holds
+  it as one line with the carriage returns inside. It is reported when the next newline or the end of the stream arrives.
+  The full-screen view's log already behaves this way
 - Plain mode's exit codes and log format are the interface the outside agent depends on; changing them needs the care
   ADR-022 asks for
 
