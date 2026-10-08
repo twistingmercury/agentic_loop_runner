@@ -252,6 +252,26 @@ async def test_start_after_all_mode_outside_a_repository_runs_and_says_so(
     assert not (outside / ".git").exists()
 
 
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_start_logs_that_the_run_commits_even_outside_a_repository(
+    record: Path,
+    outside: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: CommitMode,
+) -> None:
+    # Pins the current behavior: plain mode logs whether the mode asks for commits,
+    # while the view logs whether a repository exists, so the two differ here.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
+    monkeypatch.chdir(outside)
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file, commit=mode)
+
+    assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
+
+
 async def test_start_logs_the_run_beside_the_task_file(
     record: Path, tmp_path: Path
 ) -> None:

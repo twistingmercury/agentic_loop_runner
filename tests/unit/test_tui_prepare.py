@@ -85,6 +85,21 @@ async def test_prepare_outside_a_repository_records_that_nothing_commits(
     assert '"commit":false' in ledger.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_prepare_outside_a_repository_records_false_even_when_a_mode_asks(
+    outside: Path, monkeypatch: pytest.MonkeyPatch, mode: CommitMode
+) -> None:
+    # Pins the current behavior: the view logs whether a repository exists, while
+    # plain mode logs whether the mode asks, so the two differ outside a work tree.
+    settings = _outside_settings(outside, monkeypatch, logging=True, commit_mode=mode)
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    ledger = next((outside / "logs").glob("*/run.jsonl"))
+    assert '"commit":false' in ledger.read_text(encoding="utf-8")
+
+
 async def test_prepare_in_a_repository_records_that_commits_happen(
     git_repo: Path,
 ) -> None:

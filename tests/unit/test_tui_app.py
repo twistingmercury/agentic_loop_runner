@@ -554,6 +554,33 @@ async def test_a_run_outside_a_repository_finishes_done_without_commits(
         assert not (outside / ".git").exists()
 
 
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_note_shows_for_after_all_outside_a_repository(
+    outside_settings: RunSettings,
+) -> None:
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _tab_to(app, pilot, "commit")
+        await pilot.press("enter", "down", "down", "enter")
+        await until(lambda: app.settings.commit_mode is CommitMode.RUN)
+
+        assert _note_shown(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_note_shows_when_the_settings_start_on_after_all(
+    outside_settings: RunSettings,
+) -> None:
+    outside_settings.commit_mode = CommitMode.RUN
+    app = AlrApp(outside_settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert _note_shown(app)
+
+
 async def test_a_run_inside_a_repository_keeps_the_commit_choice(
     git_repo: Path,
 ) -> None:
@@ -1362,6 +1389,33 @@ async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
         await _finished(app)
 
         assert _dropdowns_disabled(app) == (True, True)
+
+
+async def test_the_dropdowns_are_disabled_while_running_and_enabled_after_a_failed_start(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def held_then_failing(settings: RunSettings) -> Prepared:
+        entered.set()
+        await release.wait()
+        raise OSError("gone")
+
+    monkeypatch.setattr(app_module, "prepare", held_then_failing)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        assert app.state is AppState.RUNNING
+        assert _dropdowns_disabled(app) == (True, True)
+
+        release.set()
+        await until(lambda: app.state is AppState.READY)
+
+        assert _dropdowns_disabled(app) == (False, False)
 
 
 def _note_shown(app: AlrApp) -> bool:
