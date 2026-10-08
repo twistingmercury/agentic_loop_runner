@@ -35,7 +35,7 @@ def test_dir_runs_with_only_tasks_yaml(tmp_path: Path, fake_claude: Path) -> Non
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        "--skip-permissions",
+        "--yolo",
         "-d",
         str(folder),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
@@ -55,7 +55,7 @@ def test_dir_missing_tasks_file(tmp_path: Path, fake_claude: Path) -> None:
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        "--skip-permissions",
+        "--yolo",
         "-d",
         str(folder),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},

@@ -31,14 +31,14 @@ def _spawn(
 ) -> pexpect.spawn:
     """Start alr on the folder and wait until the view is drawn and ready for keys.
 
-    TERM lets Textual draw, --skip-permissions answers that step. Keys sent
+    TERM lets Textual draw, --yolo answers that step. Keys sent
     before the first draw can be lost, so nothing is returned before "(s)tart",
     which the Start button shows, is on the screen.
     """
     env = {**os.environ, "TERM": "xterm-256color", **extra_env}
     child = pexpect.spawn(
         find_alr(),
-        ["-d", str(folder), "--skip-permissions"],
+        ["-d", str(folder), "--yolo"],
         env=env,
         encoding="utf-8",
         timeout=30,

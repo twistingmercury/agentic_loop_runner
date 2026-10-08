@@ -98,7 +98,7 @@ def shared_block(
 
 def run_args(tasks_path: Path) -> list[str]:
     """The flags of an ordinary unsandboxed run; the task file is the folder's tasks.yaml."""
-    return ["--skip-permissions", f"--dir={tasks_path.parent}"]
+    return ["--yolo", f"--dir={tasks_path.parent}"]
 
 
 VALID_TASKS_YAML = shared_block() + ONE_TASK

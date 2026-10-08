@@ -1,4 +1,4 @@
-"""--sandbox-settings and --skip-permissions: a run must choose one, and the sandbox keys are forced.
+"""--sandbox-settings and --yolo: a run must choose one, and the sandbox keys are forced.
 
 A run folder's sandbox.json makes the sandboxed choice when no flag does.
 """
@@ -25,10 +25,10 @@ from e2e_helpers import (
     write_tasks_yaml,
 )
 
-NEITHER_FLAG_ERROR = "error: pass --sandbox-settings <path>, or --skip-permissions to run without a sandbox"
-BOTH_FLAGS_ERROR = (
-    "error: --sandbox-settings and --skip-permissions cannot be used together"
+NEITHER_FLAG_ERROR = (
+    "error: pass --sandbox-settings <path>, or --yolo to run without a sandbox"
 )
+BOTH_FLAGS_ERROR = "error: --sandbox-settings and --yolo cannot be used together"
 FORCED_SETTINGS = {
     "sandbox": {
         "enabled": True,
@@ -134,12 +134,12 @@ def test_sandbox_every_task_gets_the_same_settings(
             ["--sandbox-settings="], NEITHER_FLAG_ERROR, id="empty sandbox path"
         ),
         pytest.param(
-            ["--sandbox-settings={settings}", "--skip-permissions"],
+            ["--sandbox-settings={settings}", "--yolo"],
             BOTH_FLAGS_ERROR,
             id="both",
         ),
         pytest.param(
-            ["--sandbox-settings={settings}", "--skip-permissions", "--dry-run"],
+            ["--sandbox-settings={settings}", "--yolo", "--dry-run"],
             BOTH_FLAGS_ERROR,
             id="both on a dry run",
         ),
@@ -245,10 +245,8 @@ def test_dir_without_sandbox_json_needs_a_permission_flag(
     assert run.records == [], "claude must not run"
 
 
-def test_dir_skip_permissions_wins_over_sandbox_json(
-    tmp_path: Path, fake_claude: Path
-) -> None:
-    run, _ = run_folder(tmp_path, "{}", "--skip-permissions")
+def test_dir_yolo_wins_over_sandbox_json(tmp_path: Path, fake_claude: Path) -> None:
+    run, _ = run_folder(tmp_path, "{}", "--yolo")
 
     assert run.res.code == 0, run.res
     assert [record["argv"] for record in run.records] == [
