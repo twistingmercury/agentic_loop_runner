@@ -46,7 +46,7 @@ def test_missing_tasks() -> None:
 
 
 def test_skip_permissions_is_an_unknown_flag(tmp_path: Path, fake_claude: Path) -> None:
-    """--yolo replaced it; exit 2 and the usage line keep the old name from coming back as an alias."""
+    """--yolo replaced it; exit 2 and the unknown-flag line keep the old name from coming back as an alias."""
     tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
 
     res = run_alr("--skip-permissions", f"--dir={tasks_path.parent}")

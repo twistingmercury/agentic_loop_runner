@@ -159,7 +159,7 @@ def _parser() -> argparse.ArgumentParser:
         "--dir",
         metavar="",
         default="",
-        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings overrides the folder's sandbox.json",
+        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings or --yolo overrides the folder's sandbox.json",
     )
     parser.add_argument(
         "--dry-run",
