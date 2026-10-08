@@ -91,7 +91,7 @@ async def _until(condition: Callable[[], object]) -> None:
     pytest.fail("timed out waiting for the condition")
 
 
-def shown_text(pane: ActivityPane) -> list[str]:
+def shown_text(pane: ActivityPane | GatesPane) -> list[str]:
     """The rows on screen, without the padding that fills each to the pane's width."""
     return [strip.text.rstrip() for strip in pane.lines]
 
@@ -305,13 +305,14 @@ async def test_tasks_pane_announces_the_highlighted_task_with_its_name() -> None
 async def test_gates_pane_lists_gate_results_and_commit_hashes() -> None:
     pane = GatesPane()
     gate = Gate(cmd="ruff check")
-    async with Host(pane).run_test():
+    async with Host(pane).run_test() as pilot:
         pane.apply(GateFinished(FIRST, gate, "10m", None, False, 0.4))
         pane.apply(GateFinished(FIRST, gate, "10m", "exit status 1", False, 0.2))
         pane.apply(GateFinished(FIRST, gate, "1s", None, True, 1.0))
         pane.apply(Committed(FIRST, "a1b2c3d4e5f6"))
+        await pilot.pause()
 
-        assert list(pane.lines) == [
+        assert shown_text(pane) == [
             "1. ✔ ruff check 0.4s",
             "1. ✖ ruff check 0.2s",
             "1. ⏱ ruff check 1.0s",
@@ -322,7 +323,54 @@ async def test_gates_pane_lists_gate_results_and_commit_hashes() -> None:
 async def test_gates_pane_shows_long_gate_times_in_hours_minutes_seconds() -> None:
     pane = GatesPane()
     gate = Gate(cmd="make test")
-    async with Host(pane).run_test():
+    async with Host(pane).run_test() as pilot:
         pane.apply(GateFinished(FIRST, gate, "2h", None, False, 3725.5))
+        await pilot.pause()
 
-        assert list(pane.lines) == ["1. ✔ make test 1h 2m 6s"]
+        assert shown_text(pane) == ["1. ✔ make test 1h 2m 6s"]
+
+
+LONG_GATE = Gate(
+    cmd="uv run pytest " + " ".join(f"tests/unit/dir{i}/test_x.py" for i in range(8))
+)
+
+
+async def test_gates_pane_wraps_a_long_gate_line_without_losing_text() -> None:
+    pane = GatesPane()
+    event = GateFinished(FIRST, LONG_GATE, "10m", None, False, 0.4)
+    async with Host(pane).run_test(size=(40, 20)) as pilot:
+        pane.apply(event)
+        await pilot.pause()
+
+        rows = shown_text(pane)
+
+        assert len(rows) > 1
+        assert " ".join(rows).split() == f"1. ✔ {LONG_GATE.cmd} 0.4s".split()
+        assert pane.max_scroll_x == 0
+
+
+async def test_gates_pane_prints_square_brackets_raw() -> None:
+    pane = GatesPane()
+    gate = Gate(cmd="pytest [x]")
+    async with Host(pane).run_test() as pilot:
+        pane.apply(GateFinished(FIRST, gate, "10m", None, False, 0.4))
+        await pilot.pause()
+
+        assert shown_text(pane) == ["1. ✔ pytest [x] 0.4s"]
+
+
+async def test_gates_pane_rewraps_when_it_is_resized() -> None:
+    pane = GatesPane()
+    event = GateFinished(FIRST, LONG_GATE, "10m", None, False, 0.4)
+    async with Host(pane).run_test(size=(40, 20)) as pilot:
+        pane.apply(event)
+        await pilot.pause()
+        narrow = len(shown_text(pane))
+
+        await pilot.resize_terminal(200, 20)
+        await _until(lambda: len(shown_text(pane)) < narrow)
+
+        assert len(shown_text(pane)) < narrow
+        assert (
+            " ".join(shown_text(pane)).split() == f"1. ✔ {LONG_GATE.cmd} 0.4s".split()
+        )

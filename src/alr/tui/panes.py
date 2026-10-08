@@ -5,7 +5,7 @@ from collections import deque
 from textual.events import Resize
 from textual.message import Message
 from textual.timer import Timer
-from textual.widgets import DataTable, Log, RichLog
+from textual.widgets import DataTable, RichLog
 from textual.widgets.data_table import ColumnKey
 
 from alr.record.events import (
@@ -192,18 +192,49 @@ class ActivityPane(RichLog):
             self.write(event.line, scroll_end=self.is_vertical_scroll_end)
 
 
-class GatesPane(Log):
+class GatesPane(RichLog):
     """Gate results and commit hashes, kept apart so they never scroll away in the activity."""
 
     def on_mount(self) -> None:
         self.border_title = "Gates & commits"
 
+    def __init__(self, id: str | None = None) -> None:
+        # Same settings as the activity pane: raw text, and wrapping at the pane's own edge.
+        super().__init__(
+            wrap=True,
+            markup=False,
+            highlight=False,
+            auto_scroll=True,
+            min_width=10,
+            id=id,
+        )
+        self._lines: list[str] = []
+        self._width = 0
+
+    def on_resize(self, event: Resize) -> None:
+        """Wrapping is fixed when a line is written, so a new width needs the lines written again."""
+        if event.size.width == self._width:
+            return
+
+        # The first resize comes at width 0, before there is anything to wrap against.
+        self._width = event.size.width
+        self._redraw()
+
+    def _redraw(self) -> None:
+        self.clear()
+        for line in self._lines:
+            self.write(line)
+
+    def _add(self, line: str) -> None:
+        self._lines.append(line)
+        self.write(line)
+
     def apply(self, event: Event) -> None:
         if isinstance(event, GateFinished):
-            self.write_line(_gate_line(event))
+            self._add(_gate_line(event))
 
         if isinstance(event, Committed):
-            self.write_line(f"{event.task.id}. commit {event.commit_hash[:7]}")
+            self._add(f"{event.task.id}. commit {event.commit_hash[:7]}")
 
 
 def _gate_line(event: GateFinished) -> str:
