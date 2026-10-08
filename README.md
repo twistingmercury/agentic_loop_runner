@@ -1,7 +1,7 @@
 # Agentic Loop Runner (alr)
 
 > **Maturity Level**: Emerging - in active, initial development; expect breaking changes.</br>
-> **Version**: v0.0.9
+> **Version**: v0.0.10
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-10-08
+
 ### Changed
 
 - `--commit` takes `none`, `task`, or `run` and defaults to `none`: `task`
@@ -24,6 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--commit-after-all`; use `--commit run`.
 - `--commit` without a value; use `--commit task`.
+
+### Fixed
+
+- A stop (Ctrl-C) that landed while alr was still starting a gate, git, or
+  Claude process skipped the gentle stop: only the process itself was killed,
+  with SIGKILL, and its children were left running. For git this could leave a
+  stale `.git/index.lock`. The whole process group is now stopped the same way
+  as for any other stop, SIGTERM first for git.
+- The full-screen view could raise an error from a run event delivered after
+  the app had already closed its screens; such events are now ignored.
+- The README's advice after a failed or stopped committing run could destroy
+  the work of tasks already marked completed (stashing or deleting leftovers in
+  `run` mode). It now says what is safe in each mode.
 
 ## [0.0.9] - 2026-10-08
 
