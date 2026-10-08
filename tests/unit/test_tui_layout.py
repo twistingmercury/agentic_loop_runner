@@ -1,11 +1,9 @@
 """The main screen's labels, pane titles and proportions, and how long task names are cut."""
 
-import asyncio
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from helpers import write_file
+from helpers import until, write_file
 from textual.widgets import Button, Footer, Select, Static
 
 from alr.tui.app import AlrApp
@@ -43,19 +41,9 @@ def _app(repo: Path, *names: str) -> AlrApp:
     )
 
 
-async def _until(condition: Callable[[], object]) -> None:
-    for _ in range(300):
-        if condition():
-            return
-
-        await asyncio.sleep(0.02)
-
-    pytest.fail("timed out waiting for the condition")
-
-
 async def _loaded(app: AlrApp) -> None:
-    await _until(lambda: app.query_one(TasksPane).row_count > 0)
-    await _until(lambda: app.query_one(TasksPane).size.width > 0)
+    await until(lambda: app.query_one(TasksPane).row_count > 0)
+    await until(lambda: app.query_one(TasksPane).size.width > 0)
 
 
 def _name_cell(app: AlrApp, row: int = 0) -> str:

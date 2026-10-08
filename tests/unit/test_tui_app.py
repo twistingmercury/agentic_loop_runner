@@ -3,7 +3,6 @@
 import asyncio
 import os
 import signal
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -11,6 +10,7 @@ from helpers import (
     fake_claude_records,
     git,
     saved_tasks,
+    until,
     wait_for_text,
     wait_until_gone,
     write_file,
@@ -89,18 +89,8 @@ def _visible_settings(repo: Path) -> RunSettings:
     )
 
 
-async def _until(condition: Callable[[], object]) -> None:
-    for _ in range(300):
-        if condition():
-            return
-
-        await asyncio.sleep(0.02)
-
-    pytest.fail("timed out waiting for the condition")
-
-
 async def _finished(app: AlrApp) -> None:
-    await _until(lambda: app.state is AppState.FINISHED)
+    await until(lambda: app.state is AppState.FINISHED)
 
 
 async def test_setup_disables_start_and_names_the_reason() -> None:
@@ -172,7 +162,7 @@ async def test_stop_ends_a_blocked_run_as_stopped(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         await pilot.press("ctrl+c")
         await _finished(app)
@@ -188,11 +178,11 @@ async def test_the_start_button_becomes_a_working_stop_button(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         button = app.query_one("#start", Button)
-        await _until(lambda: not button.disabled)
+        await until(lambda: not button.disabled)
         assert str(button.label) == "(s)tart"
 
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
         assert str(button.label) == "Stop (^c)"
         assert not button.disabled
 
@@ -224,7 +214,7 @@ async def test_sigterm_stops_a_run_like_ctrl_c(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         os.kill(os.getpid(), signal.SIGTERM)
         await _finished(app)
@@ -249,7 +239,7 @@ async def test_a_failed_check_on_start_shows_an_error_and_stays_ready(
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.screen.query("#close"))
+        await until(lambda: app.screen.query("#close"))
 
         assert app.state is AppState.READY
         assert "clean work tree" in str(app.screen.query_one("#message").render())
@@ -274,13 +264,13 @@ async def test_permissions_label_shows_the_choice_and_applies_the_dialog(
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", TASKS)
     app = AlrApp(RunSettings(tasks_file=tasks_file))
     async with app.run_test() as pilot:
-        await _until(lambda: isinstance(app.screen, PermissionsDialog))
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
         label = app.query_one("#permissions")
         assert "not chosen" in str(label.render())
 
         await pilot.click("#skip")
         await pilot.click("#ok")
-        await _until(lambda: app.settings.permissions is Permissions.SKIP)
+        await until(lambda: app.settings.permissions is Permissions.SKIP)
 
         assert "skip" in str(label.render())
 
@@ -317,7 +307,7 @@ async def test_start_saves_the_edited_gates(git_repo: Path) -> None:
 async def test_launch_opens_the_folder_dialog_when_no_folder_is_known() -> None:
     app = AlrApp(RunSettings())
     async with app.run_test():
-        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await until(lambda: isinstance(app.screen, FolderDialog))
 
 
 async def test_launch_skips_every_step_the_inputs_answer(git_repo: Path) -> None:
@@ -336,26 +326,26 @@ async def test_launch_asks_for_permissions_then_gates_in_order(git_repo: Path) -
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file))
     async with app.run_test() as pilot:
-        await _until(lambda: isinstance(app.screen, PermissionsDialog))
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
 
         await pilot.click("#skip")
         await pilot.click("#ok")
-        await _until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, GatesDialog))
 
         await pilot.click("#done")
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
 
 async def test_the_menu_reopens_a_dialog_before_start(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await pilot.click("#menu-gates")
-        await _until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, GatesDialog))
 
         await pilot.click("#cancel")
-        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        await until(lambda: not isinstance(app.screen, ModalScreen))
         assert app.state is AppState.READY
 
 
@@ -363,10 +353,10 @@ async def test_the_menu_opens_the_task_file_read_only(git_repo: Path) -> None:
     settings = _settings(git_repo)
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await pilot.click("#menu-tasks")
-        await _until(lambda: isinstance(app.screen, ModalScreen))
+        await until(lambda: isinstance(app.screen, ModalScreen))
 
         viewer = app.screen.query_one("#text", TextArea)
         assert viewer.read_only
@@ -376,10 +366,10 @@ async def test_the_menu_opens_the_task_file_read_only(git_repo: Path) -> None:
 async def test_the_viewer_says_when_there_is_no_sandbox_file(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await pilot.click("#menu-sandbox")
-        await _until(lambda: isinstance(app.screen, ModalScreen))
+        await until(lambda: isinstance(app.screen, ModalScreen))
 
         assert "no file chosen yet" in app.screen.query_one("#text", TextArea).text
 
@@ -393,7 +383,7 @@ async def test_setup_dialogs_do_not_open_while_running(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         await pilot.click(f"#menu-{item}")
         await pilot.pause()
@@ -427,7 +417,7 @@ async def test_logging_on_with_a_visible_log_folder_blocks_start(
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.screen.query("#close"))
+        await until(lambda: app.screen.query("#close"))
 
         assert app.state is AppState.READY
         assert ".gitignore" in str(app.screen.query_one("#message").render())
@@ -441,7 +431,7 @@ async def test_turning_logging_off_skips_the_log_folder(git_repo: Path) -> None:
     async with app.run_test() as pilot:
         await _tab_to(app, pilot, "logging")
         await pilot.press("enter", "down", "enter")
-        await _until(lambda: app.settings.logging is False)
+        await until(lambda: app.settings.logging is False)
         await pilot.press("s")
         await _finished(app)
 
@@ -453,7 +443,7 @@ async def test_logging_is_a_dropdown_with_on_and_off(git_repo: Path) -> None:
     settings.logging = True
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         dropdown = app.query_one("#logging", Select)
 
         assert dropdown.value is True
@@ -485,7 +475,7 @@ async def test_a_run_outside_a_repository_finishes_done_without_commits(
 ) -> None:
     app = AlrApp(outside_settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.in_work_tree is not None)
+        await until(lambda: app.in_work_tree is not None)
 
         assert app.query_one("#commit", Select).disabled
         assert app.query_one("#commit-note", Static).display
@@ -505,7 +495,7 @@ async def test_a_run_inside_a_repository_keeps_the_commit_choice(
 ) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.in_work_tree is not None)
+        await until(lambda: app.in_work_tree is not None)
         await pilot.pause()
 
         assert not app.query_one("#commit", Select).disabled
@@ -543,7 +533,7 @@ async def test_stop_during_prepare_finishes_stopped(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(entered.is_set)
+        await until(entered.is_set)
 
         await pilot.press("ctrl+c")
         await _finished(app)
@@ -572,14 +562,14 @@ async def test_pressing_the_stop_button_twice_leaves_the_app_open(
     monkeypatch.setattr(app, "exit", lambda *args, **kwargs: exits.append(args))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(entered.is_set)
+        await until(entered.is_set)
         button = app.query_one("#start", Button)
         button.focus()
 
         await pilot.press("enter")
-        await _until(lambda: app._stopping)
+        await until(lambda: app._stopping)
         # A button ignores presses while its press flash shows.
-        await _until(lambda: not button.has_class("-active"))
+        await until(lambda: not button.has_class("-active"))
         await pilot.press("enter")
         await pilot.pause()
 
@@ -599,11 +589,11 @@ async def test_a_second_stop_while_stopping_quits(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(entered.is_set)
+        await until(entered.is_set)
 
         await pilot.press("ctrl+c")
         await pilot.press("ctrl+c")
-        await _until(lambda: not app.is_running)
+        await until(lambda: not app.is_running)
 
 
 async def test_a_second_stop_button_press_while_stopping_does_nothing(
@@ -614,14 +604,14 @@ async def test_a_second_stop_button_press_while_stopping_does_nothing(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(entered.is_set)
+        await until(entered.is_set)
         button = app.query_one("#start", Button)
         button.focus()
 
         await pilot.press("enter")
-        await _until(lambda: app._stopping)
+        await until(lambda: app._stopping)
         # A button ignores presses while its pressed flash shows, so wait that out.
-        await _until(lambda: not button.has_class("-active"))
+        await until(lambda: not button.has_class("-active"))
         await pilot.press("enter")
         await pilot.pause()
 
@@ -629,7 +619,7 @@ async def test_a_second_stop_button_press_while_stopping_does_nothing(
         assert app.state is AppState.RUNNING
 
         await pilot.press("ctrl+c")
-        await _until(lambda: not app.is_running)
+        await until(lambda: not app.is_running)
 
 
 @pytest.mark.parametrize(
@@ -650,7 +640,7 @@ async def test_an_unexpected_error_in_prepare_returns_to_ready_with_a_dialog(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.screen.query("#close"))
+        await until(lambda: app.screen.query("#close"))
 
         assert app.state is AppState.READY
         assert str(app.screen.query_one("#message").render()) == shown
@@ -681,7 +671,7 @@ async def test_launch_opens_the_gates_dialog_when_flags_answer_everything_else(
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
-        await _until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, GatesDialog))
         # Let the table's queued first highlight land; leaving with it queued
         # makes it arrive in a closing app on a busy worker.
         await pilot.pause()
@@ -689,10 +679,10 @@ async def test_launch_opens_the_gates_dialog_when_flags_answer_everything_else(
 
 async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
     await pilot.click("#menu-folder")
-    await _until(lambda: isinstance(app.screen, FolderDialog))
+    await until(lambda: isinstance(app.screen, FolderDialog))
     app.screen.query_one("#path", Input).value = str(folder)
     await pilot.click("#ok")
-    await _until(lambda: not isinstance(app.screen, ModalScreen))
+    await until(lambda: not isinstance(app.screen, ModalScreen))
 
 
 async def test_picking_another_folder_drops_the_gates_edited_for_the_first(
@@ -704,7 +694,7 @@ async def test_picking_another_folder_drops_the_gates_edited_for_the_first(
     write_file(other / "tasks.yaml", TASKS)
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await _pick_folder(app, pilot, other)
 
@@ -716,7 +706,7 @@ async def test_picking_the_same_folder_keeps_the_gates(git_repo: Path) -> None:
     settings = _settings(git_repo, gates=[Gate(cmd="true")])
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await _pick_folder(app, pilot, git_repo / "run")
 
@@ -729,7 +719,7 @@ async def test_the_tasks_pane_keeps_room_at_common_terminal_sizes(
 ) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test(size=size) as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         await pilot.pause()
 
         region = app.query_one("#tasks").region
@@ -746,27 +736,27 @@ async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> Non
     second = Task(id=2, name="Second", prompt="p")
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         tasks = app.query_one(TasksPane)
         activity = app.query_one(ActivityPane)
-        await _until(lambda: tasks.row_count == 2)
+        await until(lambda: tasks.row_count == 2)
 
         app.post_message(RunEvent(TaskStarted(first)))
         app.post_message(RunEvent(Activity(first, "one says hi")))
-        await _until(lambda: _activity_lines(app) == ["one says hi"])
+        await until(lambda: _activity_lines(app) == ["one says hi"])
         assert activity.border_title == "Task: 1 First"
 
         app.post_message(RunEvent(TaskStarted(second)))
-        await _until(lambda: tasks.cursor_row == 1)
-        await _until(lambda: _activity_lines(app) == [])
+        await until(lambda: tasks.cursor_row == 1)
+        await until(lambda: _activity_lines(app) == [])
         assert activity.border_title == "Task: 2 Second"
 
         app.post_message(RunEvent(Activity(second, "two says hi")))
-        await _until(lambda: _activity_lines(app) == ["two says hi"])
+        await until(lambda: _activity_lines(app) == ["two says hi"])
 
         tasks.focus()
         await pilot.press("up")
-        await _until(lambda: _activity_lines(app) == ["one says hi"])
+        await until(lambda: _activity_lines(app) == ["one says hi"])
         assert activity.border_title == "Task: 1 First"
 
         app.post_message(RunEvent(Activity(second, "two again")))
@@ -774,7 +764,7 @@ async def test_the_activity_pane_follows_the_running_task(git_repo: Path) -> Non
         assert _activity_lines(app) == ["one says hi"]
 
         app.post_message(RunEvent(TaskStarted(second)))
-        await _until(lambda: _activity_lines(app) == ["two says hi", "two again"])
+        await until(lambda: _activity_lines(app) == ["two says hi", "two again"])
         assert tasks.cursor_row == 1
 
 
@@ -795,30 +785,30 @@ async def test_browsing_another_task_gives_way_to_the_next_task_start(
     third = Task(id=3, name="Third", prompt="p")
     app = AlrApp(_settings(git_repo, THREE_TASKS))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         tasks = app.query_one(TasksPane)
         activity = app.query_one(ActivityPane)
-        await _until(lambda: tasks.row_count == 3)
+        await until(lambda: tasks.row_count == 3)
 
         app.post_message(RunEvent(TaskStarted(first)))
         app.post_message(RunEvent(Activity(first, "one says hi")))
-        await _until(lambda: _activity_lines(app) == ["one says hi"])
+        await until(lambda: _activity_lines(app) == ["one says hi"])
 
         tasks.focus()
         await pilot.press("down")
-        await _until(lambda: activity.border_title == "Task: 2 Second")
+        await until(lambda: activity.border_title == "Task: 2 Second")
         app.post_message(RunEvent(Activity(second, "two says hi")))
         app.post_message(RunEvent(Activity(first, "one again")))
-        await _until(lambda: _activity_lines(app) == ["two says hi"])
+        await until(lambda: _activity_lines(app) == ["two says hi"])
 
         app.post_message(RunEvent(TaskStarted(third)))
         app.post_message(RunEvent(Activity(third, "three says hi")))
-        await _until(lambda: tasks.cursor_row == 2)
-        await _until(lambda: _activity_lines(app) == ["three says hi"])
+        await until(lambda: tasks.cursor_row == 2)
+        await until(lambda: _activity_lines(app) == ["three says hi"])
         assert activity.border_title == "Task: 3 Third"
 
         tasks.move_cursor(row=1)
-        await _until(lambda: _activity_lines(app) == ["two says hi"])
+        await until(lambda: _activity_lines(app) == ["two says hi"])
 
 
 async def test_a_late_row_zero_highlight_does_not_pull_the_activity_back(
@@ -827,16 +817,16 @@ async def test_a_late_row_zero_highlight_does_not_pull_the_activity_back(
     second = Task(id=2, name="Second", prompt="p")
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         tasks = app.query_one(TasksPane)
         activity = app.query_one(ActivityPane)
-        await _until(lambda: tasks.row_count == 2)
+        await until(lambda: tasks.row_count == 2)
         await pilot.pause()
 
         app.post_message(RunEvent(TaskStarted(second)))
         app.post_message(RunEvent(Activity(second, "two says hi")))
-        await _until(lambda: tasks.cursor_row == 1)
-        await _until(lambda: _activity_lines(app) == ["two says hi"])
+        await until(lambda: tasks.cursor_row == 1)
+        await until(lambda: _activity_lines(app) == ["two says hi"])
 
         # The table's first highlight message, delivered after the start moved the cursor.
         row_key = tasks.coordinate_to_cell_key(Coordinate(0, 0)).row_key
@@ -934,7 +924,7 @@ async def test_stop_in_the_second_task_keeps_the_first_completed(
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: len(fake_claude_records(record)) == 2)
+        await until(lambda: len(fake_claude_records(record)) == 2)
 
         await pilot.press("ctrl+c")
         await _finished(app)
@@ -970,22 +960,22 @@ async def test_hotkeys_open_the_setup_dialogs_before_start(
 ) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await pilot.press(key)
 
-        await _until(lambda: isinstance(app.screen, dialog))
+        await until(lambda: isinstance(app.screen, dialog))
 
 
 @pytest.mark.parametrize("key", ["t", "x"])
 async def test_viewer_hotkeys_open_a_viewer(git_repo: Path, key: str) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await pilot.press(key)
 
-        await _until(lambda: isinstance(app.screen, FileViewer))
+        await until(lambda: isinstance(app.screen, FileViewer))
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -997,7 +987,7 @@ async def test_setup_hotkeys_do_nothing_while_running(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         await pilot.press(key)
         await pilot.pause()
@@ -1015,13 +1005,13 @@ async def test_viewer_hotkeys_work_while_running(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         await pilot.press("t")
-        await _until(lambda: isinstance(app.screen, FileViewer))
+        await until(lambda: isinstance(app.screen, FileViewer))
 
         await pilot.press("escape")
-        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        await until(lambda: not isinstance(app.screen, ModalScreen))
         await pilot.press("ctrl+c")
         await _finished(app)
 
@@ -1029,9 +1019,9 @@ async def test_viewer_hotkeys_work_while_running(
 async def test_hotkeys_do_not_fire_inside_a_dialog(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         await pilot.press("f")
-        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await until(lambda: isinstance(app.screen, FolderDialog))
         dialog = app.screen
 
         await pilot.press("g", "tab")
@@ -1050,19 +1040,19 @@ async def test_the_whole_setup_runs_from_the_keyboard_alone(git_repo: Path) -> N
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         # The folder dialog starts on the working directory; add the folder to it.
-        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await until(lambda: isinstance(app.screen, FolderDialog))
         await pilot.press("end", *"/run", "enter")
 
         # Down to "skip", Enter picks it, Tab goes through the file field to OK.
-        await _until(lambda: isinstance(app.screen, PermissionsDialog))
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
         await pilot.press("down", "enter", "tab", "tab", "enter")
 
         # The command field has focus; Enter adds, then Tab to Done.
-        await _until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, GatesDialog))
         await pilot.press(*"true", "enter")
         await pilot.press("tab", "tab", "tab", "tab", "enter")
 
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         assert settings.gates == [Gate(cmd="true")]
 
         await pilot.press("s")
@@ -1077,19 +1067,19 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(git_repo: Path) -> 
     settings.logging = True
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await _tab_to(app, pilot, "commit")
         await pilot.press("enter", "down", "enter")
-        await _until(lambda: app.settings.commit_mode is CommitMode.AFTER_ALL)
+        await until(lambda: app.settings.commit_mode is CommitMode.AFTER_ALL)
 
         await _tab_to(app, pilot, "logging")
         await pilot.press("enter", "down", "enter")
-        await _until(lambda: app.settings.logging is False)
+        await until(lambda: app.settings.logging is False)
 
         await _tab_to(app, pilot, "start")
         await pilot.press("enter")
-        await _until(lambda: app.state is not AppState.READY)
+        await until(lambda: app.state is not AppState.READY)
 
 
 async def _tab_to(app: AlrApp, pilot: Pilot, widget_id: str) -> None:
@@ -1113,8 +1103,8 @@ async def test_reset_failed_flag_resets_the_file_at_launch(git_repo: Path) -> No
     settings = _settings(git_repo, FAILED_TASKS, reset_failed=True)
     app = AlrApp(settings)
     async with app.run_test():
-        await _until(lambda: app.state is AppState.READY)
-        await _until(
+        await until(lambda: app.state is AppState.READY)
+        await until(
             lambda: saved_tasks(Path(settings.tasks_file)).tasks[0].state == "pending"
         )
 
@@ -1137,7 +1127,7 @@ async def test_a_file_with_a_failed_task_opens_with_start_blocked(
 ) -> None:
     app = AlrApp(_settings(git_repo, FAILED_TASKS))
     async with app.run_test() as pilot:
-        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.pause()
 
         assert app.query_one(TasksPane).get_row("1")[0] == "✖"
@@ -1155,7 +1145,7 @@ async def test_the_reason_counts_several_failed_tasks(git_repo: Path) -> None:
     )
     app = AlrApp(_settings(git_repo, both))
     async with app.run_test() as pilot:
-        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.pause()
 
         assert "2 failed tasks: press r to reset" in str(
@@ -1166,10 +1156,10 @@ async def test_the_reason_counts_several_failed_tasks(git_repo: Path) -> None:
 async def test_r_lists_the_failed_tasks(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo, FAILED_TASKS))
     async with app.run_test() as pilot:
-        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await until(lambda: app.query_one(TasksPane).row_count == 2)
 
         await pilot.press("r")
-        await _until(lambda: isinstance(app.screen, ResetDialog))
+        await until(lambda: isinstance(app.screen, ResetDialog))
 
         assert "1: First: boom" in str(app.screen.query_one("#message").render())
 
@@ -1179,12 +1169,12 @@ async def test_escape_in_the_reset_dialog_changes_nothing(git_repo: Path) -> Non
     before = Path(settings.tasks_file).read_bytes()
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.press("r")
-        await _until(lambda: isinstance(app.screen, ResetDialog))
+        await until(lambda: isinstance(app.screen, ResetDialog))
 
         await pilot.press("escape")
-        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        await until(lambda: not isinstance(app.screen, ModalScreen))
 
         assert Path(settings.tasks_file).read_bytes() == before
         assert app.query_one("#start").disabled
@@ -1196,12 +1186,12 @@ async def test_enter_in_the_reset_dialog_resets_and_enables_start(
     settings = _settings(git_repo, DONE_AND_FAILED, gates=[Gate(cmd="true")])
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.query_one(TasksPane).row_count == 2)
+        await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.press("r")
-        await _until(lambda: isinstance(app.screen, ResetDialog))
+        await until(lambda: isinstance(app.screen, ResetDialog))
 
         await pilot.press("enter")
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         saved = saved_tasks(Path(settings.tasks_file))
         assert [task.state for task in saved.tasks] == ["pending", "completed"]
@@ -1215,7 +1205,7 @@ async def test_enter_in_the_reset_dialog_resets_and_enables_start(
 async def test_r_does_nothing_when_no_task_failed(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         await pilot.press("r")
         await pilot.pause()
@@ -1226,9 +1216,9 @@ async def test_r_does_nothing_when_no_task_failed(git_repo: Path) -> None:
 async def test_r_does_nothing_when_no_file_is_loaded() -> None:
     app = AlrApp(RunSettings())
     async with app.run_test() as pilot:
-        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await until(lambda: isinstance(app.screen, FolderDialog))
         await pilot.press("escape")
-        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        await until(lambda: not isinstance(app.screen, ModalScreen))
 
         await pilot.press("r")
         await pilot.pause()
@@ -1244,7 +1234,7 @@ async def test_r_does_nothing_while_running(
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         await pilot.press("r")
         await pilot.pause()
@@ -1261,7 +1251,7 @@ async def test_r_does_nothing_once_finished(git_repo: Path) -> None:
         await pilot.press("s")
         await _finished(app)
         await pilot.press("escape")
-        await _until(lambda: not isinstance(app.screen, ModalScreen))
+        await until(lambda: not isinstance(app.screen, ModalScreen))
 
         await pilot.press("r")
         await pilot.pause()
@@ -1278,10 +1268,10 @@ async def test_the_flag_resets_a_file_picked_in_the_folder_dialog(
     )
     app = AlrApp(settings)
     async with app.run_test() as pilot:
-        await _until(lambda: isinstance(app.screen, FolderDialog))
+        await until(lambda: isinstance(app.screen, FolderDialog))
 
         await pilot.press("end", *"/run", "enter")
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
 
         assert _states(settings) == ["pending", "pending"]
         assert app.query_one(TasksPane).get_row("1")[0] != "✖"
@@ -1298,13 +1288,13 @@ def _dropdowns_disabled(app: AlrApp) -> tuple[bool, bool]:
 async def test_the_dropdowns_lock_from_start_on(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.in_work_tree is not None)
+        await until(lambda: app.in_work_tree is not None)
         await pilot.pause()
 
         assert _dropdowns_disabled(app) == (False, False)
 
         await pilot.press("s")
-        await _until(lambda: _dropdowns_disabled(app) == (True, True))
+        await until(lambda: _dropdowns_disabled(app) == (True, True))
         await _finished(app)
 
         assert _dropdowns_disabled(app) == (True, True)
@@ -1316,8 +1306,8 @@ async def test_the_commit_dropdown_stays_disabled_outside_a_repository(
 ) -> None:
     app = AlrApp(outside_settings)
     async with app.run_test() as pilot:
-        await _until(lambda: app.in_work_tree is not None)
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.in_work_tree is not None)
+        await until(lambda: app.state is AppState.READY)
 
         assert _dropdowns_disabled(app) == (True, False)
 
@@ -1357,7 +1347,7 @@ async def test_nothing_is_greyed_out_before_start() -> None:
 async def test_nothing_is_greyed_out_when_ready(git_repo: Path) -> None:
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         await pilot.pause()
 
         assert _menu_disabled(app) == _expected_menu("ready")
@@ -1370,9 +1360,9 @@ async def test_a_run_greys_out_the_inert_buttons_and_quit_returns_after(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
         assert _menu_disabled(app) == _expected_menu("running")
 
         await pilot.press("ctrl+c")
@@ -1387,9 +1377,9 @@ async def test_tab_skips_the_greyed_out_buttons(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     app = AlrApp(_settings(git_repo))
     async with app.run_test() as pilot:
-        await _until(lambda: app.state is AppState.READY)
+        await until(lambda: app.state is AppState.READY)
         await pilot.press("s")
-        await _until(lambda: app.state is AppState.RUNNING)
+        await until(lambda: app.state is AppState.RUNNING)
 
         reached: set[str] = set()
         for _ in range(20):

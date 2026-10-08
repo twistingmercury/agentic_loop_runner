@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -195,6 +196,22 @@ async def wait_until_gone(pid: int, timeout: float = 2) -> None:
             pytest.fail(f"process {pid} remained running")
 
         await asyncio.sleep(0.01)
+
+
+async def until(condition: Callable[[], object]) -> None:
+    """Poll until the condition is truthy, failing the test after a few seconds.
+
+    The wait yields to the event loop in small steps, so the app under test keeps
+    running, and the bound means a condition that never holds fails with a message
+    rather than hanging the run.
+    """
+    for _ in range(300):
+        if condition():
+            return
+
+        await asyncio.sleep(0.02)
+
+    pytest.fail("timed out waiting for the condition")
 
 
 def start_alr(*args: str, env: dict[str, str] | None = None) -> subprocess.Popen[str]:
