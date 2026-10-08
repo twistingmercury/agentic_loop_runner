@@ -124,6 +124,12 @@ def task_errors(task_list: dict[str, Any]) -> dict[int, str]:
     return {task["id"]: task.get("error", "") for task in task_list["tasks"]}
 
 
+def read_task_log(tasks_path: Path, task_id: int) -> str:
+    """The text of a task's log from the run's one folder under <dir>/logs."""
+    (folder,) = (tasks_path.parent / "logs").iterdir()
+    return (folder / f"task-{task_id}.log").read_text(encoding="utf-8")
+
+
 def assert_no_tmp_file(tasks_path: Path) -> None:
     """A save either finished or never started: its temporary file is gone."""
     tmp = tasks_path.with_name(tasks_path.name + ".tmp")
