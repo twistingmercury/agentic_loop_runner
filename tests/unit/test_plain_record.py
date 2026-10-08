@@ -10,9 +10,11 @@ from alr.engine.commit import open_repo
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
     Activity,
+    CommitStarted,
     Committed,
     Event,
     GateFinished,
+    GateStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -56,7 +58,14 @@ async def test_each_step_records_its_event(tmp_path: Path) -> None:
     events = await _run(tmp_path / "tasks.yaml", gate)
 
     kinds = [type(event) for event in events if not isinstance(event, Activity)]
-    assert kinds == [TaskStarted, SessionFinished, GateFinished, TaskFinished, RunDone]
+    assert kinds == [
+        TaskStarted,
+        SessionFinished,
+        GateStarted,
+        GateFinished,
+        TaskFinished,
+        RunDone,
+    ]
     started = events[0]
     assert isinstance(started, TaskStarted)
     assert started.task.id == 1
@@ -65,6 +74,35 @@ async def test_each_step_records_its_event(tmp_path: Path) -> None:
     assert finished.error is None
     [done] = [e for e in events if isinstance(e, RunDone)]
     assert done.error is None
+
+
+async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(
+    tmp_path: Path,
+) -> None:
+    gate = Gate(cmd="true")
+
+    events = await _run(tmp_path / "tasks.yaml", gate)
+
+    [started] = [e for e in events if isinstance(e, GateStarted)]
+    assert started.gate == gate
+    marker = events.index(Activity(started.task, "→ gate true"))
+    assert events.index(started) == marker + 1
+    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    assert events.index(started) < events.index(finished)
+
+
+async def test_commit_started_is_reported_once_after_its_marker_and_before_committed(
+    git_repo: Path,
+) -> None:
+    tasks_file = git_repo / "run" / "tasks.yaml"
+
+    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
+
+    [started] = [e for e in events if isinstance(e, CommitStarted)]
+    marker = events.index(Activity(started.task, "→ commit First"))
+    assert events.index(started) == marker + 1
+    [committed] = [e for e in events if isinstance(e, Committed)]
+    assert events.index(started) < events.index(committed)
 
 
 async def test_claude_stdout_lines_arrive_in_order_with_the_last_unterminated(

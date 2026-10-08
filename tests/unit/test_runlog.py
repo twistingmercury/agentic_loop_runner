@@ -13,9 +13,11 @@ import pytest
 from alr.errors import RunLogError
 from alr.record.events import (
     Activity,
+    CommitStarted,
     Committed,
     Event,
     GateFinished,
+    GateStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -204,6 +206,19 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         "14:02:11 → gate go test ./...",
         "14:02:11 → commit First",
     ]
+
+
+def test_record_start_events_add_nothing_to_the_log(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    task = Task(id=1, name="First", prompt="p1")
+    before = ledger_lines(path)
+
+    record(log, GateStarted(task, Gate(cmd="check")), CommitStarted(task))
+
+    assert ledger_lines(path) == before
+    assert not (path / "task-1.log").exists()
 
 
 @pytest.mark.parametrize(

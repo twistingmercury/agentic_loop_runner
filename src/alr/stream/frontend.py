@@ -9,9 +9,11 @@ from alr.engine.frontend import SessionResult
 from alr.engine.gates import first_line
 from alr.record.events import (
     Activity,
+    CommitStarted,
     Committed,
     Event,
     GateFinished,
+    GateStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -59,6 +61,7 @@ class StreamFrontEnd:
     async def run_gate(self, task: Task, gate: Gate) -> str | None:
         # Only the first line, so a multi-line command stays one activity line.
         self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
+        self._report(GateStarted(task, gate))
         return await self._run_command(task, ["sh", "-c", gate.cmd])
 
     def gate_finished(
@@ -74,6 +77,7 @@ class StreamFrontEnd:
 
     def commit_started(self, task: Task) -> None:
         self._report(Activity(task, "→ commit " + first_line(task.name)))
+        self._report(CommitStarted(task))
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
         return await self._run_command(task, argv, cwd=cwd, gentle=True)

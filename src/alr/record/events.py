@@ -23,6 +23,12 @@ class SessionFinished:
 
 
 @dataclass(frozen=True)
+class GateStarted:
+    task: Task
+    gate: Gate
+
+
+@dataclass(frozen=True)
 class GateFinished:
     task: Task
     gate: Gate
@@ -30,6 +36,11 @@ class GateFinished:
     error: str | None  # None when the gate passed or timed out
     timed_out: bool
     seconds: float
+
+
+@dataclass(frozen=True)
+class CommitStarted:
+    task: Task
 
 
 @dataclass(frozen=True)
@@ -55,7 +66,9 @@ Event = (
     TaskStarted
     | Activity
     | SessionFinished
+    | GateStarted
     | GateFinished
+    | CommitStarted
     | Committed
     | TaskFinished
     | RunDone
