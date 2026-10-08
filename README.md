@@ -19,9 +19,10 @@
 
 ## Usage
 
-`alr` runs ["ralph loops"](https://ghuntley.com/loop/) with Claude Code. It is the
-Python port of [gralph](https://github.com/twistingmercury/gralph) and follows
-gralph v0.12.0: the same task file, flags, and behavior.
+`alr` runs ["ralph loops"](https://ghuntley.com/loop/) with Claude Code. It began as the
+Python port of [gralph](https://github.com/twistingmercury/gralph) and has since evolved
+beyond it, so its flags, formats, and behavior can differ. [CHANGELOG.md](CHANGELOG.md) records each break
+([ADR-022](docs/design/02_architectural_decisions.md#adr-022-alr-has-evolved-beyond-gralph)).
 
 A run starts from one `tasks.yaml`:
 
@@ -66,9 +67,10 @@ show `tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a
 button does nothing while a run is going. The Task pane shows only the last 5,000 lines of a
 task, with no warning; the run log keeps every line. While a run goes, a status line above the Task
 pane ticks every second and says where the run is, such as
-`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s` (the task out of those
-pending at Start, the step, the step's time, and the run's time), and the Tasks pane's
-Time column counts the running task up and keeps each finished task's time. Inside a git work tree the
+`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s` (the task out of the tasks
+pending at Start, the step, the step's time, and the run's time). In a narrow window the step is
+cut with `…` so the times still show. The line is only `task n of N · run <time>` between tasks.
+The Tasks pane's Time column counts the running task up and keeps each finished task's time. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.

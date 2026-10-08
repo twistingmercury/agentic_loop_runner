@@ -1,7 +1,7 @@
 ---
-version: 19
+version: 20
 date: 2026-10-08
-notes: "Adds ADR-021: the bypass flag is --yolo, with no --skip-permissions alias; ADR-009 gets an amendment note and the inherited gralph ADR-014 row names ADR-021."
+notes: "Adds ADR-022: alr has evolved beyond gralph and is a tool, not an agent; it supersedes the drop-in parts of ADR-001 and ADR-007 and the agent-layer plans of ADR-001 to ADR-004 and ADR-012 (their status lines point to it); ADR-017 drops the known-differences pointer; ADR-020 gets the status line's exact form in place."
 ---
 
 # alr — Architectural Decisions
@@ -29,13 +29,13 @@ Each architectural decision is recorded as an ADR with the following structure:
 
 | ADR #                                                                              | Title                                                               | Status   | Date       |
 |------------------------------------------------------------------------------------|---------------------------------------------------------------------|----------|------------|
-| [001](#adr-001-port-gralph-to-python-drop-in-compatible)                           | Port gralph to Python, drop-in compatible                           | Accepted | 2026-10-04 |
+| [001](#adr-001-port-gralph-to-python-drop-in-compatible)                           | Port gralph to Python, drop-in compatible (goal superseded by 022)  | Accepted | 2026-10-04 |
 | [002](#adr-002-engine-first-the-tui-is-the-next-design)                            | Engine first; the TUI is the next design                            | Accepted | 2026-10-04 |
 | [003](#adr-003-an-async-engine)                                                    | An async engine                                                     | Accepted | 2026-10-04 |
 | [004](#adr-004-one-engine-two-front-ends)                                          | One engine, two front ends                                          | Accepted | 2026-10-04 |
 | [005](#adr-005-pyyaml-nodes-and-hand-written-validation-no-pydantic)               | PyYAML nodes and hand-written validation, no pydantic               | Accepted | 2026-10-04 |
 | [006](#adr-006-port-the-tests-first-with-a-fake-claude-on-path)                    | Port the tests first, with a fake claude on PATH                    | Accepted | 2026-10-04 |
-| [007](#adr-007-compatible-in-use-python-native-inside)                             | Compatible in use, Python-native inside                             | Accepted | 2026-10-04 |
+| [007](#adr-007-compatible-in-use-python-native-inside)                             | Compatible in use, Python-native inside (goal superseded by 022)    | Accepted | 2026-10-04 |
 | [008](#adr-008-the-shared-prompt-and-gates-live-in-the-task-file)                  | The shared prompt and gates live in the task file                   | Accepted | 2026-10-06 |
 | [009](#adr-009-the-run-folders-sandboxjson-answers-the-permission-choice)          | The run folder's sandbox.json answers the permission choice         | Accepted | 2026-10-06 |
 | [010](#adr-010-unit-tests-under-make-test-e2e-tests-in-a-container)                | Unit tests under `make test`, e2e tests in a container              | Accepted | 2026-10-06 |
@@ -50,6 +50,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes) | The run log always goes in the run folder's logs folder, in both modes | Accepted | 2026-10-07 |
 | [020](#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column) | The view shows a ticking status line and a Time column | Accepted | 2026-10-08 |
 | [021](#adr-021-the-bypass-flag-is---yolo) | The bypass flag is `--yolo` | Accepted | 2026-10-08 |
+| [022](#adr-022-alr-has-evolved-beyond-gralph) | alr has evolved beyond gralph | Accepted | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -86,8 +87,8 @@ the installed skill) supersedes its ADR-010 and needs nothing here: `alr` has no
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted; what "drop-in compatible" covers is narrowed by ADR-007, and its reference version moves to gralph
-v0.12.0 under ADR-008 and ADR-009
+**Status:** Accepted; the drop-in compatibility goal and the plan to grow into an agent are superseded by ADR-022, what the goal covered was narrowed by ADR-007, and
+its reference version moves to gralph v0.12.0 under ADR-008 and ADR-009
 
 **Context:**
 
@@ -124,7 +125,7 @@ because it has no acceptance tests and guesses at what the agent will need.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted
+**Status:** Accepted; its plans for an agent layer are superseded by ADR-022
 
 **Context:**
 
@@ -158,7 +159,7 @@ Until the view exists, `alr` always runs plain mode: gralph's `--no-tui` flag wa
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted
+**Status:** Accepted; its plans for an agent layer are superseded by ADR-022
 
 **Context:**
 
@@ -191,7 +192,7 @@ without hand-built machinery.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted
+**Status:** Accepted; its plans for an agent layer are superseded by ADR-022
 
 **Context:**
 
@@ -291,7 +292,7 @@ tests run under `make test` and inside the Docker build.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted
+**Status:** Accepted; the compatibility goal described here is superseded by ADR-022
 
 **Context:**
 
@@ -552,7 +553,7 @@ row. It does not change ADR-010: the e2e suite stays black-box and separate.
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted
+**Status:** Accepted; its plans for an agent layer are superseded by ADR-022
 
 **Context:**
 
@@ -814,8 +815,8 @@ looks".
 
 *Negative:*
 
-- Gralph command lines that use `-t` stop working, which relaxes the drop-in goal of ADR-007 for this one flag; it is
-  listed in the requirements' known differences
+- Gralph command lines that use `-t` stop working, which relaxes the drop-in goal of ADR-007 for this one flag (ADR-022);
+  the CHANGELOG records the break
 - A folder holding two task files needs two folders
 
 ### ADR-018: Failed tasks are reset from the menu or with --reset-failed
@@ -931,14 +932,18 @@ events also could not tell the view when a gate or a commit began, only when a g
   text. It counts tasks from `TaskStarted`, gates from `GateStarted` (reset at each task), and marks the commit step at
   `CommitStarted`. It takes a clock, so tests never wait. The view only feeds it events and asks for the text.
 - **The status line.** One row between the top panes and the Task pane, in the form
-  `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`: the task's number out of the tasks pending at Start,
-  the step (`session`, `gate N of M: <first line of the command>`, or `commit`), the step's time, and the run's time.
-  It is blank before the first task starts and is cleared when the run ends.
-- **The Time column.** The Tasks pane gains a `Time` column. The running task's time counts up from its
-  `TaskStarted`; at `TaskFinished` the cell keeps the event's `seconds`. Tasks that have not run this time stay blank.
+  `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`. The parts are joined by ` · `: `task n of N`, where N
+  counts only the tasks pending at Start; then the step (`session`, `gate i of n: <first line of the command>`, or
+  `commit`), the step's time, and `run <time>`. When the line is wider than its widget, the step text is cut with a
+  trailing `…` so the two timers always show. Between tasks, and before an after-all commit begins, the line is only
+  `task n of N · run <time>`; once the commit begins it is `task n of N · commit · <time> · run <time>`. The line is
+  empty before the first task starts and after the run ends.
+- **The Time column.** The Tasks pane gains a `Time` column, 11 characters wide so `10h 59m 59s` fits. The running
+  task's time counts up from its `TaskStarted`; at `TaskFinished` the cell keeps the event's `seconds`. Tasks that have
+  not run this time stay blank.
 - **One ticker.** At Start the view sets a one-second interval that redraws the status line and the running task's
   time; every run event also redraws the line at once. The ticker stops when the run ends or the app unmounts. Times
-  use `format_elapsed`.
+  use `format_elapsed`: tenths under a minute (`31.0s`), then `1m 4s`, `1h 2m 3s`.
 
 **Consequences:**
 
@@ -987,5 +992,49 @@ and its name should say so in a word a user will remember. `alr` is still pre-1.
 
 - Another break from gralph: a gralph command line using `--skip-permissions` must change to `--yolo`
 - The flag (`--yolo`) and the words in the view and the run log (`skip`) no longer match
+
+### ADR-022: alr has evolved beyond gralph
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+gralph was the starting point for `alr`. ADR-001 ported it to Python and made it the behavioral reference, and the first
+tasks held `alr` to gralph's command lines, task files, and error text so the port could be checked against gralph's
+tests. The port is done, and `alr` now has needs of its own. ADR-017, ADR-019, and ADR-021 already changed flags and
+formats: the task file's name and place, the run log folder, and the bypass flag. Treating every gralph surface as a goal
+would make each of those changes an argument about compatibility.
+
+**Decision:**
+
+- **gralph is the starting point and reference, not a constraint.** Compatibility with gralph's command lines, task files,
+  and error text is no longer a goal. `alr` changes flags, formats, and behavior as its own needs require.
+- **The CHANGELOG records the breaks.** A change that a gralph user would notice goes under `Changed` or `Removed` in
+  the CHANGELOG, with the new form.
+- **Rules from gralph ADRs stay as written while they are in force.** A rule that a gralph ADR set, and that this
+  document set still follows, is unchanged and still says where it came from.
+- **alr is a tool, not an agent.** The agent that comes later is a separate program with its own framework. It uses
+  `alr` as a tool: it runs `alr --plain` and reads the exit code and the run log (`<dir>/logs/<timestamp>/run.jsonl`
+  and `task-N.log`). Plain mode always writes the run log (ADR-019), so the outside agent can rely on it. `alr` embeds
+  no agent framework.
+- **This ADR supersedes the drop-in parts of ADR-001 and ADR-007.** Their Status lines point here. Their bodies stay as
+  they were written, as history.
+
+**Consequences:**
+
+*Positive:*
+
+- A flag, a format, or a message can change when `alr` needs it, without a compatibility argument
+- The CHANGELOG is the one list of breaks
+- `alr` stays small: no agent framework or its dependencies are carried in the runner
+
+*Negative:*
+
+- A gralph command line, task file, or script can stop working with `alr`; the CHANGELOG says what to change
+- A reader who knows gralph cannot assume `alr` behaves the same; this document set and the CHANGELOG are the reference
+- Plain mode, its exit codes, and the run log are the interface the outside agent depends on. Changing them needs care,
+  a CHANGELOG entry, and the agent program updated with them
 
 **Next:** [System Architecture](03_system_architecture.md)

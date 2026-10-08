@@ -1,7 +1,7 @@
 ---
-version: 15
+version: 16
 date: 2026-10-08
-notes: "--yolo replaces gralph's --skip-permissions, with no alias; the flag table, the session flags step, the success criteria, and the known differences say so (ADR-021)."
+notes: "Removes the known differences from gralph list: alr no longer aims for gralph compatibility (ADR-022), and the CHANGELOG records breaks. The agent is a separate program that uses alr as a tool (ADR-022); the non-goals, the constraints, and the assumptions say so. --yolo replaces --skip-permissions with no alias (ADR-021)."
 ---
 
 # alr — Requirements
@@ -21,13 +21,13 @@ notes: "--yolo replaces gralph's --skip-permissions, with no alias; the flag tab
 
 ## Problem Statement
 
-gralph, the Go loop runner, has reached the point where its next step is to become a full agent. The frameworks for that (LangGraph, CrewAI) are Python only. The runner therefore has to exist in Python before the agent work can start, and it has to behave exactly like gralph so nothing built around gralph breaks on the way.
+gralph, the Go loop runner, was to become a full agent. That agent is now a separate program, built later, that uses `alr` as a tool: it runs `alr --plain` and reads the exit code and the run log. The runner therefore has to exist as a Python command-line tool first, and Python fits the Textual view and the asyncio engine. The port began by matching gralph's behavior; `alr` has since moved on from gralph (ADR-022).
 
 `alr` already exists in this repository as a small learning project with a simpler task model. That code is replaced by the port. The project keeps the name `alr`.
 
 ## Behavioral Reference
 
-gralph v0.12.0 (commit `433a5c1`) is the reference for behavior. The first version of these documents was written against `v0.9.8-25-g170dc6f`; three gralph releases since then (v0.10.0, v0.11.0, v0.12.0) changed the task file, the command line, and the run folder, and this version follows them. Where this document set is silent, gralph's own documents and code at that tag decide:
+gralph v0.12.0 (commit `433a5c1`) was the starting reference for the port's behavior (ADR-001, ADR-022). The first version of these documents was written against `v0.9.8-25-g170dc6f`; three gralph releases since then (v0.10.0, v0.11.0, v0.12.0) changed the task file, the command line, and the run folder, and this version followed them. Where this document set is silent about an inherited detail, gralph's own documents and code at that tag decide:
 
 - gralph's `docs/architecture/01_requirements.md` (v14), `02_architectural_decisions.md`, `03_system_architecture.md` (v25)
 - `docs/howto.md`
@@ -50,7 +50,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file
 10. Keep the logic that only plain mode runs clearly apart from the logic that only the full-screen path runs, with the shared rules in one place
 11. Port the full-screen path's engine side now: stream-json parsing, run events, and the run log writer, tested against a fake `claude`
-12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds. The Task pane (activity lines) keeps the last 5,000 lines per task (the run log keeps every line), and the Gates button does nothing while a run goes. While a run goes, a status line between the top panes and the Task pane says where the run is and ticks every second (`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`), and the Tasks pane has a Time column that counts the running task up and keeps each finished task's time
+12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds. The Task pane (activity lines) keeps the last 5,000 lines per task (the run log keeps every line), and the Gates button does nothing while a run goes. While a run goes, a status line between the top panes and the Task pane says where the run is and ticks every second (`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`; the form is set in [ADR-020](02_architectural_decisions.md#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column)), and the Tasks pane has a Time column that counts the running task up and keeps each finished task's time
 13. Start a run only when the user presses Start, with Start disabled and the reason shown while something is missing
 14. Ask for a missing folder, permission choice, or gate list in modal dialogs over the main window, using gralph's wizard rules, and let any dialog be reopened until Start
 15. Open `tasks.yaml` and `sandbox.json` read-only from the menu
@@ -63,7 +63,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 
 ### Secondary Goals
 
-1. Give the later Textual view and agent layer a surface they can use without changing the engine
+1. Give the Textual view and an outside program (such as the later agent) a surface they can use without changing the engine: plain mode, its exit codes, and the run log (ADR-022)
 2. Keep the existing project scaffolding: uv, the Makefile, the Docker-first build, and the CI workflow
 3. Type-hint every function
 
@@ -74,8 +74,8 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 - Editing `tasks.yaml` or `sandbox.json` in the view. The file viewer is read-only
 - A default gate timeout setting in the view (ADR-015)
 - Checking the installed skill at startup. gralph no longer does (its ADR-022)
-- Any agent framework, or any change to behavior aimed at the future agent
-- Changing what a user sees or types. Differences in flags, files, or run behavior are bugs unless listed under [Command Line](#command-line). Internal behavior and error wording are free to differ (ADR-007)
+- An agent framework inside `alr`, or any change to behavior aimed at the outside agent. The agent is a separate program that uses `alr` as a tool (ADR-022)
+- Keeping gralph's command lines, task files, and error text. `alr` began as a port of gralph and has since evolved beyond it; it changes flags, formats, and behavior as its own needs require, and the CHANGELOG records each break (ADR-022)
 - Byte-identical task file output. The saved file is equivalent YAML (same keys, values, and order; 2-space indent), not the exact bytes Go's YAML library writes
 - Byte-identical `--help` text
 - Windows support
@@ -83,7 +83,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 
 ## Command Line
 
-The flags below are accepted, with gralph's meaning and startup order.
+The flags below are accepted. The CHANGELOG records each change from gralph's flags.
 
 | Flag                        | Short | Notes                                                                                   |
 | --------------------------- | ----- | --------------------------------------------------------------------------------------- |
@@ -98,22 +98,6 @@ The flags below are accepted, with gralph's meaning and startup order.
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
 | `--commit-after-all`        |       | New in alr. One commit after the last task completes; none on a failed or stopped run; pre-selects after all in the view; with `--commit` is a usage error |
 | `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
-
-Known differences from gralph in this step:
-
-- The command is `alr`, and messages that name the command say `alr`
-- `--commit-after-all` and `--plain` exist only in `alr`
-- `-t/--tasks` is not accepted: it is an unknown-flag error, and the task file is always `<folder>/tasks.yaml` (ADR-017). Gralph command lines that use `-t` must use `-d`
-- `--log-dir` is not accepted: it is an unknown-flag error, and the run log always goes to `<folder>/logs` (ADR-019)
-- `--no-tui`, gralph's flag for plain output, is not accepted: it is an unknown-flag error, and `--plain` replaces it
-- `--skip-permissions` is not accepted: it is an unknown-flag error, and `--yolo` replaces it with no alias (ADR-021). Gralph command lines that use `--skip-permissions` must use `--yolo`
-- `-p/--prompt` is not accepted. It is an unknown-flag error, as in gralph v0.11.0 and later
-- Inside a git work tree the view always commits, and offers per task or after all tasks as its two choices; outside one it runs without commits and says so; plain mode still commits only with a flag
-- The view's dialogs differ from gralph's wizard: modal pop-ups over a main window, a Start button, a commit setting in the strip rather than a yes/no step, a Logging dropdown on by default, no gate-timeout step, and a read-only file viewer
-- `--help` text is generated by Python's `argparse` and is not word-for-word gralph's
-- Error messages are worded by `alr` and need not match gralph's
-- YAML is read with PyYAML's standard rules: an unquoted `yes`, `on`, or `12:30` is not a string and must be quoted, and `<<` merge keys are rejected
-- The result line's keys must be the exact lowercase `state` and `error`; gralph also accepted other letter cases
 
 ## Success Criteria
 
@@ -154,7 +138,7 @@ Known differences from gralph in this step:
 
 ### Business Constraints
 
-- **Emerging maturity**: breaking changes are expected until the port reaches parity with gralph
+- **Emerging maturity**: breaking changes are expected, and the CHANGELOG records each one (ADR-022)
 - **The gralph-docs-writer skill** keeps producing the one task file, shared prompt included; the task field rules must stay in sync with it
 
 ### Organizational Constraints
@@ -167,11 +151,11 @@ Known differences from gralph in this step:
 
 | Assumption                                                                 | Impact if Wrong                                                    | Validation Plan                                                  |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| gralph v0.12.0 is the gralph behavior to match                             | The port matches a version that changes before it merges           | Re-diff gralph's engine packages against `v0.12.0` before release |
+| gralph v0.12.0 is the starting reference for the port                      | The port's first version reflects a gralph that changes later      | Not tracked after the port (ADR-022); the CHANGELOG records alr's own changes |
 | Equivalent YAML is enough; nothing depends on the exact saved bytes        | A tool that diffs task files byte for byte would see changes       | Round-trip tests compare parsed content                          |
 | PyYAML's node API can enforce gralph's tag and integer rules               | Validation would need a different YAML library                     | The first ported task tests cover these cases                    |
 | Go's exit-error wording (such as `exit status 1`) can be reproduced        | Task `error` text would differ from gralph's                       | Ported gate and commit tests assert the strings                  |
 | Textual can host the async engine as a worker in its own event loop       | The TUI would need a thread or a child process (ADR-012)           | Textual's worker and `run_test` documentation checked; proven by the first TUI run test |
-| The agent framework can consume an async engine without change            | The agent design would have to reopen the engine                   | Checked when the agent design is written                         |
+| The outside agent drives alr through plain mode, its exit codes, and the run log| A change to those breaks the agent program, so they change only with care and a CHANGELOG entry| Ported plain-mode and run log tests; the e2e exit-code matrix    |
 
 **Next:** [Architectural Decisions](02_architectural_decisions.md)

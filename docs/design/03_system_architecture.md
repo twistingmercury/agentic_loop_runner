@@ -1,7 +1,7 @@
 ---
-version: 19
+version: 20
 date: 2026-10-08
-notes: "The bypass flag is --yolo, not --skip-permissions, in the module map, the session flags, and the startup order (ADR-021)."
+notes: "The front-end table lists GateStarted and CommitStarted for both front ends (plain prints the same lines and sends the events too, ADR-020); the status line's form and truncation are ADR-020's, stated here; plain output is no longer described as gralph's (ADR-022)."
 ---
 
 # alr — System Architecture
@@ -259,7 +259,7 @@ How gralph's packages map onto this:
 | Characteristic | Value                                                             |
 |----------------|-------------------------------------------------------------------|
 | Used when      | A run is not full-screen: no terminal, `--plain`, or `--dry-run`  |
-| Output         | Plain text on stdout and stderr, same as gralph                   |
+| Output         | Plain text on stdout and stderr                                   |
 | Imports        | `alr.engine`, `alr.record`, `alr.tasks`; never `alr.stream`       |
 
 ### Stream Front End (alr.stream)
@@ -296,10 +296,12 @@ How gralph's packages map onto this:
   button), a menu row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and
   commits side by side on top, a one-row status line, the activity pane across the full width below, then a status bar
 - While a run goes, show where it is on the status line, which ticks every second (ADR-020):
-  `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`, that is the task's number out of the tasks pending
-  at Start, the step (`session`, `gate N of M: <first line of the command>`, or `commit`), the step's time, and the
-  run's time. `alr.tui.progress` builds the text from the run events; the line is blank before the first task and
-  cleared when the run ends
+  `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`, joined by ` · `: `task n of N` (N counts only the
+  tasks pending at Start), the step (`session`, `gate i of n: <first line of the command>`, or `commit`), the step's
+  time, and `run <time>`. When the line is wider than the widget, the step text is cut with a trailing `…` so the
+  timers always show. Between tasks, and before an after-all commit begins, the line is only `task n of N · run <time>`.
+  `alr.tui.progress` builds the text from the run events; the line is empty before the first task starts and after
+  the run ends
 - Give the Tasks pane a `Time` column: the running task's time counts up every second, a finished task keeps the time
   its `TaskFinished` carries, and a task that has not run this time stays blank
 - Let the activity pane follow the running task: a task start moves the tasks highlight and shows only that task's
@@ -344,19 +346,19 @@ How gralph's packages map onto this:
 `alr.engine.frontend` defines the one interface both front ends implement. The engine owns when each call happens and
 what the result means. The front end owns how output is handled.
 
-| Call                | Engine asks the front end to                                             | Plain                            | Stream                                  |
-|---------------------|--------------------------------------------------------------------------|----------------------------------|-----------------------------------------|
-| extra session flags | Give the Claude flags that follow `--print`                              | None                             | `--output-format stream-json --verbose` |
-| run session         | Run Claude with this argv and stdin; return the result text and the exit | Echo, tee stdout, pass stderr    | Capture, parse, emit `Activity`         |
-| run gate            | Run this gate command under this limit; return the exit                  | Print `gate: <cmd>`, pass output | Emit marker and output as `Activity`, and `GateStarted` |
-| run git             | Run this git command; return the exit                                    | Pass output                      | Emit output as `Activity`               |
-| task started        | Note that a task is starting                                             | Nothing                          | Emit `TaskStarted`                      |
-| session finished    | Note the session outcome and duration                                    | Nothing                          | Emit `SessionFinished`                  |
-| gate finished       | Note a gate's result and duration                                        | Nothing                          | Emit `GateFinished`                     |
-| commit started      | Note that something is staged and a commit follows                       | Print `commit: <name>`           | Emit `→ commit <name>` and `CommitStarted` |
-| committed           | Note the new commit hash                                                 | Nothing                          | Emit `Committed`                        |
-| task finished       | Note the final state and duration                                        | Nothing                          | Emit `TaskFinished`                     |
-| run done            | Note the end of the run, with its error if any                           | Nothing                          | Emit `RunDone`                          |
+| Call                | Engine asks the front end to                                             | Plain                                                    | Stream                                                  |
+|---------------------|--------------------------------------------------------------------------|----------------------------------------------------------|---------------------------------------------------------|
+| extra session flags | Give the Claude flags that follow `--print`                              | None                                                     | `--output-format stream-json --verbose`                 |
+| run session         | Run Claude with this argv and stdin; return the result text and the exit | Echo, tee stdout, pass stderr                            | Capture, parse, emit `Activity`                         |
+| run gate            | Run this gate command under this limit; return the exit                  | Print `gate: <cmd>`, pass output, and emit `GateStarted` | Emit marker and output as `Activity`, and `GateStarted` |
+| run git             | Run this git command; return the exit                                    | Pass output                                              | Emit output as `Activity`                               |
+| task started        | Note that a task is starting                                             | Nothing                                                  | Emit `TaskStarted`                                      |
+| session finished    | Note the session outcome and duration                                    | Nothing                                                  | Emit `SessionFinished`                                  |
+| gate finished       | Note a gate's result and duration                                        | Nothing                                                  | Emit `GateFinished`                                     |
+| commit started      | Note that something is staged and a commit follows                       | Print `commit: <name>`, and emit `CommitStarted`         | Emit `→ commit <name>` and `CommitStarted`              |
+| committed           | Note the new commit hash                                                 | Nothing                                                  | Emit `Committed`                                        |
+| task finished       | Note the final state and duration                                        | Nothing                                                  | Emit `TaskFinished`                                     |
+| run done            | Note the end of the run, with its error if any                           | Nothing                                                  | Emit `RunDone`                                          |
 
 Both front ends start processes through `alr.engine.proc`, so process groups and the kill-on-cancel rule are the same
 for both.
