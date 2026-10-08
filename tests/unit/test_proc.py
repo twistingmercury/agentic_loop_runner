@@ -156,8 +156,15 @@ async def test_cancel_returns_when_an_escaped_descendant_holds_the_pipe(
     pid_file = tmp_path / "escaped.pid"
     # setsid takes the sleeper out of the group the stop kills, and it keeps
     # the stdout pipe; the test kills it, and it outlasts a loaded machine.
+    # The sleeper writes its own pid, so the file only appears once it has left
+    # the group: with `$!` it appears at the fork, and a stop that came before
+    # setsid ran would kill the sleeper too and leave nothing to clean up.
     process = await proc.start(
-        ["sh", "-c", f"setsid sleep 30 & echo $! > {pid_file}; sleep 60"],
+        [
+            "sh",
+            "-c",
+            f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & sleep 60",
+        ],
         stdout=asyncio.subprocess.PIPE,
     )
     assert process.stdout is not None
