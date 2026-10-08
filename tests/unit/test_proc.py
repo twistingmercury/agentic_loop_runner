@@ -3,6 +3,8 @@
 import asyncio
 import os
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -242,6 +244,61 @@ async def test_bounded_cancel_stops_the_group_without_sigterm(
 
     assert process.returncode == -signal.SIGKILL
     assert not stopped.exists(), "only gentle sends SIGTERM first"
+
+
+# Runs a command whose escaped descendant holds the pipes past the grace period,
+# then lets the loop close and the garbage go, as the end of alr does.
+_CUT_OFF_SCRIPT = """
+import asyncio, gc, os, signal, sys
+from pathlib import Path
+from alr.engine import proc
+
+proc._GENTLE_GRACE = 0.2
+pid_file = Path(sys.argv[2])
+argv = ["sh", "-c", f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & echo hi"]
+
+
+async def run_bounded() -> None:
+    process = await proc.start(argv, stdout=asyncio.subprocess.PIPE)
+    await proc.finish(process, process.stdout.read(), bounded=True)
+
+
+async def run_captured() -> None:
+    await proc.capture(argv, gentle=True)
+
+
+try:
+    asyncio.run({"bounded": run_bounded, "capture": run_captured}[sys.argv[1]]())
+    gc.collect()
+finally:
+    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+"""
+
+
+@pytest.mark.parametrize("mode", ["bounded", "capture"])
+def test_a_drain_cut_off_at_the_deadline_leaves_no_transport_open(
+    tmp_path: Path, mode: str
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "dev",
+            "-W",
+            "error::ResourceWarning",
+            "-c",
+            _CUT_OFF_SCRIPT,
+            mode,
+            str(tmp_path / "escaped.pid"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.stderr == ""
+    assert result.returncode == 0
 
 
 async def test_cancel_returns_when_an_escaped_descendant_holds_the_pipe(
