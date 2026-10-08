@@ -101,7 +101,8 @@ async def commit_all(
 
     The front end's calls each name a task, so the last one carries the git steps.
     """
-    title = f"alr: {len(tasks)} tasks completed"
+    noun = "task" if len(tasks) == 1 else "tasks"
+    title = f"alr: {len(tasks)} {noun} completed"
     body = "\n".join(f"{task.id}: {task.name}" for task in tasks)
     return await _commit_changes(repo, tasks[-1], front_end, [title, body])
 

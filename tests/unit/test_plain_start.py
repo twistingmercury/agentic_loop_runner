@@ -224,7 +224,7 @@ async def test_start_after_all_mode_makes_one_commit_for_the_run(
 
     await _start(tasks_file, commit=CommitMode.RUN)
 
-    assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]
+    assert commit_subjects(git_repo) == ["alr: 1 task completed", "init"]
 
 
 async def test_start_after_all_mode_outside_a_repository_runs_and_says_so(

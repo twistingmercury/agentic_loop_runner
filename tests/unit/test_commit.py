@@ -893,7 +893,7 @@ async def test_run_after_all_resumed_run_commits_only_the_tasks_that_ran(
         commit_mode=CommitMode.RUN,
     )
 
-    assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]
+    assert commit_subjects(git_repo) == ["alr: 1 task completed", "init"]
     assert git(git_repo, "log", "-1", "--format=%b").strip() == "2: Second"
 
 
