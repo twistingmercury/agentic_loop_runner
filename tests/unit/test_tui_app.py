@@ -1518,6 +1518,32 @@ async def test_a_failing_lookup_does_not_crash_the_view(
         assert not _note_shown(app)
 
 
+async def test_the_commit_note_stays_hidden_inside_a_repository_with_per_task(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo, commit_mode=CommitMode.TASK))
+    async with app.run_test() as pilot:
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert app.in_work_tree is True
+        assert not _note_shown(app)
+
+
+async def test_the_commit_note_stays_hidden_inside_a_repository_after_picking_after_all(
+    git_repo: Path,
+) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await _pick_commit(app, pilot, "down", "down")
+        await until(lambda: app.in_work_tree is not None)
+        await pilot.pause()
+
+        assert app.settings.commit_mode is CommitMode.RUN
+        assert not _note_shown(app)
+
+
 MENU = ["folder", "permissions", "gates", "reset", "tasks", "sandbox", "quit"]
 # What each state greys out; gates, tasks and sandbox are never touched.
 GREYED = {
