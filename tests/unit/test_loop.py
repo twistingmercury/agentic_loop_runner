@@ -105,6 +105,59 @@ def test_load_tasks_failed_task_returns_list_and_err_failed_tasks(
     assert len(caught.value.task_list.tasks) == 2
 
 
+FAILED_AND_COMPLETED_YAML = (
+    "shared:\n  prompt: shared\ntasks:\n"
+    "  - {id: 1, name: Done, prompt: p, state: completed}\n"
+    "  - {id: 2, name: Broke, prompt: p, state: failed, error: boom}\n"
+    "  - {id: 3, name: Later, prompt: p}\n"
+)
+
+
+def test_read_tasks_accepts_a_file_with_a_failed_task(tmp_path: Path) -> None:
+    path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
+
+    got = loop.read_tasks(path)
+
+    assert [task.state for task in got.tasks] == [COMPLETED, FAILED, PENDING]
+
+
+def test_read_tasks_still_rejects_a_bad_file(tmp_path: Path) -> None:
+    path = write_file(tmp_path / "tasks.yaml", BOGUS_STATE_YAML)
+
+    with pytest.raises(TaskFileError, match="failed to parse tasks yaml"):
+        loop.read_tasks(path)
+
+
+def test_reset_failed_resets_only_failed_tasks_and_clears_their_error(
+    tmp_path: Path,
+) -> None:
+    path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
+
+    count = loop.reset_failed(path)
+
+    saved = saved_tasks(Path(path))
+    assert count == 1
+    assert [(task.state, task.error) for task in saved.tasks] == [
+        (COMPLETED, ""),
+        (PENDING, ""),
+        (PENDING, ""),
+    ]
+
+
+def test_reset_failed_with_nothing_failed_leaves_the_file_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+
+    def forbidden(*_: object) -> None:
+        raise AssertionError("the file must not be rewritten")
+
+    monkeypatch.setattr(loop, "save_tasks", forbidden)
+
+    assert loop.reset_failed(path) == 0
+    assert Path(path).read_text(encoding="utf-8") == VALID_TASKS_YAML
+
+
 def test_load_tasks_parse_error_is_not_err_failed_tasks(tmp_path: Path) -> None:
     path = write_file(tmp_path / "tasks.yaml", BOGUS_STATE_YAML)
 

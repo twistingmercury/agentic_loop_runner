@@ -1,19 +1,34 @@
 """The plain real run: load, check the repository, then run the loop."""
 
+import asyncio
+import json
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
-from helpers import commit_subjects, write_file
+from helpers import (
+    cancel_run,
+    commit_subjects,
+    wait_for_text,
+    wait_until_gone,
+    write_file,
+    write_nested_file,
+)
 
+from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
     FailedTasksError,
+    RunLogError,
     RepoError,
     RunError,
     TaskFileError,
 )
 from alr.plain.start import start
+from alr.record.events import Activity, Event
+from alr.record.runlog import RunLog, run_dir
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -38,8 +53,31 @@ def _calls(record: Path) -> int:
     return len(record.read_text(encoding="utf-8").splitlines())
 
 
-async def _start(tasks_file: str, commit: bool = False) -> None:
-    await start(tasks_file, "", bypass_args(), commit)
+async def _start(
+    tasks_file: str,
+    commit: CommitMode | None = None,
+    reset_failed: bool = False,
+    sandbox_settings: str = "",
+) -> None:
+    await start(
+        tasks_file,
+        "",
+        bypass_args(),
+        commit,
+        reset_failed,
+        sandbox_settings=sandbox_settings,
+    )
+
+
+def _run_folder(tasks_file: str) -> Path:
+    """The one run folder a run left under logs/ beside the task file."""
+    (folder,) = (Path(tasks_file).parent / "logs").iterdir()
+    return folder
+
+
+def _ledger(folder: Path) -> list[dict[str, Any]]:
+    lines = (folder / "run.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
 
 
 async def test_start_missing_tasks_file(tmp_path: Path) -> None:
@@ -116,6 +154,25 @@ tasks:
     )
 
 
+async def test_start_reset_failed_runs_the_failed_task_without_a_word(
+    record: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    content = ONE_TASK_YAML.replace("p1}", "p1, state: failed, error: boom}")
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
+
+    await _start(tasks_file, reset_failed=True)
+
+    assert _calls(record) == 1
+    printed = capsys.readouterr().out.lower()
+    assert "reset" not in printed
+    assert "failed" not in printed
+
+
+async def test_start_reset_failed_still_wraps_a_bad_file(tmp_path: Path) -> None:
+    with pytest.raises(TaskFileError, match="failed to start loop runner"):
+        await _start(str(tmp_path / "missing.yaml"), reset_failed=True)
+
+
 async def test_start_commit_refuses_dirty_tree_before_any_session(
     record: Path, git_repo: Path, outside: Path
 ) -> None:
@@ -123,7 +180,7 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     with pytest.raises(RepoError) as caught:
-        await _start(tasks_file, commit=True)
+        await _start(tasks_file, commit=CommitMode.PER_TASK)
 
     assert "--commit needs a clean work tree" in str(caught.value)
     assert _calls(record) == 0, "claude must not run"
@@ -140,7 +197,7 @@ async def test_start_commit_flag_commits_the_task(
         "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
-    await _start(tasks_file, commit=True)
+    await _start(tasks_file, commit=CommitMode.PER_TASK)
 
     assert commit_subjects(git_repo) == ["First", "init"]
 
@@ -154,3 +211,215 @@ async def test_start_without_commit_flag_ignores_a_dirty_tree(
     await _start(tasks_file)
 
     assert commit_subjects(git_repo) == ["init"]
+
+
+async def test_start_after_all_mode_makes_one_commit_for_the_run(
+    record: Path, git_repo: Path, outside: Path
+) -> None:
+    tasks_file = write_file(
+        outside / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+    )
+
+    await _start(tasks_file, commit=CommitMode.AFTER_ALL)
+
+    assert commit_subjects(git_repo) == ["alr: 1 tasks completed", "init"]
+
+
+async def test_start_logs_the_run_beside_the_task_file(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file)
+
+    folder = _run_folder(tasks_file)
+    events = [line["event"] for line in _ledger(folder)]
+    assert events[0] == "run_started"
+    assert events[-1] == "run_finished"
+    detail = (folder / "task-1.log").read_text(encoding="utf-8")
+    assert detail != "", "Claude's output is in the detail file"
+
+
+async def test_start_logs_the_run_info(record: Path, tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file, sandbox_settings="/some/sandbox.json")
+
+    started = _ledger(_run_folder(tasks_file))[0]
+    assert started["tasks_file"] == tasks_file
+    assert started["permissions"] == "sandbox"
+    assert started["sandbox_settings"] == "/some/sandbox.json"
+    assert started["commit"] is False
+
+
+async def test_start_logs_skip_permissions_without_a_sandbox(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file)
+
+    started = _ledger(_run_folder(tasks_file))[0]
+    assert started["permissions"] == "skip"
+    assert "sandbox_settings" not in started
+
+
+async def test_start_logs_that_the_run_commits(
+    record: Path, git_repo: Path, outside: Path
+) -> None:
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file, commit=CommitMode.PER_TASK)
+
+    assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
+
+
+async def test_start_commit_refuses_a_log_folder_git_can_see(
+    record: Path, git_repo: Path
+) -> None:
+    # Only the task file is ignored, so the logs folder beside it stays visible.
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+
+    with pytest.raises(RepoError, match="log directory"):
+        await _start(tasks_file, commit=CommitMode.PER_TASK)
+
+    assert _calls(record) == 0, "claude must not run"
+    assert not (git_repo / "work" / "logs").exists()
+
+
+async def test_start_commit_accepts_a_log_folder_git_ignores(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", ONE_TASK_YAML)
+
+    await _start(tasks_file, commit=CommitMode.PER_TASK)
+
+    assert (git_repo / "run" / "logs").is_dir()
+
+
+async def test_start_without_commit_does_not_check_the_log_folder(
+    record: Path, git_repo: Path
+) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+
+    await _start(tasks_file)
+
+    assert (git_repo / "work" / "logs").is_dir()
+
+
+async def test_start_writes_no_log_when_loading_fails(tmp_path: Path) -> None:
+    with pytest.raises(TaskFileError):
+        await _start(str(tmp_path / "missing.yaml"))
+
+    assert not (tmp_path / "logs").exists()
+
+
+async def test_start_log_failure_stops_the_run(record: Path, tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+    # A file where the logs folder should go, so the log cannot be created.
+    (tmp_path / "logs").write_text("in the way\n", encoding="utf-8")
+
+    with pytest.raises(RunLogError):
+        await _start(tasks_file)
+
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_start_twice_in_the_same_second_keeps_two_run_folders(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+    same_second = datetime(2026, 10, 7, 15, 56, 18, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "alr.plain.start.run_dir",
+        lambda log_dir, _start: run_dir(log_dir, same_second),
+    )
+
+    await _start(tasks_file)
+    (tmp_path / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+    await _start(tasks_file)
+
+    folders = sorted(p.name for p in (tmp_path / "logs").iterdir())
+    assert folders == ["20261007T155618", "20261007T155618-1"]
+    for name in folders:
+        events = _ledger(tmp_path / "logs" / name)
+        assert events[0]["event"] == "run_started"
+
+
+def _spy_on_close(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count the calls to RunLog.close, which still closes the log."""
+    closed: list[int] = []
+    real_close = RunLog.close
+
+    def close(self: RunLog) -> None:
+        closed.append(1)
+        real_close(self)
+
+    monkeypatch.setattr(RunLog, "close", close)
+    return closed
+
+
+async def test_start_cancel_ends_the_ledger_with_stopped(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+    closed = _spy_on_close(monkeypatch)
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    run = asyncio.ensure_future(_start(tasks_file))
+    await wait_for_text(ready)
+    await cancel_run(run)
+
+    last = _ledger(_run_folder(tasks_file))[-1]
+    assert last["event"] == "run_finished"
+    assert last["result"] == "stopped"
+    assert closed == [1], "the log must be closed once"
+    assert (tmp_path / "tasks.yaml").read_text(encoding="utf-8") == ONE_TASK_YAML
+
+
+async def test_start_log_write_failure_stops_the_run_and_the_child(
+    fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    # Writes its pid, prints a line, which the log records as activity, then blocks as the
+    # same process, so the pid in the ready file is the one that must go.
+    script = fake_claude / "claude"
+    script.write_text(
+        f"#!/bin/sh\necho $$ > {ready}\necho working\nexec sleep 300\n",
+        encoding="utf-8",
+    )
+    closed = _spy_on_close(monkeypatch)
+    real_record = RunLog.record
+
+    def failing_record(self: RunLog, event: Event) -> None:
+        if isinstance(event, Activity):
+            raise RunLogError("disk full")
+
+        real_record(self, event)
+
+    monkeypatch.setattr(RunLog, "record", failing_record)
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+
+    with pytest.raises(RunLogError, match="disk full"):
+        await _start(tasks_file)
+
+    await wait_until_gone(int(await wait_for_text(ready)))
+    assert closed == [1], "the log must be closed once"
+    ledger = _ledger(_run_folder(tasks_file))
+    assert [line["event"] for line in ledger] == [
+        "run_started",
+        "task_started",
+        "run_finished",
+    ]
+    assert ledger[1]["task"] == 1
+    assert ledger[-1]["result"] == "stopped", (
+        "a failed log write must not claim success"
+    )
+    assert ledger[-1]["error"] == "RunLogError: disk full"

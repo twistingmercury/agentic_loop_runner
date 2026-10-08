@@ -3,9 +3,9 @@
 Plain functions live here and fixtures in conftest.py. The suite never imports
 alr; the command line is its only way in.
 
-Ported from gralph's tests/e2e. Not ported: install_skill_test.go,
-skill_check_test.go, and wizard_signal_linux_test.go. The skill, the wizard,
-and the full-screen view are out of scope until the TUI design.
+Ported from gralph's tests/e2e. Not ported: skill_check_test.go and
+wizard_signal_linux_test.go. --install-skill and the full-screen view are
+covered by test_install_skill.py and test_tui.py.
 """
 
 import json
@@ -97,8 +97,8 @@ def shared_block(
 
 
 def run_args(tasks_path: Path) -> list[str]:
-    """The flags of an ordinary unsandboxed run."""
-    return ["--skip-permissions", f"--tasks={tasks_path}"]
+    """The flags of an ordinary unsandboxed run; the task file is the folder's tasks.yaml."""
+    return ["--skip-permissions", f"--dir={tasks_path.parent}"]
 
 
 VALID_TASKS_YAML = shared_block() + ONE_TASK
@@ -136,8 +136,8 @@ def run_dry_run(tmp_path: Path, tasks_yaml: str, *flags: str) -> tuple[Result, P
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        "-t",
-        str(tasks_path),
+        "-d",
+        str(tasks_path.parent),
         "--dry-run",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},

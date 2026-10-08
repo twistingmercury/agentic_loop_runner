@@ -9,11 +9,15 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
 from alr.errors import AlrError, UsageError
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
+from alr.skillinstall import install
 from alr.tasks import parse_timeout
+from alr.tui.app import run_app
+from alr.tui.settings import Permissions, RunSettings
 
 _INTERRUPTED = "error: interrupted"
 
@@ -36,8 +40,11 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(f"alr version: {metadata.version('alr')}")
         return 0
 
+    if args.install_skill:
+        return _install_skill()
+
     try:
-        tasks_file = resolve_dir(args.dir, args.tasks)
+        tasks_file = resolve_dir(args.dir)
         sandbox_settings = resolve_sandbox(
             args.dir, args.sandbox_settings, args.skip_permissions
         )
@@ -45,12 +52,16 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if args.gate_timeout is not None:
             check_gate_timeout(args.gate_timeout)
 
+        check_reset_flag(args.reset_failed, args.dry_run)
+        if wants_tui(args):
+            return _open_view(args, tasks_file, sandbox_settings)
+
         missing = _missing_flags(tasks_file)
         if missing:
             _report_missing(parser, missing)
             return 1
 
-        check_log_dir(args.log_dir, args.dry_run)
+        commit_mode = check_commit_flags(args.commit, args.commit_after_all)
         session = session_args(sandbox_settings, args.skip_permissions, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -59,15 +70,81 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     gate_timeout = args.gate_timeout or ""
     if args.dry_run:
         return _run(
-            dry_run(sys.stdout, tasks_file, gate_timeout, sandbox_settings, args.commit)
+            dry_run(
+                sys.stdout,
+                tasks_file,
+                gate_timeout,
+                sandbox_settings,
+                commit_mode is not None,
+            )
         )
 
-    return _run(start(tasks_file, gate_timeout, session, args.commit))
+    return _run(
+        start(
+            tasks_file,
+            gate_timeout,
+            session,
+            commit_mode,
+            args.reset_failed,
+            sandbox_settings=sandbox_settings,
+        )
+    )
+
+
+def _install_skill() -> int:
+    """Install the bundled skill and print where it went."""
+    try:
+        print(install())
+    except AlrError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def wants_tui(args: argparse.Namespace) -> bool:
+    """Report whether this run opens the full-screen view: a terminal, no --plain, no dry run."""
+    if args.plain or args.dry_run:
+        return False
+
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> int:
+    """Open the full-screen view with what the flags already answer."""
+    commit_mode = check_commit_flags(args.commit, args.commit_after_all)
+    # Validates a given settings file and the both-flags conflict; no run starts here.
+    session_args(sandbox_file, args.skip_permissions, dry_run=True)
+    settings = RunSettings(
+        tasks_file=tasks_file,
+        sandbox_file=sandbox_file,
+        permissions=_permissions(sandbox_file, args.skip_permissions),
+        commit_mode=commit_mode or CommitMode.PER_TASK,
+        gate_timeout=args.gate_timeout or "",
+        reset_failed=args.reset_failed,
+    )
+    return run_app(settings)
+
+
+def _permissions(sandbox_file: str, skip: bool) -> Permissions:
+    if skip:
+        return Permissions.SKIP
+
+    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
+
+
+class _BareMetavarFormatter(argparse.HelpFormatter):
+    """Drop the stray space argparse leaves after a flag whose metavar is empty."""
+
+    def _format_action_invocation(self, action: argparse.Action) -> str:
+        return super()._format_action_invocation(action).replace(" ,", ",").rstrip()
 
 
 def _parser() -> argparse.ArgumentParser:
     # Abbreviations are off because gralph does not expand a flag prefix.
-    parser = argparse.ArgumentParser(prog="alr", allow_abbrev=False)
+    parser = argparse.ArgumentParser(
+        prog="alr", allow_abbrev=False, formatter_class=_BareMetavarFormatter
+    )
     parser.add_argument(
         "-v",
         "--version",
@@ -75,16 +152,16 @@ def _parser() -> argparse.ArgumentParser:
         help="Show the current version of alr",
     )
     parser.add_argument(
-        "-d",
-        "--dir",
-        default="",
-        help="Run folder holding tasks.yaml (and optionally sandbox.json); --tasks and --sandbox-settings override",
+        "--install-skill",
+        action="store_true",
+        help="Install the bundled gralph-docs-writer skill into ~/.claude/skills and exit",
     )
     parser.add_argument(
-        "-t",
-        "--tasks",
+        "-d",
+        "--dir",
+        metavar="",
         default="",
-        help="Path to the tasks.yaml task list that drives the loop; required unless --dir gives it",
+        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings overrides the folder's sandbox.json",
     )
     parser.add_argument(
         "--dry-run",
@@ -94,16 +171,23 @@ def _parser() -> argparse.ArgumentParser:
     # None, not "", so an empty value given on purpose can be told apart.
     parser.add_argument(
         "--gate-timeout",
+        metavar="",
         default=None,
         help="Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)",
     )
     parser.add_argument(
-        "--no-tui",
+        "--plain",
         action="store_true",
-        help="Use plain output instead of the full-screen view; alr has no full-screen view yet, so this changes nothing",
+        help="Use plain output instead of the full-screen view",
+    )
+    parser.add_argument(
+        "--reset-failed",
+        action="store_true",
+        help="Set every failed task back to pending before the run, without asking",
     )
     parser.add_argument(
         "--sandbox-settings",
+        metavar="",
         default="",
         help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --skip-permissions",
     )
@@ -118,20 +202,20 @@ def _parser() -> argparse.ArgumentParser:
         help="Commit each completed task with git after its gates pass, with the task name as the message; in a repository, the work tree must be clean",
     )
     parser.add_argument(
-        "--log-dir",
-        default="",
-        help="Directory for a record of the run: a ledger and each task's activity, in a new folder per run; full-screen view only",
+        "--commit-after-all",
+        action="store_true",
+        help="Commit once, after the last task completes, instead of after each task; a failed or stopped run makes no commit",
     )
     return parser
 
 
-def resolve_dir(dir: str, tasks_path: str) -> str:
-    """Turn a run folder into the task file path.
+def resolve_dir(dir: str) -> str:
+    """Turn a run folder into the task file path; no folder gives no path.
 
-    The name is fixed, so a folder needs no other flag; --tasks always wins.
+    The name is fixed, so the folder is all the command line says.
     """
-    if not dir or tasks_path:
-        return tasks_path
+    if not dir:
+        return ""
 
     path = Path(dir) / "tasks.yaml"
     if not path.exists():
@@ -160,18 +244,23 @@ def check_gate_timeout(value: str) -> None:
         raise UsageError(f"--gate-timeout: {exc}") from exc
 
 
-def check_log_dir(log_dir: str, dry_run: bool) -> None:
-    """Refuse --log-dir on a real run.
+def check_commit_flags(commit: bool, after_all: bool) -> CommitMode | None:
+    """Turn the two commit flags into the mode they ask for; asking for both is an error."""
+    if commit and after_all:
+        raise UsageError("--commit and --commit-after-all cannot be used together")
 
-    The record is built from events only the full-screen view's path produces,
-    and a run that was asked for a record must not quietly leave none. An
-    empty value counts as not passed. A dry run records nothing and ignores
-    the flag.
-    """
-    if not log_dir or dry_run:
-        return
+    if after_all:
+        return CommitMode.AFTER_ALL
 
-    raise UsageError("--log-dir only works with the full-screen view")
+    return CommitMode.PER_TASK if commit else None
+
+
+def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:
+    """Refuse --reset-failed with --dry-run, which must write nothing."""
+    if reset_failed and dry_run:
+        raise UsageError(
+            "--reset-failed cannot be used with --dry-run (a dry run writes nothing)"
+        )
 
 
 def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
@@ -201,7 +290,7 @@ def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
 
 
 def _missing_flags(tasks_file: str) -> list[str]:
-    return [] if tasks_file else ["--tasks"]
+    return [] if tasks_file else ["--dir"]
 
 
 def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None:

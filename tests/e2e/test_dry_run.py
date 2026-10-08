@@ -8,6 +8,7 @@ from e2e_helpers import (
     run_alr,
     run_dry_run,
     shared_block,
+    write_tasks_yaml,
 )
 
 
@@ -58,12 +59,25 @@ def test_dry_run_flags_failed_task_and_exits_zero(
     )
 
 
-def test_dry_run_missing_tasks_flag() -> None:
+def test_dry_run_missing_dir_flag() -> None:
     res = run_alr("--dry-run")
 
     assert res.code == 1, res
     # Usage follows the error and names every flag, so match the error line.
-    assert "error: required flag --tasks not set\n" in res.err
+    assert "error: required flag --dir not set\n" in res.err
+
+
+def test_dry_run_with_reset_failed_is_refused(tmp_path: Path) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr("-d", str(tmp_path), "--dry-run", "--reset-failed")
+
+    assert res.code == 1, res
+    assert (
+        "error: --reset-failed cannot be used with --dry-run (a dry run writes nothing)\n"
+        in res.err
+    )
+    assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
 
 
 def test_dry_run_valid_gates_are_not_run(tmp_path: Path, fake_claude: Path) -> None:

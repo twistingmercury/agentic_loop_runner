@@ -17,7 +17,13 @@ from helpers import (
 
 from alr import tasks
 from alr.engine import proc
-from alr.engine.commit import Repo, check_log_dir, open_repo
+from alr.engine.commit import (
+    CommitMode,
+    Repo,
+    check_log_dir,
+    open_repo,
+    work_tree_root,
+)
 from alr.errors import RepoError, RunCancelledError, RunError
 from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
 
@@ -707,3 +713,92 @@ async def test_check_log_dir_outside_the_tree_needs_no_rule(
     repo = await _open(_task_file(git_repo))
 
     await check_log_dir(repo, str(outside / "logs" / RUN_DIR))
+
+
+_NUMBERED = Gate(
+    cmd="n=1; while [ -e work-$n.txt ]; do n=$((n+1)); done; echo work > work-$n.txt"
+)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_makes_one_commit_listing_every_task(
+    git_repo: Path,
+) -> None:
+    tasks_file = _task_file(git_repo)
+
+    await run_loop(
+        _two_tasks(_NUMBERED),
+        tasks_file,
+        repo=await _open(tasks_file),
+        commit_mode=CommitMode.AFTER_ALL,
+    )
+
+    assert commit_subjects(git_repo) == ["alr: 2 tasks completed", "init"]
+    assert git(git_repo, "log", "-1", "--format=%b").split("\n")[:2] == [
+        "1: First",
+        "2: Second",
+    ]
+    assert _head_files(git_repo) == ["work-1.txt", "work-2.txt"]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_failed_task_makes_no_commit(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"nope"}')
+    tasks_file = _task_file(git_repo)
+    repo = await _open(tasks_file)
+
+    with pytest.raises(RunError, match="nope"):
+        await run_loop(
+            _two_tasks(), tasks_file, repo=repo, commit_mode=CommitMode.AFTER_ALL
+        )
+
+    assert commit_subjects(git_repo) == ["init"]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_with_every_task_completed_makes_no_commit(
+    git_repo: Path,
+) -> None:
+    done = _two_tasks()
+    for task in done.tasks:
+        task.state = COMPLETED
+    tasks_file = _task_file(git_repo)
+
+    await run_loop(
+        done, tasks_file, repo=await _open(tasks_file), commit_mode=CommitMode.AFTER_ALL
+    )
+
+    assert commit_subjects(git_repo) == ["init"]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_after_all_commit_failure_stops_the_run(git_repo: Path) -> None:
+    _install_hook(git_repo, "echo hook-says-no >&2\nexit 1")
+    tasks_file = _task_file(git_repo)
+    repo = await _open(tasks_file)
+
+    with pytest.raises(RunError, match="commit failed"):
+        await run_loop(
+            _two_tasks(_NUMBERED),
+            tasks_file,
+            repo=repo,
+            commit_mode=CommitMode.AFTER_ALL,
+        )
+
+    assert commit_subjects(git_repo) == ["init"]
+    assert _saved_states(tasks_file) == [(COMPLETED, ""), (COMPLETED, "")]
+
+
+async def test_work_tree_root_names_the_repository(git_repo: Path) -> None:
+    assert await work_tree_root() == str(git_repo)
+
+
+async def test_work_tree_root_outside_a_repository_is_none(
+    outside: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
+    monkeypatch.chdir(outside)
+
+    assert await work_tree_root() is None

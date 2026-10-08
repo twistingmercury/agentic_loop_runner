@@ -1,7 +1,7 @@
 ---
-version: 5
-date: 2026-10-06
-notes: "Core Concept diagram: every block has an explicit fill and a #333333 text color, so none depends on the viewer's theme."
+version: 8
+date: 2026-10-07
+notes: "The System Model gains alr.record (run events, run log); both modes log to <dir>/logs and --log-dir is gone (ADR-019)."
 ---
 
 # alr — Architecture Overview
@@ -23,7 +23,7 @@ notes: "Core Concept diagram: every block has an explicit fill and a #333333 tex
 
 `alr` is the Python port of [gralph](https://github.com/twistingmercury/gralph), which is written in Go. The port exists because the next step for the tool is to grow into a full agent built on a Python framework such as LangGraph or CrewAI. Those frameworks are Python only, so the runner moves to Python first.
 
-This set of documents covers the first step: porting gralph's engine and its plain (no full-screen view) mode. The port is drop-in compatible: an existing gralph v0.12.0 task file, sandbox settings file, and command line work with `alr` unchanged. These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
+This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, a choice of per-task or after-all commits, and `--install-skill`. The port is drop-in compatible: an existing gralph v0.12.0 task file, sandbox settings file, and command line work with `alr` unchanged. These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
 
 ## Core Concept
 
@@ -72,8 +72,10 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | `alr.tasks`     | Parses, validates, and atomically saves the task file                                               |
 | `alr.engine`    | The shared run logic: the loop, the outcome rule, gates, commits, session flags, process handling   |
 | `alr.plain`     | Everything only plain mode does: echo, pass-through output, the dry-run report                      |
-| `alr.stream`    | Everything only the full-screen path does: stream-json parsing, events, the run log                 |
-| `alr.tui`       | Not in this design. The Textual full-screen view and setup wizard, added by the next design         |
+| `alr.record`    | The run events and the run log writer, shared by both front ends                                    |
+| `alr.stream`    | Everything only the full-screen path does: stream-json parsing and the stream front end             |
+| `alr.tui`       | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker |
+| `alr.skillinstall` | `--install-skill`: copies the bundled skill to `~/.claude/skills`                                |
 
 ## Key Principles
 
@@ -81,14 +83,14 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 2. **One engine, two front ends** — The rules of a run live in one place. Plain mode and the full-screen path differ only in how a subprocess is run and shown, so they cannot disagree on what counts as completed.
 3. **The engine never prints and never asks which mode it is in** — It is handed a front end and calls it. This keeps the plain path readable on its own and gives the later TUI and agent layer a clean surface to plug into.
 4. **Async from the start** — The engine is built on `asyncio` because the planned TUI (Textual) and agent frameworks are async, and because cancelling a run cleanly is simpler there.
-5. **Build only what this step needs** — No agent framework, no TUI library, and no new abstraction beyond the front end interface.
+5. **Build only what this step needs** — No agent framework, and no new abstraction beyond the front end interface. Textual is the one new dependency.
 
 ## Roadmap
 
 | Step | Scope                                                                                                      | Status        |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------- |
-| 1    | Engine, plain mode, dry-run, and the stream path plus run log (built and tested, not yet reachable by CLI) | This design   |
-| 2    | Textual full-screen view, setup wizard, `--log-dir` switched on, `--install-skill` (gralph no longer checks the installed skill) | Next design   |
+| 1    | Engine, plain mode, dry-run, and the stream path plus run log                                              | Done (v0.0.6) |
+| 2    | Textual full-screen view with setup dialogs, after-all commits, logging in both modes, `--install-skill` | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
 | 4    | Agent layer on LangGraph or CrewAI                                                                         | Later         |
 

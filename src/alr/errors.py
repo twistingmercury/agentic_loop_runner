@@ -56,3 +56,7 @@ class RunError(AlrError):
 
 class RunCancelledError(RunError):
     """The run was stopped before a task finished."""
+
+
+class SkillInstallError(AlrError):
+    """The bundled skill cannot be installed."""

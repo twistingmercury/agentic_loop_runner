@@ -1,7 +1,7 @@
 ---
-version: 3
-date: 2026-10-06
-notes: "Fixed the paths to gralph's own documents, which a bulk rename had pointed at this repository's docs/design."
+version: 13
+date: 2026-10-07
+notes: "Item 12 names the pane Task. Items 12 and 18 add the same-second folder suffix, the 5,000-line Activity limit, and the idle Gates button during a run."
 ---
 
 # alr — Requirements
@@ -50,6 +50,16 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file
 10. Keep the logic that only plain mode runs clearly apart from the logic that only the full-screen path runs, with the shared rules in one place
 11. Port the full-screen path's engine side now: stream-json parsing, run events, and the run log writer, tested against a fake `claude`
+12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds. The Task pane (activity lines) keeps the last 5,000 lines per task (the run log keeps every line), and the Gates button does nothing while a run goes
+13. Start a run only when the user presses Start, with Start disabled and the reason shown while something is missing
+14. Ask for a missing folder, permission choice, or gate list in modal dialogs over the main window, using gralph's wizard rules, and let any dialog be reopened until Start
+15. Open `tasks.yaml` and `sandbox.json` read-only from the menu
+16. Offer a commit setting of one commit per task (the default) or one commit after all tasks, with commits always on inside a git work tree, and run without commits (with a note) outside one
+17. Offer a permissions setting of the folder's `sandbox.json` (the default when it exists) or skip permissions, never defaulting to unsandboxed
+18. Log every real run to `<folder>/logs/<timestamp>/` in both modes: plain mode always, the view through a Logging dropdown that is on by default. When the run commits inside a git work tree, refuse to start (plain mode) or block Start (the view) if that folder is not git-ignored. If two runs start in the same second, the later run's folder gets a `-1` suffix (then `-2`), and the final name is not reported to the caller
+19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
+20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
+21. Open a task file that holds failed tasks in the view and reset them to pending from the menu after a confirmation, or silently with `--reset-failed` in either mode
 
 ### Secondary Goals
 
@@ -59,8 +69,11 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 
 ## Non-Goals
 
-- The full-screen view, the setup wizard, and terminal detection. Until they exist, `alr` always runs plain mode
-- `--install-skill` and the bundled skill. gralph no longer checks the installed skill at startup (its ADR-022), so there is no check to leave out
+- Pause, skip, and retry controls in the view. Stop is the only control during a run (ADR-012)
+- A second run in the same view session. A new run means a new launch
+- Editing `tasks.yaml` or `sandbox.json` in the view. The file viewer is read-only
+- A default gate timeout setting in the view (ADR-015)
+- Checking the installed skill at startup. gralph no longer does (its ADR-022)
 - Any agent framework, or any change to behavior aimed at the future agent
 - Changing what a user sees or types. Differences in flags, files, or run behavior are bugs unless listed under [Command Line](#command-line). Internal behavior and error wording are free to differ (ADR-007)
 - Byte-identical task file output. The saved file is equivalent YAML (same keys, values, and order; 2-space indent), not the exact bytes Go's YAML library writes
@@ -75,22 +88,27 @@ The flags below are accepted, with gralph's meaning and startup order.
 | Flag                        | Short | Notes                                                                                   |
 | --------------------------- | ----- | --------------------------------------------------------------------------------------- |
 | `--version`                 | `-v`  | Prints the version                                                                      |
-| `--dir <folder>`            | `-d`  | Run folder holding `tasks.yaml` and, optionally, `sandbox.json`; `--tasks` and `--sandbox-settings` override |
-| `--tasks <path>`            | `-t`  | Required unless `--dir` gives it                                                        |
+| `--dir <folder>`            | `-d`  | Run folder holding `tasks.yaml` and, optionally, `sandbox.json`; required in plain mode, and the view asks when it is missing; `--sandbox-settings` overrides the settings file |
 | `--dry-run`                 |       | Validate and report only. The old alr short form `-d` now means `--dir`, as in gralph   |
 | `--gate-timeout <duration>` |       | Duration such as `90s`, `10m`, or `1h30m`; overrides every gate's own timeout            |
-| `--no-tui`                  |       | Accepted. Has no effect until the full-screen view exists                               |
+| `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
 | `--skip-permissions`        |       | Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
-| `--commit`                  |       | Commit each completed task after its gates pass                                         |
-| `--log-dir <folder>`        |       | On a real run, exits 1 with gralph's plain-mode error until the full-screen view exists |
+| `--commit`                  |       | Commit each completed task after its gates pass; pre-selects per task in the view        |
+| `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
+| `--commit-after-all`        |       | New in alr. One commit after the last task completes; none on a failed or stopped run; pre-selects after all in the view; with `--commit` is a usage error |
+| `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
 
 Known differences from gralph in this step:
 
 - The command is `alr`, and messages that name the command say `alr`
-- `--install-skill` is not accepted
+- `--commit-after-all` and `--plain` exist only in `alr`
+- `-t/--tasks` is not accepted: it is an unknown-flag error, and the task file is always `<folder>/tasks.yaml` (ADR-017). Gralph command lines that use `-t` must use `-d`
+- `--log-dir` is not accepted: it is an unknown-flag error, and the run log always goes to `<folder>/logs` (ADR-019)
+- `--no-tui`, gralph's flag for plain output, is not accepted: it is an unknown-flag error, and `--plain` replaces it
 - `-p/--prompt` is not accepted. It is an unknown-flag error, as in gralph v0.11.0 and later
-- A bare `alr` in a terminal does not open a wizard; it reports the missing required flags, as gralph does in plain mode
+- Inside a git work tree the view always commits, and offers per task or after all tasks as its two choices; outside one it runs without commits and says so; plain mode still commits only with a flag
+- The view's dialogs differ from gralph's wizard: modal pop-ups over a main window, a Start button, a commit setting in the strip rather than a yes/no step, a Logging dropdown on by default, no gate-timeout step, and a read-only file viewer
 - `--help` text is generated by Python's `argparse` and is not word-for-word gralph's
 - Error messages are worded by `alr` and need not match gralph's
 - YAML is read with PyYAML's standard rules: an unquoted `yes`, `on`, or `12:30` is not a string and must be quoted, and `<<` merge keys are rejected
@@ -111,6 +129,14 @@ Known differences from gralph in this step:
 | Exit codes             | Zero only when every task completed                                                             | Ported e2e matrix                                                           |
 | Run log                | Same ledger lines and detail files as gralph for the same events; `run_started` has no `prompt_file` | Ported `runlog_test.go` cases                                          |
 | Path separation        | `engine` imports neither `plain` nor `stream`; `plain` and `stream` do not import each other    | A test that inspects the imports                                            |
+| View states            | Start disabled with a reason while something is missing; Running locks the settings and greys out the Folder, Permissions, Reset, and Quit buttons; Finished shows a summary and stays open | TUI unit tests under Textual's `run_test` and `Pilot`          |
+| Dialog rules           | A dialog opens only for an open step; nothing is written before Start except a confirmed reset | TUI unit tests                                                     |
+| Reset                  | A file with failed tasks opens with Start disabled and the reason shown; a confirmed reset saves them pending with no error text; `--reset-failed` does it silently and exits 1 with `--dry-run` | Engine, CLI, and TUI unit tests; e2e                |
+| Commit modes           | One commit per task, or one commit after the last task; none after a failed or stopped run; both flags together exit 1 | Unit tests against real git repositories; e2e                  |
+| Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
+| View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |
+| Skill install          | The bundled skill lands in `~/.claude/skills/gralph-docs-writer/`, replacing any copy           | Unit test with a temporary home; e2e                                        |
+| Keyboard only          | The mouse is not captured; the whole setup and a run can be done with keys alone                | TUI unit test of the keyboard-only flow                                     |
 | Build                  | `make test` (analyze and unit tests) and `make build` (wheel, then e2e in a container) pass     | CI                                                                          |
 
 ## Constraints
@@ -118,7 +144,7 @@ Known differences from gralph in this step:
 ### Technical Constraints
 
 - **Python 3.12 or later**, managed with uv, `src/` layout
-- **Runtime dependency: PyYAML only.** `pydantic` is removed. Dev dependencies: pytest, pytest-asyncio, ruff
+- **Runtime dependencies: PyYAML and Textual.** `pydantic` is removed. Dev dependencies: pytest, pytest-asyncio, ruff
 - **Standard library for the rest**: `asyncio` for subprocesses and cancellation, `argparse` for flags, `json`, `pathlib`
 - **Unix process API**: process groups and signals; Linux and macOS only
 - **The `claude` CLI on `PATH`**, called with a fixed argv and the prompt on stdin
@@ -144,6 +170,7 @@ Known differences from gralph in this step:
 | Equivalent YAML is enough; nothing depends on the exact saved bytes        | A tool that diffs task files byte for byte would see changes       | Round-trip tests compare parsed content                          |
 | PyYAML's node API can enforce gralph's tag and integer rules               | Validation would need a different YAML library                     | The first ported task tests cover these cases                    |
 | Go's exit-error wording (such as `exit status 1`) can be reproduced        | Task `error` text would differ from gralph's                       | Ported gate and commit tests assert the strings                  |
-| Textual and the agent framework can consume an async engine without change | The next design would have to reopen the engine                    | Checked when the TUI design is written                           |
+| Textual can host the async engine as a worker in its own event loop       | The TUI would need a thread or a child process (ADR-012)           | Textual's worker and `run_test` documentation checked; proven by the first TUI run test |
+| The agent framework can consume an async engine without change            | The agent design would have to reopen the engine                   | Checked when the agent design is written                         |
 
 **Next:** [Architectural Decisions](02_architectural_decisions.md)

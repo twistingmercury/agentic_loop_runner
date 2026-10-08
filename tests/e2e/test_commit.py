@@ -57,7 +57,7 @@ class CommitRepo:
         )
 
     def dry_run(self) -> Result:
-        return run_alr("-t", str(self.tasks_path), "--dry-run", "--commit")
+        return run_alr("-d", str(self.tasks_path.parent), "--dry-run", "--commit")
 
     def git(self, *args: str) -> str:
         done = subprocess.run(

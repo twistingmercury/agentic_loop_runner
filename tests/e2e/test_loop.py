@@ -105,6 +105,36 @@ def test_loop_failed_task_refuses_to_run(tmp_path: Path, fake_claude: Path) -> N
     assert_no_tmp_file(tasks_path)
 
 
+def test_loop_reset_failed_runs_the_failed_task_without_a_word(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_yaml = (
+        shared_block("Body.")
+        + """tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+    state: failed
+    error: boom
+"""
+    )
+    tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
+    record_file = tmp_path / "record.ndjson"
+
+    res = run_alr(
+        *run_args(tasks_path),
+        "--reset-failed",
+        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
+    )
+
+    assert res.code == 0, res
+    assert "reset" not in res.out.lower()
+    assert "failed" not in res.out.lower()
+    assert len(fake_claude_records(record_file)) == 1
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
+    assert_no_tmp_file(tasks_path)
+
+
 def test_loop_stops_on_first_failure(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
     record_file = tmp_path / "record.ndjson"
@@ -162,7 +192,7 @@ def test_loop_claude_missing_from_path(tmp_path: Path) -> None:
     ],
 )
 def test_removed_flag_rejected(flag: str) -> None:
-    """Without the unknown-flag line and exit code 2, a returning flag would pass as a missing --tasks."""
+    """Without the unknown-flag line and exit code 2, a returning flag would pass as a missing --dir."""
     res = run_alr(flag)
 
     assert res.code == 2, res

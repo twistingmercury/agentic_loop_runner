@@ -1,0 +1,50 @@
+# Template for tasks.yaml. SKILL.md holds the field rules and task-scoping
+# guidance; this header covers only how to fill in this file.
+#
+# - Replace every GENERATE_* token. Copy the task entry once per task.
+# - The shared prompt below covers the project, the task-file rule, and the
+#   result line contract; put only task-specific content in each task's `prompt`.
+# - Leave `state` empty; Gralph reads an empty state as pending.
+# - Comments are not passed to the agent, so drop this header from the
+#   generated file.
+shared:
+  prompt: |
+    ## Project
+
+    - Context documents: GENERATE_RELEVANT_PROJECT_DOCUMENT_PATHS_OR_NONE
+    - Build and test: GENERATE_TOOLCHAIN_BUILD_AND_TEST_COMMANDS
+    - Commits: GENERATE_COMMIT_RULES_OR_DO_NOT_COMMIT
+    - Never edit or commit `tasks.yaml`.
+
+    ## Finish
+
+    The last non-blank line of your output must be this JSON object, on a single
+    line, with nothing else on that line:
+
+    {"state": "completed", "error": ""}
+
+    If the task did not succeed, use `"state": "failed"` and a one-line `error`.
+tasks:
+  - id: 1
+    name: "GENERATE_SHORT_TASK_TITLE"
+    state: ""
+    prompt: |
+      Objective:
+      GENERATE_ONE_SENTENCE_DELIVERABLE_AND_PROJECT_CONTEXT
+
+      Scope and files:
+      - GENERATE_EXACT_SOURCE_OR_SUPPORTING_PATHS_AND_ALLOWED_CHANGES
+      - GENERATE_RELEVANT_DEPENDENCIES_CONSTRAINTS_AND_NON_GOALS
+
+      Steps:
+      1. GENERATE_BOUNDED_IMPLEMENTATION_ACTIONS_FOR_THIS_DELIVERABLE
+      2. GENERATE_TASK_SPECIFIC_CLEANUP_OR_OMIT_THIS_STEP
+
+      Verification:
+      - Working directory: GENERATE_ACTUAL_VERIFICATION_DIRECTORY
+      - Project checks: GENERATE_PROJECT_TEST_LINT_AND_BUILD_COMMANDS
+      - Task checks: GENERATE_TASK_SPECIFIC_COMMANDS_OR_NONE
+      - Expected outcome: GENERATE_OBSERVABLE_SUCCESS_CONDITION
+
+      Completion criteria:
+      - GENERATE_CONCRETE_DELIVERED_BEHAVIOR_AND_RELEVANT_ACCEPTANCE_CHECKS

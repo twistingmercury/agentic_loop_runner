@@ -7,7 +7,7 @@ help: ## Show this help
 	@echo ""
 
 test: analyze ## Run analyze, then the unit tests (e2e runs in a container: make e2e)
-	uv run pytest tests/unit
+	uv run pytest -n auto tests/unit
 
 analyze: ## Runs formatting and linting
 	uv run ruff format

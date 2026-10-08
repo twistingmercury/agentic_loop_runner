@@ -42,29 +42,56 @@ tasks:
 
 ```sh
 # Validate the task file only; launches no agent and changes no files.
-alr -t tasks.yaml --dry-run
+alr -d .local/feature --dry-run
 
 # Run the tasks, with Claude in its sandbox.
-alr -t tasks.yaml --sandbox-settings sandbox.json
+alr -d .local/feature --sandbox-settings ~/sandbox.json
 
 # Run a folder that holds tasks.yaml and sandbox.json, and commit each task.
 alr -d .local/feature --commit
+
+# Install the bundled task-file skill into ~/.claude/skills and exit.
+alr --install-skill
 ```
+
+In a terminal, `alr` opens a full-screen view: a settings strip (Commit and
+Logging dropdowns, which lock once a run starts), a menu row, three panes (tasks and gates
+and commits on top, activity across the full width below), and dialogs that ask for whatever the flags and the
+task file leave open (run folder, permissions, gates). Nothing runs, and nothing is
+written, until you press Start. It is keyboard-driven and never captures the mouse:
+the menu button names show their keys (there is no footer): `s` starts a run (the button
+then reads `Stop (^c)`), Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
+and gates dialogs (Folder, Permissions, Reset, and Quit grey out during a run), `r` resets failed tasks to pending (after you confirm), `t` and `x`
+show `tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a dialog. The Gates
+button does nothing while a run is going. The Task pane shows only the last 5,000 lines of a
+task, with no warning; the run log keeps every line. Inside a git work tree the
+view always commits, per task by default (outside one it runs without commits and says
+so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
+`--plain`, a non-terminal, or `--dry-run` for plain output.
 
 | Flag                        | Short | Description                                                                              |
 | --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
-| `--tasks <path>`            | `-t`  | The task file. Required unless `--dir` gives it                                          |
-| `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`          |
+| `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
 | `--dry-run`                 |       | Validate and report only                                                                 |
 | `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--skip-permissions`        |       | Run sessions with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json`  |
 | `--commit`                  |       | Commit each completed task after its gates pass                                          |
+| `--reset-failed`            |       | Set every failed task back to pending before the run, without asking                     |
+| `--commit-after-all`        |       | Commit once after the last task completes; a failed or stopped run makes no commit       |
+| `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
+| `--plain`                   |       | Use plain output instead of the full-screen view                                         |
 | `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
 | `--version`                 | `-v`  | Print the version                                                                        |
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
-`--skip-permissions`. `--no-tui` is accepted and does nothing yet, and `--log-dir` is
-refused until the full-screen view exists.
+`--skip-permissions`; the full-screen view asks in a dialog when neither is given.
+`--commit` and `--commit-after-all` cannot be used together.
+
+A real run logs to `<folder>/logs/<timestamp>/` in both modes (a dry run writes nothing).
+Plain mode always logs; the full-screen view has a Logging dropdown, on by default. When the
+run commits, git must ignore `logs/`, or the run will not start. If two runs start in the
+same second, the later one's folder gets a `-1` suffix (then `-2`); `alr` does not report the
+final folder name back. The git check looks at the plain folder name.
 
 ## How it works
 
@@ -99,7 +126,7 @@ Requires Python >= 3.12 and [uv](https://docs.astral.sh/uv/). The e2e tests need
 
 ```sh
 uv sync
-uv run alr -t path/to/tasks.yaml --dry-run
+uv run alr -d path/to/run-folder --dry-run
 ```
 
 ### Testing
@@ -111,6 +138,10 @@ make e2e       # run the e2e tests against the wheel already in dist/
 make analyze   # format and auto-fix lint findings
 make help      # list available targets
 ```
+
+`make test` runs the unit tests in parallel with `pytest-xdist` (`-n auto`), and so does the Docker build. To run them
+one at a time, which is the way to use a debugger, use `uv run pytest -n 0 tests/unit` (or point it at one test file or
+use `-k`). A `tasks.yaml` gate may use `uv run pytest -n auto tests/unit`.
 
 ### Versioning
 

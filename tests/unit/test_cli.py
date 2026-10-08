@@ -4,15 +4,19 @@ import asyncio
 import contextlib
 import os
 import signal
+import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from helpers import gone_within, start_alr, wait_for_file
 
 from alr import cli
 from alr.engine import proc
+from alr.engine.commit import CommitMode
 from alr.errors import AlrError, SandboxError, UsageError
+from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
     "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
@@ -99,17 +103,6 @@ def test_check_gate_timeout_errors(value: str, want: str) -> None:
     assert want in str(caught.value)
 
 
-# Go's rows with plain false are not ported: alr has no full-screen view.
-@pytest.mark.parametrize(
-    ("log_dir", "dry_run"),
-    [
-        pytest.param("logs", True, id="dry run ignores it"),
-    ],
-)
-def test_check_log_dir_accepted(log_dir: str, dry_run: bool) -> None:
-    cli.check_log_dir(log_dir, dry_run)
-
-
 @pytest.fixture
 def folder(tmp_path: Path) -> Path:
     """A run folder holding only the task file."""
@@ -119,8 +112,12 @@ def folder(tmp_path: Path) -> Path:
     return path
 
 
-def test_resolve_dir_flag_wins_over_the_folder(folder: Path) -> None:
-    assert cli.resolve_dir(str(folder), "other.yaml") == "other.yaml"
+def test_resolve_dir_without_a_folder_gives_no_path() -> None:
+    assert cli.resolve_dir("") == ""
+
+
+def test_resolve_dir_names_the_folders_task_file(folder: Path) -> None:
+    assert cli.resolve_dir(str(folder)) == str(folder / "tasks.yaml")
 
 
 def test_version_prints_one_line(capsys: pytest.CaptureFixture[str]) -> None:
@@ -137,7 +134,7 @@ def test_missing_required_flags_are_each_named(
     assert cli.main([]) == 1
 
     err = capsys.readouterr().err
-    assert err.startswith("error: required flag --tasks not set\n")
+    assert err.startswith("error: required flag --dir not set\n")
     assert err.count("required flag") == 1
 
 
@@ -146,7 +143,7 @@ def test_prompt_flag_is_an_unknown_argument(
     flag: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.main([flag, "x", "-t", "t.yaml", "--dry-run"])
+        cli.main([flag, "x", "--dry-run"])
 
     assert exit_info.value.code == 2
     err = capsys.readouterr().err
@@ -154,11 +151,32 @@ def test_prompt_flag_is_an_unknown_argument(
     assert "required flag" not in err
 
 
+def test_no_tui_flag_is_an_unknown_argument(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--no-tui", "--dry-run"])
+
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --no-tui" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["-t", "--tasks"])
+def test_tasks_flag_is_an_unknown_argument(
+    flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([flag, str(folder / "tasks.yaml"), "--dry-run"])
+
+    assert exit_info.value.code == 2
+    assert f"unrecognized arguments: {flag}" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("flag", ["-d", "--dir"])
 def test_dir_with_only_tasks_yaml_dry_runs(
     flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main([flag, str(folder), "--dry-run", "--no-tui"]) == 0
+    assert cli.main([flag, str(folder), "--dry-run", "--plain"]) == 0
     assert f"{folder / 'tasks.yaml'} is valid" in capsys.readouterr().out
 
 
@@ -167,11 +185,13 @@ def test_dir_with_only_tasks_yaml_runs(folder: Path) -> None:
     assert cli.main(["-d", str(folder), "--skip-permissions"]) == 0
 
 
-def test_both_permission_flags_are_refused(capsys: pytest.CaptureFixture[str]) -> None:
+def test_both_permission_flags_are_refused(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     code = cli.main(
         [
-            "-t",
-            "t.yaml",
+            "-d",
+            str(folder),
             "--sandbox-settings",
             "s.json",
             "--skip-permissions",
@@ -182,23 +202,27 @@ def test_both_permission_flags_are_refused(capsys: pytest.CaptureFixture[str]) -
     assert capsys.readouterr().err == f"error: {BOTH_PERMISSIONS}\n"
 
 
-def test_a_real_run_needs_a_permission_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["-t", "t.yaml"]) == 1
+def test_a_real_run_needs_a_permission_flag(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["-d", str(folder)]) == 1
     assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
 
 
-def test_log_dir_is_refused_on_a_real_run(capsys: pytest.CaptureFixture[str]) -> None:
-    code = cli.main(["-t", "t.yaml", "--skip-permissions", "--log-dir", "logs"])
+def test_log_dir_flag_is_an_unknown_argument(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["-d", str(folder), "--skip-permissions", "--log-dir", "logs"])
 
-    assert code == 1
-    assert (
-        "error: --log-dir only works with the full-screen view"
-        in capsys.readouterr().err
-    )
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --log-dir" in capsys.readouterr().err
 
 
-def test_empty_gate_timeout_is_bad(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["-t", "t.yaml", "--dry-run", "--gate-timeout", ""]) == 1
+def test_empty_gate_timeout_is_bad(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", ""]) == 1
     assert f"error: {BAD_DURATION}" in capsys.readouterr().err
 
 
@@ -216,25 +240,19 @@ def test_startup_checks_run_in_gralphs_order(
 def test_a_run_error_is_one_error_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    missing = tmp_path / "missing.yaml"
+    # A task file that cannot be read: a folder where tasks.yaml should be.
+    (tmp_path / "tasks.yaml").mkdir()
 
-    assert cli.main(["-t", str(missing), "--dry-run"]) == 1
+    assert cli.main(["-d", str(tmp_path), "--dry-run"]) == 1
 
     err = capsys.readouterr().err
     assert err.startswith("error: ")
     assert err.count("\n") == 1
 
 
-def test_install_skill_is_not_a_flag() -> None:
-    with pytest.raises(SystemExit) as exit_info:
-        cli.main(["--install-skill"])
-
-    assert exit_info.value.code == 2
-
-
 def test_flag_prefixes_are_not_expanded() -> None:
     with pytest.raises(SystemExit):
-        cli.main(["--dry", "-t", "t.yaml"])
+        cli.main(["--dry", "-d", "x"])
 
 
 def test_a_stop_with_no_task_running_is_one_error_line(
@@ -255,7 +273,7 @@ def test_sigint_during_the_startup_checks_is_one_error_line(
 
     monkeypatch.setattr(cli, "resolve_dir", interrupted)
 
-    assert cli.main(["-t", "t.yaml", "--dry-run"]) == 1
+    assert cli.main(["-d", "x", "--dry-run"]) == 1
     assert capsys.readouterr().err == "error: interrupted\n"
 
 
@@ -270,7 +288,7 @@ def test_a_signal_leaves_no_traceback_and_no_change(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = start_alr("-t", str(tasks_file), "--skip-permissions")
+    process = start_alr("-d", str(tmp_path), "--skip-permissions")
     try:
         claude_pid = int(wait_for_file(ready))
         process.send_signal(stop)
@@ -304,7 +322,7 @@ def test_a_second_signal_does_not_leave_git_running(
     hook.write_text(f"#!/bin/sh\ntrap '' TERM\necho $$ > '{ready}'\nexec sleep 60\n")
     hook.chmod(0o700)
 
-    process = start_alr("-t", str(tasks_file), "--skip-permissions", "--commit")
+    process = start_alr("-d", str(tasks_file.parent), "--skip-permissions", "--commit")
     hook_pid = 0
     try:
         hook_pid = int(wait_for_file(ready))
@@ -331,7 +349,12 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     seen: list[list[str]] = []
 
     async def fake_start(
-        tasks_file: str, gate_timeout: str, session: list[str], commit: bool
+        tasks_file: str,
+        gate_timeout: str,
+        session: list[str],
+        commit: CommitMode | None,
+        reset_failed: bool,
+        sandbox_settings: str = "",
     ) -> None:
         seen.append(session)
 
@@ -351,16 +374,6 @@ def test_the_folders_sandbox_json_sandboxes_the_run(
     _add_sandbox(folder)
 
     assert cli.main(["-d", str(folder)]) == 0
-    assert sessions == [SANDBOXED]
-
-
-def test_the_folders_sandbox_json_still_applies_with_tasks(
-    folder: Path, sessions: list[list[str]]
-) -> None:
-    _add_sandbox(folder)
-    tasks = folder / "tasks.yaml"
-
-    assert cli.main(["-d", str(folder), "-t", str(tasks)]) == 0
     assert sessions == [SANDBOXED]
 
 
@@ -400,11 +413,22 @@ def test_a_bad_folder_file_fails_and_never_runs_unsandboxed(
 
 
 def test_an_unreadable_folder_file_fails(
-    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _add_sandbox(folder).chmod(0)
-    if os.access(folder / "sandbox.json", os.R_OK):
-        pytest.skip("permissions are not enforced for this user")
+    _add_sandbox(folder)
+    read_text = Path.read_text
+
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> str:
+        # chmod 0 would not stop root, so the refusal is made here instead.
+        if self.name == "sandbox.json":
+            raise PermissionError(13, "Permission denied")
+
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", refuse)
 
     assert cli.main(["-d", str(folder)]) == 1
     assert sessions == []
@@ -421,16 +445,6 @@ def test_no_folder_file_keeps_the_neither_flag_error(
     assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
 
 
-def test_tasks_alone_ignores_a_neighboring_sandbox_json(
-    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
-) -> None:
-    _add_sandbox(folder)
-
-    assert cli.main(["-t", str(folder / "tasks.yaml")]) == 1
-    assert sessions == []
-    assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
-
-
 def test_dry_run_names_the_folders_sandbox_json(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -438,3 +452,238 @@ def test_dry_run_names_the_folders_sandbox_json(
 
     assert cli.main(["-d", str(folder), "--dry-run"]) == 0
     assert f"sandbox settings: {folder}/sandbox.json" in capsys.readouterr().out
+
+
+def test_commit_and_commit_after_all_together_exit_1(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    (tmp_path / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+
+    code = cli.main(
+        ["-d", str(tmp_path), "--skip-permissions", "--commit", "--commit-after-all"]
+    )
+
+    assert code == 1
+    assert (
+        "--commit and --commit-after-all cannot be used together"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    ("flags", "want"),
+    [
+        ([], None),
+        (["--commit"], CommitMode.PER_TASK),
+        (["--commit-after-all"], CommitMode.AFTER_ALL),
+    ],
+)
+def test_check_commit_flags_maps_the_flags_to_a_mode(
+    flags: list[str], want: CommitMode | None
+) -> None:
+    args = cli._parser().parse_args(flags)
+
+    assert cli.check_commit_flags(args.commit, args.commit_after_all) is want
+
+
+@pytest.mark.parametrize(
+    ("flags", "tty", "want"),
+    [
+        ([], True, True),
+        ([], False, False),
+        (["--plain"], True, False),
+        (["--dry-run"], True, False),
+    ],
+    ids=["terminal", "no terminal", "--plain", "--dry-run"],
+)
+def test_wants_tui(
+    flags: list[str], tty: bool, want: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+
+    assert cli.wants_tui(cli._parser().parse_args(flags)) is want
+
+
+def _capture_view(monkeypatch: pytest.MonkeyPatch) -> list[RunSettings]:
+    seen: list[RunSettings] = []
+
+    def run_app(settings: RunSettings) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr("alr.cli.wants_tui", lambda args: True)
+    monkeypatch.setattr("alr.cli.run_app", run_app)
+    return seen
+
+
+def test_the_view_gets_the_resolved_flags(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+    _add_sandbox(folder)
+
+    code = cli.main(["-d", str(folder), "--commit-after-all", "--gate-timeout", "5m"])
+
+    assert code == 0
+    assert seen[0].tasks_file == str(folder / "tasks.yaml")
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].sandbox_file == str(folder / "sandbox.json")
+    assert seen[0].commit_mode is CommitMode.AFTER_ALL
+    assert seen[0].gate_timeout == "5m"
+
+
+def test_the_view_defaults_to_a_commit_per_task_and_takes_skip(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--skip-permissions"])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.SKIP
+    assert seen[0].commit_mode is CommitMode.PER_TASK
+
+
+def test_the_view_asks_for_a_missing_dir_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    assert cli.main([]) == 0
+    assert seen[0].tasks_file == ""
+    assert seen[0].permissions is Permissions.UNSET
+
+
+def test_the_view_still_refuses_both_permission_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: Path,
+    settings: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(
+        ["-d", str(folder), "--sandbox-settings", settings, "--skip-permissions"]
+    )
+
+    assert code == 1
+    assert BOTH_PERMISSIONS in capsys.readouterr().err
+    assert seen == []
+
+
+def test_the_view_still_checks_a_given_settings_file(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = _capture_view(monkeypatch)
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+
+    code = cli.main(["-d", str(folder), "--sandbox-settings", str(bad)])
+
+    assert code == 1
+    assert capsys.readouterr().err.startswith("error: ")
+    assert seen == []
+
+
+def test_install_skill_prints_the_path_and_exits_0(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    code = cli.main(["--install-skill"])
+
+    assert code == 0
+    assert capsys.readouterr().out.strip() == str(
+        tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+    )
+
+
+def test_install_skill_reports_a_folder_it_cannot_write(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".claude").write_text("a file, not a folder", encoding="utf-8")
+
+    code = cli.main(["--install-skill"])
+
+    assert code == 1
+    assert capsys.readouterr().err.startswith("error: ")
+
+
+@pytest.mark.parametrize("extra", [[], ["--plain"]], ids=["view", "plain"])
+def test_reset_failed_with_dry_run_is_a_usage_error(
+    folder: Path, capsys: pytest.CaptureFixture[str], extra: list[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--dry-run", "--reset-failed", *extra])
+
+    assert code == 1
+    assert capsys.readouterr().err == (
+        "error: --reset-failed cannot be used with --dry-run (a dry run writes nothing)\n"
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_plain_run_with_reset_failed_runs_a_failed_task(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tasks = folder / "tasks.yaml"
+    tasks.write_text(
+        ONE_TASK_YAML.replace("prompt: p\n", "prompt: p\n    state: failed\n"),
+        encoding="utf-8",
+    )
+
+    code = cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
+
+    assert code == 0
+    assert "failed" not in capsys.readouterr().out
+    assert "state: completed" in tasks.read_text(encoding="utf-8")
+
+
+def test_a_plain_run_without_reset_failed_still_refuses_a_failed_task(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folder / "tasks.yaml").write_text(
+        ONE_TASK_YAML.replace("prompt: p\n", "prompt: p\n    state: failed\n"),
+        encoding="utf-8",
+    )
+
+    code = cli.main(["-d", str(folder), "--skip-permissions"])
+
+    assert code == 1
+    assert "Some tasks failed previous runs:" in capsys.readouterr().out
+
+
+def test_the_view_gets_the_reset_failed_flag(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    cli.main(["-d", str(folder), "--skip-permissions", "--reset-failed"])
+
+    assert seen[0].reset_failed is True
+
+
+@pytest.mark.parametrize(
+    ("placeholder", "usage_token", "help_option"),
+    [
+        ("DIR", "[-d]", "-d, --dir "),
+        ("GATE_TIMEOUT", "[--gate-timeout]", "--gate-timeout "),
+        ("SANDBOX_SETTINGS", "[--sandbox-settings]", "--sandbox-settings "),
+    ],
+)
+def test_value_flags_show_no_placeholder_in_the_help(
+    placeholder: str, usage_token: str, help_option: str
+) -> None:
+    parser = cli._parser()
+
+    usage = parser.format_usage()
+    help_text = parser.format_help()
+
+    assert placeholder not in usage
+    assert placeholder not in help_text
+    assert usage_token in usage
+    assert help_option in help_text

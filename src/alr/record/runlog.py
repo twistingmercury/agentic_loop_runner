@@ -12,9 +12,8 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from alr.durations import format_duration
-from alr.engine.gates import first_line
 from alr.errors import RunLogError
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,
@@ -71,6 +70,33 @@ def _io_error(path: Path, exc: OSError) -> RunLogError:
     return RunLogError(f"{path}: {exc.strerror}")
 
 
+def _create_run_dir(path: Path) -> Path:
+    """Make the run's folder, taking the first free suffixed name when path
+    exists: an existing run folder holds another run's record."""
+    try:
+        path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _create_error(path, exc) from exc
+
+    candidate = path
+    attempt = 0
+    while True:
+        try:
+            candidate.mkdir(mode=_DIR_MODE)
+        except FileExistsError:
+            attempt += 1
+            candidate = path.with_name(f"{path.name}-{attempt}")
+            continue
+        except OSError as exc:
+            raise _create_error(candidate, exc) from exc
+
+        return candidate
+
+
+def _create_error(path: Path, exc: OSError) -> RunLogError:
+    return RunLogError(f"cannot create the run log folder {path}: {exc.strerror}")
+
+
 def _not_open(path: Path) -> RunLogError:
     return RunLogError(f"{path}: the run log is not open")
 
@@ -120,14 +146,9 @@ class RunLog:
         info: Info,
         now: Callable[[], datetime] = _local_now,
     ) -> "RunLog":
-        """Create path, which must not exist, and start the ledger with the
-        run_started line."""
-        try:
-            path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
-            # Not exist_ok: an existing run folder holds another run's record.
-            path.mkdir(mode=_DIR_MODE)
-        except OSError as exc:
-            raise _io_error(path, exc) from exc
+        """Create path, or path-1, path-2 and so on when it exists, and start the
+        ledger with the run_started line."""
+        path = _create_run_dir(path)
 
         log = cls(path, now)
         try:
@@ -205,11 +226,26 @@ class RunLog:
 
     def _activity(self, event: Activity) -> None:
         clock = self._now().strftime("%H:%M:%S")
-        _write(
-            self._detail,
-            self._detail_path or self._path,
-            f"{clock} {event.line}\n",
-        )
+        text = f"{clock} {event.line}\n"
+        if self._detail is not None or self._detail_path is None:
+            _write(self._detail, self._detail_path or self._path, text)
+            return
+
+        self._append_after_finish(self._detail_path, text)
+
+    def _append_after_finish(self, detail_path: Path, text: str) -> None:
+        """Add a line to the file of a task that already finished.
+
+        The commit after all tasks reports on the last task once it is done.
+        """
+        if self._ledger is None:
+            raise _not_open(self._ledger_path)
+
+        file = _open_append(detail_path)
+        try:
+            _write(file, detail_path, text)
+        finally:
+            _close(file, detail_path)
 
     def _step_finished(self, event: str, task: Task, seconds: float) -> None:
         fields: dict[str, Any] = {"task": task.id, "state": task.state}
@@ -224,7 +260,8 @@ class RunLog:
             "gate_finished",
             {
                 "task": event.task.id,
-                "cmd": first_line(event.gate.cmd),
+                # First line only, as the engine quotes it; record cannot import the engine.
+                "cmd": event.gate.cmd.split("\n", 1)[0],
                 "result": _gate_result(event),
                 "timeout": event.limit,
                 "duration": format_duration(event.seconds),

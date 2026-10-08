@@ -130,7 +130,7 @@ async def test_gentle_finish_cuts_off_a_drain_held_open_by_a_background_process(
     monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
     pid_file = tmp_path / "holder.pid"
     process = await proc.start(
-        ["sh", "-c", f"sleep 3 & echo $! > {pid_file}; echo line"],
+        ["sh", "-c", f"sleep 30 & echo $! > {pid_file}; echo line"],
         stdout=asyncio.subprocess.PIPE,
     )
     assert process.stdout is not None
@@ -155,9 +155,9 @@ async def test_cancel_returns_when_an_escaped_descendant_holds_the_pipe(
 ) -> None:
     pid_file = tmp_path / "escaped.pid"
     # setsid takes the sleeper out of the group the stop kills, and it keeps
-    # the stdout pipe; short, so a failing run cleans up on its own.
+    # the stdout pipe; the test kills it, and it outlasts a loaded machine.
     process = await proc.start(
-        ["sh", "-c", f"setsid sleep 3 & echo $! > {pid_file}; sleep 60"],
+        ["sh", "-c", f"setsid sleep 30 & echo $! > {pid_file}; sleep 60"],
         stdout=asyncio.subprocess.PIPE,
     )
     assert process.stdout is not None

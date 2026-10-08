@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from alr.engine.commit import Repo, commit
+from alr.engine.commit import CommitMode, Repo, commit, commit_all
 from alr.engine.frontend import FrontEnd
 from alr.engine.gates import run_gates
 from alr.engine.result import last_result_line, outcome
@@ -18,7 +18,16 @@ from alr.errors import (
     TaskFileError,
     quote,
 )
-from alr.tasks import COMPLETED, FAILED, Gate, Task, TaskList, parse_tasks, save_tasks
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    Gate,
+    Task,
+    TaskList,
+    parse_tasks,
+    save_tasks,
+)
 
 __all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_tasks", "run"]
 
@@ -42,9 +51,12 @@ class RunOptions:
     repo: Repo | None = None
     """Where each completed task is committed; None for a run without --commit."""
 
+    commit_mode: CommitMode = CommitMode.PER_TASK
+    """When the repo is committed into: after each task, or once after the last."""
 
-def load_tasks(path: str) -> TaskList:
-    """Read and validate the task file; a file holding a failed task is refused."""
+
+def read_tasks(path: str) -> TaskList:
+    """Read and validate the task file, failed tasks and all."""
     try:
         # Strict: the file is saved back, and a replacement character would
         # overwrite the user's byte on the first save.
@@ -61,10 +73,34 @@ def load_tasks(path: str) -> TaskList:
     except TaskFileError as exc:
         raise TaskFileError(f"failed to parse tasks yaml: {exc}") from exc
 
+    return task_list
+
+
+def load_tasks(path: str) -> TaskList:
+    """Read the task file for a run; a file holding a failed task is refused."""
+    task_list = read_tasks(path)
     if any(task.state == FAILED for task in task_list.tasks):
         raise FailedTasksError(task_list)
 
     return task_list
+
+
+def reset_failed(tasks_file: str) -> int:
+    """Set every failed task back to pending and return how many there were.
+
+    The file is rewritten only when something was reset, so a file with
+    nothing failed stays exactly as the user left it.
+    """
+    task_list = read_tasks(tasks_file)
+    failed = [task for task in task_list.tasks if task.state == FAILED]
+    if not failed:
+        return 0
+
+    for task in failed:
+        task.state, task.error = PENDING, ""
+
+    save_tasks(tasks_file, task_list)
+    return len(failed)
 
 
 async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> None:
@@ -96,12 +132,35 @@ def _error_text(exc: BaseException) -> str:
 async def _run_loop(
     task_list: TaskList, options: RunOptions, front_end: FrontEnd
 ) -> None:
+    ran: list[Task] = []
     for task in task_list.tasks:
         if task.state == COMPLETED:
             front_end.task_skipped(task)
             continue
 
         await _run_and_save(task, task_list, options, front_end)
+        ran.append(replace(task))
+
+    await _commit_after_all(ran, options, front_end)
+
+
+async def _commit_after_all(
+    ran: Sequence[Task], options: RunOptions, front_end: FrontEnd
+) -> None:
+    """Commit the whole run once; a failed run never gets here, so its work stays in the tree."""
+    if options.repo is None or options.commit_mode is not CommitMode.AFTER_ALL:
+        return
+
+    if not ran:
+        return
+
+    try:
+        error = await commit_all(options.repo, ran, front_end)
+    except asyncio.CancelledError:
+        raise RunCancelledError("stopped during the final commit") from None
+
+    if error is not None:
+        raise RunError(f"commit failed: {error}")
 
 
 async def _run_and_save(
@@ -153,7 +212,8 @@ async def _run_task(
     state, error = await run_gates(
         replace(task), gates, options.gate_timeout, front_end
     )
-    if state != COMPLETED or options.repo is None:
+    per_task = options.commit_mode is CommitMode.PER_TASK
+    if state != COMPLETED or options.repo is None or not per_task:
         return state, error
 
     try:

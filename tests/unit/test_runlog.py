@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from alr.errors import RunLogError
-from alr.stream.events import (
+from alr.record.events import (
     Activity,
     Committed,
     Event,
@@ -21,7 +21,7 @@ from alr.stream.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.stream.runlog import Info, RunLog, run_dir
+from alr.record.runlog import Info, RunLog, run_dir
 from alr.tasks import COMPLETED, FAILED, Gate, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'
@@ -120,14 +120,41 @@ def test_time_with_a_zero_offset_is_written_as_z(tmp_path: Path) -> None:
 
 
 # Two runs started in the same second get the same folder name; the second
-# must not write into the first one's record.
-def test_open_existing_run_folder_is_an_error(opened: tuple[RunLog, Path]) -> None:
-    _, path = opened
+# takes a suffixed folder and never writes into the first one's record.
+def test_open_existing_run_folder_gets_a_suffixed_folder(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    before = ledger_lines(path)
 
-    with pytest.raises(RunLogError):
+    second = RunLog.open(path, INFO, now=fixed_now)
+    third = RunLog.open(path, INFO, now=fixed_now)
+    second.close()
+    third.close()
+
+    assert ledger_lines(path) == before, "the first run's folder is untouched"
+    assert len(ledger_lines(path.with_name(path.name + "-1"))) == 1
+    assert len(ledger_lines(path.with_name(path.name + "-2"))) == 1
+    assert sorted(p.name for p in path.parent.iterdir()) == [
+        path.name,
+        path.name + "-1",
+        path.name + "-2",
+    ]
+
+
+def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None:
+    # A file where a folder should be fails the same way for every user, root
+    # included, which a read-only folder does not.
+    blocker = tmp_path / "logs"
+    blocker.write_text("a file, not a folder", encoding="utf-8")
+    path = blocker / "nested" / "20261001T140211"
+
+    with pytest.raises(RunLogError) as raised:
         RunLog.open(path, INFO, now=fixed_now)
 
-    assert len(ledger_lines(path)) == 1
+    assert str(raised.value) == (
+        f"cannot create the run log folder {path}: Not a directory"
+    )
 
 
 def test_open_log_dir_under_a_file_is_an_error(tmp_path: Path) -> None:
@@ -420,6 +447,25 @@ def test_record_after_close_is_an_error_and_opens_no_detail_file(
         log.record(event)
 
     assert not (path / "task-1.log").exists()
+
+
+def test_record_activity_after_the_task_finished_appends_to_its_detail_file(
+    opened: tuple[RunLog, Path],
+) -> None:
+    # The after-all commit reports its marker on the last task, once that task is done.
+    log, path = opened
+    record(
+        log,
+        TaskStarted(FIRST),
+        Activity(FIRST, "working"),
+        TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
+        Activity(FIRST, "→ commit First"),
+    )
+
+    assert read_lines(path / "task-1.log") == [
+        "14:02:11 working",
+        "14:02:11 → commit First",
+    ]
 
 
 def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:

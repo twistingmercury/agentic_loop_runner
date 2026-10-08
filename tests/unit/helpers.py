@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ import pytest
 
 from alr import tasks
 from alr.engine import loop
-from alr.engine.commit import Repo
+from alr.engine.commit import CommitMode, Repo
 from alr.engine.frontend import FrontEnd
 from alr.engine.sandbox import bypass_args
 from alr.errors import RunCancelledError
@@ -80,6 +81,7 @@ async def run_loop(
     session_args: list[str] | None = None,
     repo: Repo | None = None,
     front_end: FrontEnd | None = None,
+    commit_mode: CommitMode = CommitMode.PER_TASK,
 ) -> None:
     """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(
@@ -87,6 +89,7 @@ async def run_loop(
         gate_timeout=gate_timeout,
         session_args=bypass_args() if session_args is None else session_args,
         repo=repo,
+        commit_mode=commit_mode,
     )
     await loop.run(
         task_list, options, PlainFrontEnd() if front_end is None else front_end
@@ -121,6 +124,10 @@ def wait_for_file(path: Path, timeout: float = 10) -> str:
 
 async def wait_for_text(path: Path, timeout: float = 5) -> str:
     """Wait for a child to write something to path and return it."""
+    # Always yield once: when the file is already there, a task the caller just
+    # created would otherwise never get to run before the caller cancels it,
+    # and cancelling a task that has not started stops nothing it would start.
+    await asyncio.sleep(0)
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         if text := _written_text(path):
@@ -189,6 +196,22 @@ async def wait_until_gone(pid: int, timeout: float = 2) -> None:
             pytest.fail(f"process {pid} remained running")
 
         await asyncio.sleep(0.01)
+
+
+async def until(condition: Callable[[], object]) -> None:
+    """Poll until the condition is truthy, failing the test after a few seconds.
+
+    The wait yields to the event loop in small steps, so the app under test keeps
+    running, and the bound means a condition that never holds fails with a message
+    rather than hanging the run.
+    """
+    for _ in range(300):
+        if condition():
+            return
+
+        await asyncio.sleep(0.02)
+
+    pytest.fail("timed out waiting for the condition")
 
 
 def start_alr(*args: str, env: dict[str, str] | None = None) -> subprocess.Popen[str]:

@@ -55,12 +55,19 @@ def write_sandbox_settings(tmp_path: Path, content: str) -> Path:
 def run_with_flags(
     tmp_path: Path, *flags: str, tasks_yaml: str = VALID_TASKS_YAML
 ) -> SandboxRun:
-    """Run tasks_yaml with the given permission flags, the fake claude recording its argv."""
-    tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
+    """Run tasks_yaml with the given permission flags, the fake claude recording its argv.
+
+    The task file lives in a subfolder, so a settings file written into
+    tmp_path is not the run folder's own sandbox.json, which would settle the
+    permission choice by itself.
+    """
+    folder = tmp_path / "run"
+    folder.mkdir(exist_ok=True)
+    tasks_path = write_tasks_yaml(folder, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
 
     res = run_alr(
-        f"--tasks={tasks_path}",
+        f"--dir={tasks_path.parent}",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
