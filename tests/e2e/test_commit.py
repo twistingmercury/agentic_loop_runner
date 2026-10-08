@@ -1,4 +1,4 @@
-"""--commit: alr commits each task itself once the session and every gate pass.
+"""--commit task: alr commits each task itself once the session and every gate pass.
 
 The fake claude changes no files, so a gate does the "work" a commit picks up.
 """
@@ -58,7 +58,9 @@ class CommitRepo:
         )
 
     def dry_run(self) -> Result:
-        return run_alr("-d", str(self.tasks_path.parent), "--dry-run", "--commit")
+        return run_alr(
+            "-d", str(self.tasks_path.parent), "--dry-run", "--commit", "task"
+        )
 
     def git(self, *args: str) -> str:
         done = subprocess.run(
@@ -94,7 +96,7 @@ def break_repo(repo: CommitRepo) -> None:
 
 
 def test_commit_one_commit_per_completed_task(repo: CommitRepo) -> None:
-    res = repo.run("--commit")
+    res = repo.run("--commit", "task")
 
     assert res.code == 0, res
     assert repo.subjects() == ["Second task", "First task", "init"]
@@ -118,10 +120,20 @@ def test_commit_without_the_flag_git_is_never_touched(repo: CommitRepo) -> None:
     assert "commit:" not in res.out
 
 
+def test_commit_none_git_is_never_touched(repo: CommitRepo) -> None:
+    (repo.dir / "stray.txt").write_text("stray\n", encoding="utf-8")
+
+    res = repo.run("--commit", "none")
+
+    assert res.code == 0, res
+    assert repo.subjects() == ["init"]
+    assert "commit:" not in res.out
+
+
 def test_commit_dirty_tree_refuses_to_start(repo: CommitRepo) -> None:
     (repo.dir / "stray.txt").write_text("stray\n", encoding="utf-8")
 
-    res = repo.run("--commit")
+    res = repo.run("--commit", "task")
 
     assert res.code == 1, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
@@ -135,6 +147,7 @@ def test_commit_task_file_git_can_see_is_refused(repo: CommitRepo) -> None:
     res = run_alr(
         *run_args(visible),
         "--commit",
+        "task",
         env={"FAKECLAUDE_RECORD_FILE": str(repo.record_file)},
     )
 
@@ -150,7 +163,7 @@ def test_commit_task_file_git_can_see_is_refused(repo: CommitRepo) -> None:
 def test_commit_broken_repository_is_an_error_run(repo: CommitRepo) -> None:
     break_repo(repo)
 
-    res = repo.run("--commit")
+    res = repo.run("--commit", "task")
 
     assert res.code == 1, res
     assert BROKEN_REPO_ERROR in res.err
@@ -180,7 +193,7 @@ def test_commit_failed_gate_leaves_no_commit_and_blocks_the_rerun(
     )
     repo = new_commit_repo(git_repo, tasks_yaml)
 
-    res = repo.run("--commit")
+    res = repo.run("--commit", "task")
 
     assert res.code != 0, res
     assert repo.subjects() == ["init"]
@@ -190,7 +203,7 @@ def test_commit_failed_gate_leaves_no_commit_and_blocks_the_rerun(
     # A person resets the task to pending without cleaning up: the next
     # --commit run must refuse the leftovers.
     repo.tasks_path.write_text(tasks_yaml, encoding="utf-8")
-    again = repo.run("--commit")
+    again = repo.run("--commit", "task")
 
     assert again.code == 1, again
     assert f"{DIRTY_TREE_ERROR}\n?? one.txt\n" in again.err
@@ -203,7 +216,7 @@ def test_commit_rejected_commit_fails_the_task(repo: CommitRepo) -> None:
     hook.write_text("#!/bin/sh\necho hook-says-no >&2\nexit 1\n", encoding="utf-8")
     hook.chmod(0o700)
 
-    res = repo.run("--commit")
+    res = repo.run("--commit", "task")
 
     assert res.code != 0, res
     assert "hook-says-no" in res.err
@@ -233,7 +246,7 @@ def test_commit_hook_output_is_in_the_task_log(
     hook.write_text("#!/bin/sh\necho hook-said-this\n", encoding="utf-8")
     hook.chmod(0o700)
 
-    res = repo.run("--commit")
+    res = repo.run("--commit", "task")
 
     assert res.code == 0, res
     assert repo.subjects() == ["First task", "init"]
@@ -252,6 +265,7 @@ def test_commit_outside_a_repository_runs_without_committing(
     res = run_alr(
         *run_args(tasks_path),
         "--commit",
+        "task",
         cwd=folder,
         # Stops git from finding a repository above the folder.
         env={

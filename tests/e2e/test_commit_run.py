@@ -1,4 +1,4 @@
-"""--commit-after-all: alr makes one commit for the whole run, after the last task completes.
+"""--commit run: alr makes one commit for the whole run, after the last task completes.
 
 The fake claude changes no files, so a gate does the "work" a commit picks up.
 """
@@ -18,8 +18,6 @@ from e2e_helpers import (
     task_states,
     write_tasks_yaml,
 )
-
-BOTH_FLAGS_ERROR = "--commit and --commit-after-all cannot be used together"
 
 # The one gate picks its file by what the first task left behind, so the two
 # tasks leave two files for the single commit to pick up.
@@ -52,10 +50,10 @@ def run_with(tasks_path: Path, *flags: str) -> Result:
     return run_alr(*run_args(tasks_path), *flags)
 
 
-def test_commit_after_all_makes_one_commit_for_the_run(
+def test_commit_run_makes_one_commit_for_the_run(
     git_repo: Path, tasks_path: Path
 ) -> None:
-    res = run_with(tasks_path, "--commit-after-all")
+    res = run_with(tasks_path, "--commit", "run")
 
     assert res.code == 0, res
     assert git(git_repo, "log", "--format=%s").splitlines() == [
@@ -66,11 +64,38 @@ def test_commit_after_all_makes_one_commit_for_the_run(
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed", 2: "completed"}
 
 
-def test_commit_and_commit_after_all_together_is_a_usage_error(
+def test_commit_after_all_is_an_unknown_flag(git_repo: Path, tasks_path: Path) -> None:
+    """--commit run replaced it; exit 2 and the unknown-flag line keep the old name from coming back as an alias."""
+    res = run_with(tasks_path, "--commit-after-all")
+
+    assert res.code == 2, res
+    assert "unrecognized arguments: --commit-after-all\n" in res.err
+    assert git(git_repo, "log", "--format=%s").splitlines() == ["init"]
+
+
+def test_bare_commit_is_a_usage_error(git_repo: Path, tasks_path: Path) -> None:
+    res = run_with(tasks_path, "--commit")
+
+    assert res.code == 2, res
+    assert "argument --commit: expected one argument\n" in res.err
+    assert git(git_repo, "log", "--format=%s").splitlines() == ["init"]
+
+
+def test_commit_with_an_unknown_mode_is_a_usage_error(
     git_repo: Path, tasks_path: Path
 ) -> None:
-    res = run_with(tasks_path, "--commit", "--commit-after-all")
+    res = run_with(tasks_path, "--commit", "sometimes")
 
-    assert res.code == 1, res
-    assert f"error: {BOTH_FLAGS_ERROR}\n" in res.err
+    assert res.code == 2, res
+    assert "argument --commit: invalid choice: 'sometimes'" in res.err
+    assert "(choose from none, task, run)" in res.err
     assert git(git_repo, "log", "--format=%s").splitlines() == ["init"]
+
+
+def test_commit_followed_by_a_flag_takes_no_value(
+    git_repo: Path, tasks_path: Path
+) -> None:
+    res = run_with(tasks_path, "--commit", "--plain")
+
+    assert res.code == 2, res
+    assert "argument --commit: expected one argument\n" in res.err

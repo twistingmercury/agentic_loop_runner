@@ -76,6 +76,7 @@ def test_commit_run_with_a_log_folder_git_can_see_is_refused(
     res = run_alr(
         *run_args(tasks_path),
         "--commit",
+        "task",
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
