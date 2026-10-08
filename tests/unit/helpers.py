@@ -8,6 +8,7 @@ Test modules never import each other.
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -196,6 +197,18 @@ async def wait_until_gone(pid: int, timeout: float = 2) -> None:
             pytest.fail(f"process {pid} remained running")
 
         await asyncio.sleep(0.01)
+
+
+async def kill_holder_and_let_pipes_close(pid_file: Path) -> None:
+    """Kill the background process whose pid a child wrote to pid_file.
+
+    The pid file may appear a moment late, so it is waited for first.
+    """
+    await wait_for_text(pid_file)
+    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+    # Closing the pipes lets asyncio finish with the transport; one left open
+    # would only be cleaned up after the loop is gone, with a warning.
+    await asyncio.sleep(0.05)
 
 
 async def until(condition: Callable[[], object]) -> None:

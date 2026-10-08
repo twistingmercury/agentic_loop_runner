@@ -105,8 +105,10 @@ class StreamFrontEnd:
             return proc.start_failed_text(argv[0], exc)
 
         on_line = self._raw_line(task)
+        # Bounded: a gate's or git's own exit is its result, so a descendant
+        # that outlives it and holds the pipes must not hold up the run.
         return await proc.finish(
-            process, _drain(process, on_line, on_line), gentle=gentle
+            process, _drain(process, on_line, on_line), gentle=gentle, bounded=True
         )
 
     def _raw_line(self, task: Task) -> Callable[[bytes], None]:

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from e2e_helpers import (
     VALID_TASKS_YAML,
+    read_task_log,
     run_alr,
     run_dry_run,
     run_args,
@@ -45,6 +46,19 @@ def test_plain_run_leaves_a_log_in_the_run_folder(
     assert ledger[0]["event"] == "run_started"
     assert ledger[-1]["event"] == "run_finished"
     assert (folder / "task-1.log").is_file()
+
+
+def test_plain_run_logs_the_sessions_stderr(tmp_path: Path, fake_claude: Path) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr(
+        *run_args(tasks_path),
+        env={"FAKECLAUDE_STDERR": "session-said-this\n"},
+    )
+
+    assert res.code == 0, res
+    assert "session-said-this" in res.err
+    assert "session-said-this" in read_task_log(tasks_path, 1)
 
 
 def test_commit_run_with_a_log_folder_git_can_see_is_refused(

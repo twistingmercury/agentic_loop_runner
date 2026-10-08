@@ -14,6 +14,7 @@ from e2e_helpers import (
     TWO_TASKS,
     Result,
     fake_claude_records,
+    read_task_log,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -213,6 +214,32 @@ def test_commit_rejected_commit_fails_the_task(repo: CommitRepo) -> None:
     assert task_errors(after)[1] == "commit failed: exit status 1"
     assert task_states(after)[2] == "pending"
     assert repo.calls() == 1, "the run must stop before the second task"
+
+
+def test_commit_hook_output_is_in_the_task_log(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    tasks_yaml = (
+        shared_block("Body.", [{"cmd": "echo one > one.txt"}])
+        + """tasks:
+  - id: 1
+    name: First task
+    prompt: Do the first thing.
+"""
+    )
+    repo = new_commit_repo(git_repo, tasks_yaml)
+    hook = repo.dir / ".git" / "hooks" / "pre-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\necho hook-said-this\n", encoding="utf-8")
+    hook.chmod(0o700)
+
+    res = repo.run("--commit")
+
+    assert res.code == 0, res
+    assert repo.subjects() == ["First task", "init"]
+    # Git sends a hook's stdout to its own stderr.
+    assert "hook-said-this" in res.err
+    assert "hook-said-this" in read_task_log(repo.tasks_path, 1)
 
 
 def test_commit_outside_a_repository_runs_without_committing(

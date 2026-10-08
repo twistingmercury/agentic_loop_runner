@@ -99,6 +99,9 @@ run commits, git must ignore `logs/`, or the run will not start. If two runs sta
 same second, the later one's folder gets a `-1` suffix (then `-2`); `alr` does not report the
 final folder name back. The git check looks at the plain folder name.
 
+In plain mode, `task-N.log` also holds each gate's output, git's output, and Claude's stderr, so you can
+see why a gate failed. The terminal shows the same output, but a gate sees a pipe instead of a terminal.
+
 ## How it works
 
 Tasks run one at a time, in file order, each in a fresh `claude --print` session. The

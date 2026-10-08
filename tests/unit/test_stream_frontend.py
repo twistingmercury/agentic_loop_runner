@@ -1,6 +1,7 @@
 """The stream front end: every process captured, every step reported as an event."""
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,13 @@ from helpers import (
     cancel_run,
     fake_claude_records,
     git,
+    kill_holder_and_let_pipes_close,
     run_loop,
     wait_for_text,
     write_file,
 )
 
-from alr.engine import loop
+from alr.engine import loop, proc
 from alr.engine.commit import Repo, open_repo
 from alr.engine.sandbox import bypass_args
 from alr.errors import RunError
@@ -400,3 +402,77 @@ async def test_commit_started_is_reported_once_after_its_marker_and_before_commi
     marker = events.index(Activity(started.task, "→ commit First"))
     assert events.index(started) == marker + 1
     assert events.index(started) < events.index(_of(events, Committed)[0])
+
+
+async def test_a_gate_that_exits_while_a_background_process_holds_its_pipes_returns_after_the_grace_period(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "holder.pid"
+    gate = Gate(cmd=f"sleep 30 & echo $! > {pid_file}; echo hi")
+    started = time.monotonic()
+
+    try:
+        events = await asyncio.wait_for(
+            _run(_task_list(gate), tmp_path / "tasks.yaml"), 10
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    assert "hi" in _lines(events)
+    assert elapsed < 5
+    [finished] = _of(events, GateFinished)
+    assert finished.error is None
+
+
+async def test_a_gate_that_exited_in_time_does_not_time_out_on_an_escaped_descendant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    pid_file = tmp_path / "escaped.pid"
+    # setsid takes the sleeper out of the group a time limit would stop.
+    gate = Gate(cmd=f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & echo hi")
+    events: list[Event] = []
+
+    try:
+        await asyncio.wait_for(
+            _run(
+                _task_list(gate),
+                tmp_path / "tasks.yaml",
+                gate_timeout="1s",
+                events=events,
+            ),
+            10,
+        )
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    [finished] = _of(events, GateFinished)
+    assert finished.timed_out is False
+    assert finished.error is None
+    assert "hi" in _lines(events)
+
+
+async def test_a_gate_reads_end_of_file_from_stdin(tmp_path: Path) -> None:
+    gate = Gate(cmd="read x; echo got=$x")
+
+    events = await asyncio.wait_for(_run(_task_list(gate), tmp_path / "tasks.yaml"), 10)
+
+    assert "got=" in _lines(events)
+
+
+async def test_a_git_command_reads_end_of_file_from_stdin(tmp_path: Path) -> None:
+    events: list[Event] = []
+    task = Task(1, "First", "p1")
+
+    # cat stands in for git: it ends only when stdin does.
+    error = await asyncio.wait_for(
+        StreamFrontEnd(events.append).run_git(
+            task, ["sh", "-c", "cat; echo done"], str(tmp_path)
+        ),
+        10,
+    )
+
+    assert error is None
+    assert _lines(events) == ["done"]

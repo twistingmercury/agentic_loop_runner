@@ -15,6 +15,10 @@ interface.
     FAKECLAUDE_EXIT_CODE            exit code to return (default 0)
     FAKECLAUDE_STDERR               text written verbatim to stderr just before
                                     exiting
+    FAKECLAUDE_STDERR_BYTES         byte count; that many bytes of 99-character
+                                    lines are written to stderr after
+                                    FAKECLAUDE_STDERR, for output larger than
+                                    an environment variable can hold
     FAKECLAUDE_RECORD_FILE          path to append one JSON line per call:
                                     {"argv": [...], "stdin": "..."}, with argv
                                     excluding the program name; its line count
@@ -82,8 +86,23 @@ def main() -> NoReturn:
 
     sys.stdout.flush()
     sys.stderr.buffer.write(os.environb.get(b"FAKECLAUDE_STDERR", b""))
+    write_stderr_bytes()
     sys.stderr.flush()
     sys.exit(code)
+
+
+def write_stderr_bytes() -> None:
+    raw = os.environ.get("FAKECLAUDE_STDERR_BYTES")
+    if not raw:
+        return
+
+    try:
+        size = int(raw)
+    except ValueError as exc:
+        fail(f"invalid FAKECLAUDE_STDERR_BYTES {raw!r}: {exc}")
+
+    line = b"e" * 99 + b"\n"
+    sys.stderr.buffer.write(line * (size // len(line)))
 
 
 def record_call(args: list[str], stdin: bytes) -> None:

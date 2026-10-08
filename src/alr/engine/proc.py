@@ -1,15 +1,14 @@
 """Child processes: each in its own process group, stopped as a group when the run is cancelled."""
 
 import asyncio
-import contextlib
 import os
 import signal
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from subprocess import DEVNULL
 
 # How long a gentle stop waits for the group to exit on SIGTERM before SIGKILL,
-# and how long a gentle finish keeps draining after its process has exited.
-# Tests patch it to stay fast.
+# and how long a bounded or gentle finish keeps draining after its process has
+# exited. Tests patch it to stay fast.
 _GENTLE_GRACE = 2.0
 _GENTLE_POLL = 0.01
 # How often to look at the exit code when waiting on the process does not wake
@@ -49,30 +48,35 @@ async def finish(
     drain: Awaitable[None] | None = None,
     *,
     gentle: bool = False,
+    bounded: bool = False,
 ) -> str | None:
     """Run drain alongside process until both are done and return the exit text.
 
     If the drain or the wait raises anything, cancellation included, the whole
     group is stopped before the error carries on.
-    gentle is for git, which cleans up its index lock on SIGTERM but not on SIGKILL.
-    It also bounds the drain: once the process has exited, a drain still held
-    open by a background process is cut off after a grace period, keeping what
-    it had read.
+    bounded: once the process has exited, a drain still held open by a
+    background process is cut off after a grace period, keeping what it had
+    read, and the process's pipes are closed. For a gate, whose own exit is its
+    result. Leave it off for a session, whose output must be read to the end.
+    gentle is for git, which cleans up its index lock on SIGTERM but not on
+    SIGKILL: a stop sends SIGTERM first and waits the grace period before
+    SIGKILL. It implies bounded.
     """
-    return exit_text(await _run_to_exit(process, drain, gentle))
+    return exit_text(await _run_to_exit(process, drain, gentle, bounded))
 
 
 async def _run_to_exit(
     process: asyncio.subprocess.Process,
     drain: Awaitable[None] | None,
     gentle: bool,
+    bounded: bool = False,
 ) -> int:
     """Wait for the child to exit, then for the drain; stop the group if either fails."""
     task = None if drain is None else asyncio.ensure_future(drain)
     try:
         await _wait_for_exit(process, task)
         if task is not None:
-            await _finish_drain(task, gentle)
+            await _finish_drain(process, task, gentle or bounded)
     except BaseException:
         if task is not None:
             task.cancel()
@@ -116,15 +120,19 @@ async def _wait_for_exit(
         await asyncio.gather(exited, return_exceptions=True)
 
 
-async def _finish_drain(drain: asyncio.Future[None], gentle: bool) -> None:
-    """Let the drain finish; when gentle, only for the grace period."""
-    if not gentle:
+async def _finish_drain(
+    process: asyncio.subprocess.Process, drain: asyncio.Future[None], bounded: bool
+) -> None:
+    """Let the drain finish; when bounded, only for the grace period."""
+    if not bounded:
         await drain
         return
 
     # wait_for cancels the drain at the deadline; what it read is kept.
-    with contextlib.suppress(TimeoutError):
+    try:
         await asyncio.wait_for(drain, _GENTLE_GRACE)
+    except TimeoutError:
+        _close_transport(process)
 
 
 def exit_text(returncode: int) -> str | None:
@@ -249,9 +257,16 @@ async def _stop_group(process: asyncio.subprocess.Process, gentle: bool) -> None
     # Not process.wait(): on 3.12 it also waits for the pipes to close, and a
     # descendant that left the group still holds them.
     await _wait_for_exit(process, None)
-    # Whatever still holds a pipe left the group, so the pipes will not close
-    # by themselves. Closing our ends here keeps asyncio from doing it at
-    # garbage collection, after the loop is gone, and printing a traceback.
+    _close_transport(process)
+
+
+def _close_transport(process: asyncio.subprocess.Process) -> None:
+    """Close our ends of the process's pipes, which will not close by themselves.
+
+    Whatever still holds a pipe left the group or outlived the process. Closing
+    them here keeps asyncio from doing it at garbage collection, after the loop
+    is gone, and printing a traceback.
+    """
     process._transport.close()
 
 

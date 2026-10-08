@@ -1,7 +1,7 @@
 ---
-version: 9
+version: 11
 date: 2026-10-08
-notes: "Drops the drop-in compatibility claim: alr began as a port of gralph and has evolved beyond it (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+notes: "The System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim: alr began as a port of gralph and has evolved beyond it (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -66,16 +66,16 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 
 ## System Model
 
-| Component       | Description                                                                                         |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| `alr.cli`       | Parses flags, runs the startup checks, picks the front end, sets the exit code                      |
-| `alr.tasks`     | Parses, validates, and atomically saves the task file                                               |
-| `alr.engine`    | The shared run logic: the loop, the outcome rule, gates, commits, session flags, process handling   |
-| `alr.plain`     | Everything only plain mode does: echo, pass-through output, the dry-run report                      |
-| `alr.record`    | The run events and the run log writer, shared by both front ends                                    |
-| `alr.stream`    | Everything only the full-screen path does: stream-json parsing and the stream front end             |
-| `alr.tui`       | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker |
-| `alr.skillinstall` | `--install-skill`: copies the bundled skill to `~/.claude/skills`                                |
+| Component          | Description                                                                                           |
+|--------------------|-------------------------------------------------------------------------------------------------------|
+| `alr.cli`          | Parses flags, runs the startup checks, picks the front end, sets the exit code                        |
+| `alr.tasks`        | Parses, validates, and atomically saves the task file                                                 |
+| `alr.engine`       | The shared run logic: the loop, the outcome rule, gates, commits, session flags, process handling     |
+| `alr.plain`        | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                  |
+| `alr.record`       | The run events and the run log writer, shared by both front ends                                      |
+| `alr.stream`       | Everything only the full-screen path does: stream-json parsing and the stream front end               |
+| `alr.tui`          | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker |
+| `alr.skillinstall` | `--install-skill`: copies the bundled skill to `~/.claude/skills`                                     |
 
 ## Key Principles
 

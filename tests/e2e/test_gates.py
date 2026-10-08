@@ -9,6 +9,7 @@ from e2e_helpers import (
     assert_no_tmp_file,
     expected_stdin,
     fake_claude_records,
+    read_task_log,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -106,6 +107,25 @@ def test_gates_failing_gate_fails_the_task_and_blocks_the_next_run(
     assert again.code != 0, again
     assert "Some tasks failed previous runs:" in again.out
     assert len(fake_claude_records(record_file)) == 1
+
+
+def test_gates_failing_gate_output_is_in_the_task_log_and_on_the_terminal(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    cmd = "echo gate-said-out; echo gate-said-err >&2; exit 4"
+    tasks_path = write_tasks_yaml(
+        tmp_path, shared_block("Body.", [{"cmd": cmd}]) + ONE_TASK
+    )
+
+    res = run_alr(*run_args(tasks_path))
+
+    assert res.code != 0, res
+    assert "gate-said-out" in res.out
+    assert "gate-said-err" in res.err
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "failed"}
+    log = read_task_log(tasks_path, 1)
+    assert "gate-said-out" in log
+    assert "gate-said-err" in log
 
 
 def test_gates_skipped_when_the_session_fails(

@@ -4,6 +4,7 @@ import asyncio
 import sys
 from asyncio.subprocess import PIPE
 from collections.abc import Callable, Sequence
+from typing import BinaryIO
 
 from alr.engine import proc
 from alr.engine.frontend import SessionResult
@@ -49,8 +50,8 @@ class PlainFrontEnd:
         # gralph prints the prompt with Println, so its trailing newline is followed by one more.
         print(stdin_text, flush=True)
         try:
-            # stderr is inherited, so it reaches the terminal untouched.
-            process = await proc.start(argv, stdin=PIPE, stdout=PIPE)
+            # Both outputs are piped so each line can reach the run log.
+            process = await proc.start(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE)
         except OSError as exc:
             return SessionResult(text="", error=proc.start_failed_text(argv[0], exc))
 
@@ -71,13 +72,7 @@ class PlainFrontEnd:
         print(f"gate: {gate.cmd}", flush=True)
         self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
         self._report(GateStarted(task, gate))
-        # No stdin, and stdout and stderr inherited, so the output passes straight through.
-        try:
-            process = await proc.start(["sh", "-c", gate.cmd])
-        except OSError as exc:
-            return proc.start_failed_text("sh", exc)
-
-        return await proc.finish(process)
+        return await self._run_command(task, ["sh", "-c", gate.cmd])
 
     def gate_finished(
         self,
@@ -98,13 +93,7 @@ class PlainFrontEnd:
         self._report(CommitStarted(task))
 
     async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        # stdout and stderr inherited, so git's output passes straight through.
-        try:
-            process = await proc.start(argv, cwd=cwd)
-        except OSError as exc:
-            return proc.start_failed_text(argv[0], exc)
-
-        return await proc.finish(process, gentle=True)
+        return await self._run_command(task, argv, cwd=cwd, gentle=True)
 
     def committed(self, task: Task, commit_hash: str) -> None:
         self._report(Committed(task, commit_hash))
@@ -114,6 +103,30 @@ class PlainFrontEnd:
 
     def run_done(self, error: str | None, seconds: float) -> None:
         self._report(RunDone(error, seconds))
+
+    async def _run_command(
+        self,
+        task: Task,
+        argv: Sequence[str],
+        *,
+        cwd: str | None = None,
+        gentle: bool = False,
+    ) -> str | None:
+        """Run a gate or a git command: show its output as it comes and report each line."""
+        # No stdin. Both outputs are piped so each line can reach the run log.
+        try:
+            process = await proc.start(argv, stdout=PIPE, stderr=PIPE, cwd=cwd)
+        except OSError as exc:
+            return proc.start_failed_text(argv[0], exc)
+
+        # Bounded: a gate's or git's own exit is its result, so a descendant
+        # that outlives it and holds the pipes must not hold up the run.
+        return await proc.finish(
+            process,
+            _pump_outputs(process, self._raw_line(task)),
+            gentle=gentle,
+            bounded=True,
+        )
 
     def _raw_line(self, task: Task) -> Callable[[bytes], None]:
         def report_line(line: bytes) -> None:
@@ -129,21 +142,41 @@ async def _pump(
     chunks: list[bytes],
     on_line: Callable[[bytes], None],
 ) -> None:
-    """Feed stdin and tee stdout at the same time, so a full pipe never blocks the session."""
-    if process.stdin is None or process.stdout is None:
-        raise RuntimeError("the session was started without stdin and stdout pipes")
+    """Feed stdin and tee both outputs at the same time, so a full pipe never blocks the session.
+
+    Only stdout is kept in chunks: the engine parses the result line from it,
+    and stderr must never end up there.
+    """
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        raise RuntimeError("the session was started without stdin and output pipes")
 
     await asyncio.gather(
-        proc.feed_stdin(process.stdin, stdin), _tee(process.stdout, chunks, on_line)
+        proc.feed_stdin(process.stdin, stdin),
+        _tee(process.stdout, sys.stdout.buffer, on_line, chunks),
+        _tee(process.stderr, sys.stderr.buffer, on_line),
+    )
+
+
+async def _pump_outputs(
+    process: asyncio.subprocess.Process, on_line: Callable[[bytes], None]
+) -> None:
+    """Tee stdout and stderr at the same time, so a full pipe never blocks the command."""
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("the command was started without output pipes")
+
+    await asyncio.gather(
+        _tee(process.stdout, sys.stdout.buffer, on_line),
+        _tee(process.stderr, sys.stderr.buffer, on_line),
     )
 
 
 async def _tee(
     reader: asyncio.StreamReader,
-    chunks: list[bytes],
+    out: BinaryIO,
     on_line: Callable[[bytes], None],
+    chunks: list[bytes] | None = None,
 ) -> None:
-    """Copy the session's stdout to the terminal as raw bytes, keeping it for the result line.
+    """Copy a stream to out as raw bytes, keeping the chunks if asked (the result line needs them).
 
     Each line also goes to on_line as it completes, and a last line with no
     newline goes when the stream ends.
@@ -152,9 +185,11 @@ async def _tee(
     # long line is not copied again for every chunk.
     pieces: list[bytes] = []
     while chunk := await reader.read(_READ_SIZE):
-        sys.stdout.buffer.write(chunk)
-        sys.stdout.buffer.flush()
-        chunks.append(chunk)
+        out.write(chunk)
+        out.flush()
+        if chunks is not None:
+            chunks.append(chunk)
+
         *ends, rest = chunk.split(b"\n")
         for end in ends:
             on_line(b"".join([*pieces, end]))
