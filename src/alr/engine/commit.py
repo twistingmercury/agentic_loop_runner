@@ -42,13 +42,25 @@ async def open_repo(tasks_file: str) -> Repo | None:
     Inside a work tree, git must not see tasks_file and the tree must be
     clean, so that each commit holds exactly one task's work.
     """
+    repo = await find_repo(tasks_file)
+    if repo is not None:
+        await check_clean(repo)
+
+    return repo
+
+
+async def find_repo(tasks_file: str) -> Repo | None:
+    """Find the work tree like open_repo, but leave the clean-tree check to the caller.
+
+    A caller that also checks the log directory does that first: a tree dirty
+    only with the run's own log folder needs that folder ignored, not committed.
+    """
     root = await _find_root()
     if not root:
         return None
 
     repo = Repo(root=root)
     await _check_task_file(repo, tasks_file)
-    await _check_clean(repo)
     return repo
 
 
@@ -177,7 +189,7 @@ async def _check_task_file(repo: Repo, tasks_file: str) -> None:
     )
 
 
-async def _check_clean(repo: Repo) -> None:
+async def check_clean(repo: Repo) -> None:
     """Refuse a work tree with uncommitted changes."""
     # Every untracked file is listed by name, and quotePath keeps non-ASCII
     # names readable in the error.

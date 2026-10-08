@@ -4,9 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from helpers import write_file
+from helpers import write_file, write_nested_file
 
-from alr.engine.commit import CommitMode, Repo, open_repo
+from alr.engine.commit import CommitMode, Repo, find_repo
 from alr.errors import RepoError, RunLogError, TaskFileError
 from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
@@ -60,9 +60,9 @@ async def test_prepare_outside_a_repository_runs_without_commits(
 
     async def spy(tasks_file: str) -> Repo | None:
         looked_up.append(tasks_file)
-        return await open_repo(tasks_file)
+        return await find_repo(tasks_file)
 
-    monkeypatch.setattr(prepare_module, "open_repo", spy)
+    monkeypatch.setattr(prepare_module, "find_repo", spy)
     settings = _outside_settings(outside, monkeypatch, commit_mode=mode)
 
     prepared = await prepare(settings)
@@ -124,6 +124,41 @@ async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
         await prepare(settings)
 
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == before
+
+
+def _visible_settings(git_repo: Path, **changes: object) -> RunSettings:
+    """Settings whose task file is ignored while its log folder, beside it, is not."""
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", TASKS))
+    settings = RunSettings(
+        tasks_file=tasks_file, permissions=Permissions.SKIP, logging=True
+    )
+    return replace(settings, **changes)
+
+
+async def test_prepare_tells_a_tree_dirty_only_with_its_log_folder_to_ignore_it(
+    git_repo: Path,
+) -> None:
+    settings = _visible_settings(git_repo)
+    # A default-mode run leaves its untracked log folder behind.
+    (await prepare(settings)).close()
+    settings = replace(settings, commit_mode=CommitMode.TASK)
+
+    with pytest.raises(RepoError, match="not ignored by git") as caught:
+        await prepare(settings)
+
+    assert "clean work tree" not in str(caught.value)
+
+
+async def test_prepare_with_another_dirty_file_still_reports_the_dirty_tree(
+    git_repo: Path,
+) -> None:
+    settings = _visible_settings(git_repo, commit_mode=CommitMode.TASK, logging=False)
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(RepoError, match="clean work tree"):
+        await prepare(settings)
 
 
 async def test_prepare_with_none_never_opens_the_repository(git_repo: Path) -> None:

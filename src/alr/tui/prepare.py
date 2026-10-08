@@ -6,7 +6,7 @@ from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from alr.engine.commit import CommitMode, Repo, check_log_dir, open_repo
+from alr.engine.commit import CommitMode, Repo, check_clean, check_log_dir, find_repo
 from alr.engine.loop import RunOptions, load_tasks
 from alr.errors import RepoError, TaskFileError
 from alr.record.events import Event
@@ -40,9 +40,13 @@ async def prepare(settings: RunSettings) -> Prepared:
     the values the run will use.
     """
     task_list = load_tasks(settings.tasks_file)
-    repo = await _open_repo(settings)
+    repo = await _find_repo(settings)
     session_args = settings.session_args()
     log_path = await _check_log_folder(settings, repo)
+    # After the log folder, so a tree dirty only with it is told to ignore it.
+    if repo is not None:
+        await check_clean(repo)
+
     options = RunOptions(
         tasks_file=settings.tasks_file,
         gate_timeout=settings.gate_timeout,
@@ -62,12 +66,12 @@ async def prepare(settings: RunSettings) -> Prepared:
     return prepared
 
 
-async def _open_repo(settings: RunSettings) -> Repo | None:
+async def _find_repo(settings: RunSettings) -> Repo | None:
     """Look at the repository only when the run commits; with none git is never touched."""
     if settings.commit_mode is CommitMode.NONE:
         return None
 
-    return await open_repo(settings.tasks_file)
+    return await find_repo(settings.tasks_file)
 
 
 async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | None:

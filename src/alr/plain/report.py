@@ -2,7 +2,7 @@
 
 from typing import TextIO
 
-from alr.engine.commit import Repo, open_repo
+from alr.engine.commit import Repo, check_clean, check_log_dir, find_repo
 from alr.engine.loop import load_tasks
 from alr.errors import FailedTasksError
 from alr.tasks import COMPLETED, FAILED, Task, TaskList
@@ -45,14 +45,25 @@ def load_tasks_report(out: TextIO, tasks_file: str) -> TaskList:
         raise
 
 
-async def repo_for(out: TextIO, tasks_file: str, commit: bool) -> Repo | None:
-    """Open the work tree for a --commit run; None without the flag or outside a repository."""
+async def repo_for(
+    out: TextIO, tasks_file: str, commit: bool, run_dir: str | None = None
+) -> Repo | None:
+    """Open the work tree for a --commit run; None without the flag or outside a repository.
+
+    With run_dir, the run's log folder is checked before the tree is: a tree
+    dirty only with that folder needs it ignored, not committed.
+    """
     if not commit:
         return None
 
-    repo = await open_repo(tasks_file)
+    repo = await find_repo(tasks_file)
     if repo is None:
         # Said out loud, so a run that commits nothing is not mistaken for one that did.
         out.write("commit: not a git repository, nothing will be committed\n")
+        return None
 
+    if run_dir is not None:
+        await check_log_dir(repo, run_dir)
+
+    await check_clean(repo)
     return repo

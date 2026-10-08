@@ -336,6 +336,39 @@ async def test_start_commit_refuses_a_log_folder_git_can_see(
     assert not (git_repo / "work" / "logs").exists()
 
 
+async def test_start_commit_tells_a_tree_dirty_only_with_its_log_folder_to_ignore_it(
+    record: Path, git_repo: Path
+) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+    # A default-mode run leaves its untracked log folder behind.
+    await _start(tasks_file)
+    calls = _calls(record)
+
+    with pytest.raises(RepoError, match="log directory") as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert "clean work tree" not in str(caught.value)
+    assert _calls(record) == calls, "claude must not run"
+
+
+async def test_start_commit_with_another_dirty_file_still_reports_the_dirty_tree(
+    record: Path, git_repo: Path
+) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+    # The log folder is ignored here, so only the stray file can make the tree dirty.
+    exclude.write_text("work/tasks.yaml\nwork/logs/\n", encoding="utf-8")
+
+    with pytest.raises(RepoError, match="--commit needs a clean work tree") as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert "stray.txt" in str(caught.value)
+
+
 async def test_start_commit_accepts_a_log_folder_git_ignores(
     record: Path, git_repo: Path
 ) -> None:

@@ -6,7 +6,7 @@ from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from alr.engine.commit import CommitMode, Repo, check_log_dir
+from alr.engine.commit import CommitMode, Repo
 from alr.engine.loop import RunOptions, reset_failed, run
 from alr.errors import (
     RunCancelledError,
@@ -42,9 +42,8 @@ async def start(
         raise type(exc)(f"failed to start loop runner: {exc}") from exc
 
     commits = commit is not CommitMode.NONE
-    repo = await repo_for(sys.stdout, tasks_file, commits)
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
-    await check_log_dir(repo, str(path))
+    repo = await repo_for(sys.stdout, tasks_file, commits, str(path))
     info = _info(tasks_file, gate_timeout, sandbox_settings, commits)
     log = RunLog.open(path, info)
     try:
