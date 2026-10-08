@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A status line in the full-screen view that ticks every second while a run
+  goes, such as `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`.
+- A Time column in the Tasks pane: the running task counts up, and each
+  finished task keeps its time.
+- `GateStarted` and `CommitStarted` run events, which drive the status line.
+  The run log ignores them.
+
 ## [0.0.7] - 2026-10-08
 
 ### Added

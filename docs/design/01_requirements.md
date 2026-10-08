@@ -1,7 +1,7 @@
 ---
-version: 13
-date: 2026-10-07
-notes: "Item 12 names the pane Task. Items 12 and 18 add the same-second folder suffix, the 5,000-line Activity limit, and the idle Gates button during a run."
+version: 14
+date: 2026-10-08
+notes: "Item 12 adds the ticking status line and the Tasks pane's Time column (ADR-020)."
 ---
 
 # alr — Requirements
@@ -50,7 +50,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file
 10. Keep the logic that only plain mode runs clearly apart from the logic that only the full-screen path runs, with the shared rules in one place
 11. Port the full-screen path's engine side now: stream-json parsing, run events, and the run log writer, tested against a fake `claude`
-12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds. The Task pane (activity lines) keeps the last 5,000 lines per task (the run log keeps every line), and the Gates button does nothing while a run goes
+12. Open a Textual full-screen view on a terminal, with one main window of three panes (tasks and gates and commits on top, the running task's activity full width below), a settings strip with Commit and Logging dropdowns, a menu whose button names show their hotkeys (no footer), and a status bar; elapsed times show hours, minutes, and seconds. The Task pane (activity lines) keeps the last 5,000 lines per task (the run log keeps every line), and the Gates button does nothing while a run goes. While a run goes, a status line between the top panes and the Task pane says where the run is and ticks every second (`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`), and the Tasks pane has a Time column that counts the running task up and keeps each finished task's time
 13. Start a run only when the user presses Start, with Start disabled and the reason shown while something is missing
 14. Ask for a missing folder, permission choice, or gate list in modal dialogs over the main window, using gralph's wizard rules, and let any dialog be reopened until Start
 15. Open `tasks.yaml` and `sandbox.json` read-only from the menu

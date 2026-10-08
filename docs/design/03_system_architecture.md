@@ -1,7 +1,7 @@
 ---
-version: 17
-date: 2026-10-07
-notes: "The unit tests run in parallel with pytest-xdist, and `-n 0` runs them serially. Before that: The engine and TUI components document the -1 run folder suffix, the unreported folder name, the check_log_dir check, the idle Gates button, and the 5,000-line Activity limit; Logging is called a setting."
+version: 18
+date: 2026-10-08
+notes: "The stream front end emits GateStarted and CommitStarted, which the run log ignores; alr.tui gains progress.py, a ticking status line between the panes, and a Time column in the Tasks pane (ADR-020)."
 ---
 
 # alr — System Architecture
@@ -125,6 +125,7 @@ src/alr/
     app.py         the Textual app: states, Start and Stop, the run worker
     adapter.py     the report callback: events into Textual messages
     settings.py    the run settings the strip and the dialogs fill
+    progress.py    follows the run events and gives the status line's text (ADR-020)
     screens/       the main screen, the folder, permissions, and gates dialogs, the file viewer,
                    the finished summary
     panes/         the tasks, activity, and gates-and-commits panes
@@ -270,11 +271,13 @@ How gralph's packages map onto this:
 - Turn `assistant` events into activity lines (text lines, and `→ <Tool> <target>` for tool use) and keep the `result`
   event's text for the outcome
 - Report gate and git output as activity lines, with `→ gate <cmd>` and `→ commit <name>` markers
-- Emit events to a `report` callback: `TaskStarted`, `Activity`, `SessionFinished`, `GateFinished`, `Committed`,
-  `TaskFinished`, `RunDone`; a cancelled session or gate emits none of the finished kinds
+- Emit events to a `report` callback: `TaskStarted`, `Activity`, `SessionFinished`, `GateStarted`, `GateFinished`,
+  `CommitStarted`, `Committed`, `TaskFinished`, `RunDone`; `GateStarted` and `CommitStarted` follow the `→ gate` and
+  `→ commit` markers (ADR-020); a cancelled session or gate emits none of the finished kinds
 - Record the run through `alr.record` when the Logging setting is on: the writer creates the run folder (`0700`, files
   `0600`; when two runs start in the same second the later one gets a `-1` suffix, then `-2`, and so on, and the
-  caller is not told the final folder name, a known limit), writes `run_started`, appends one ledger line per event to `run.jsonl` with gralph's key order, and appends
+  caller is not told the final folder name, a known limit), writes `run_started`, appends one ledger line per event to `run.jsonl` with gralph's key order (`GateStarted` and
+  `CommitStarted` add nothing), and appends
   activity, including the parsed `→ Tool` lines, to `task-<id>.log`
 
 **Key Characteristics:**
@@ -291,11 +294,18 @@ How gralph's packages map onto this:
 
 - Show one main window: a settings strip (`Commit:` and `Logging:` dropdowns, the permissions label, and the Start
   button), a menu row of buttons with their hotkeys in the names (no footer), and three panes: tasks and gates and
-  commits side by side on top, the activity pane across the full width below, then a status bar
+  commits side by side on top, a one-row status line, the activity pane across the full width below, then a status bar
+- While a run goes, show where it is on the status line, which ticks every second (ADR-020):
+  `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`, that is the task's number out of the tasks pending
+  at Start, the step (`session`, `gate N of M: <first line of the command>`, or `commit`), the step's time, and the
+  run's time. `alr.tui.progress` builds the text from the run events; the line is blank before the first task and
+  cleared when the run ends
+- Give the Tasks pane a `Time` column: the running task's time counts up every second, a finished task keeps the time
+  its `TaskFinished` carries, and a task that has not run this time stays blank
 - Let the activity pane follow the running task: a task start moves the tasks highlight and shows only that task's
   lines, wrapped and redrawn on resize; the arrow keys can show another task's lines. The pane keeps only the last
   5,000 lines per task and drops older ones without saying so; the run log keeps every line
-- Show elapsed times with `format_elapsed` (`1h 2m 3s`) in the summary pop-up, the status line, and the gate times
+- Show elapsed times with `format_elapsed` (`1h 2m 3s`) in the summary pop-up, the status bar, the status line, the Time column, and the gate times
 - Lock the dropdowns at Start for good; while a run goes, make the Start button `Stop (^c)` and grey out Folder,
   Permissions, Reset, and Quit; at the end disable Start again and re-enable Quit (Folder, Permissions, and Reset stay off). The Gates button is not greyed out but does nothing
   while a run is going; the Tasks and Sandbox viewers open any time
@@ -338,12 +348,12 @@ what the result means. The front end owns how output is handled.
 |---------------------|--------------------------------------------------------------------------|----------------------------------|-----------------------------------------|
 | extra session flags | Give the Claude flags that follow `--print`                              | None                             | `--output-format stream-json --verbose` |
 | run session         | Run Claude with this argv and stdin; return the result text and the exit | Echo, tee stdout, pass stderr    | Capture, parse, emit `Activity`         |
-| run gate            | Run this gate command under this limit; return the exit                  | Print `gate: <cmd>`, pass output | Emit marker and output as `Activity`    |
+| run gate            | Run this gate command under this limit; return the exit                  | Print `gate: <cmd>`, pass output | Emit marker and output as `Activity`, and `GateStarted` |
 | run git             | Run this git command; return the exit                                    | Pass output                      | Emit output as `Activity`               |
 | task started        | Note that a task is starting                                             | Nothing                          | Emit `TaskStarted`                      |
 | session finished    | Note the session outcome and duration                                    | Nothing                          | Emit `SessionFinished`                  |
 | gate finished       | Note a gate's result and duration                                        | Nothing                          | Emit `GateFinished`                     |
-| commit started      | Note that something is staged and a commit follows                       | Print `commit: <name>`           | Emit `→ commit <name>`                  |
+| commit started      | Note that something is staged and a commit follows                       | Print `commit: <name>`           | Emit `→ commit <name>` and `CommitStarted` |
 | committed           | Note the new commit hash                                                 | Nothing                          | Emit `Committed`                        |
 | task finished       | Note the final state and duration                                        | Nothing                          | Emit `TaskFinished`                     |
 | run done            | Note the end of the run, with its error if any                           | Nothing                          | Emit `RunDone`                          |
@@ -413,7 +423,8 @@ sequenceDiagram
         Engine ->> Stream: run session, gate, git
         Stream ->> Adapter: report(event)
         Adapter ->> Panes: Textual message
-        Panes -->> User: updated tasks, activity, gates and commits
+        Panes -->> User: updated tasks and times, activity, gates and commits
+        App -->> User: status line, on each event and every second
     end
     Engine ->> Stream: run done (None, or the error)
     Stream ->> Adapter: RunDone

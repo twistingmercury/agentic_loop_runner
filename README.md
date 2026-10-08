@@ -64,7 +64,11 @@ then reads `Stop (^c)`), Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the fold
 and gates dialogs (Folder, Permissions, Reset, and Quit grey out during a run), `r` resets failed tasks to pending (after you confirm), `t` and `x`
 show `tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a dialog. The Gates
 button does nothing while a run is going. The Task pane shows only the last 5,000 lines of a
-task, with no warning; the run log keeps every line. Inside a git work tree the
+task, with no warning; the run log keeps every line. While a run goes, a status line above the Task
+pane ticks every second and says where the run is, such as
+`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s` (the task out of those
+pending at Start, the step, the step's time, and the run's time), and the Tasks pane's
+Time column counts the running task up and keeps each finished task's time. Inside a git work tree the
 view always commits, per task by default (outside one it runs without commits and says
 so), and keeps run logs in `<folder>/logs`, which git must ignore. Use
 `--plain`, a non-terminal, or `--dry-run` for plain output.

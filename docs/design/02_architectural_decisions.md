@@ -1,7 +1,7 @@
 ---
-version: 17
-date: 2026-10-07
-notes: "ADR-015 titles the activity pane Task. ADR-013, ADR-015, and ADR-019 say Logging is a setting (a dropdown), and document the -1 folder suffix, the unreported folder name, the unsuffixed check_log_dir check, the idle Gates button, and the 5,000-line Activity limit."
+version: 18
+date: 2026-10-08
+notes: "Adds ADR-020: the view shows a ticking status line and a Time column, driven by the new GateStarted and CommitStarted events and alr.tui.progress."
 ---
 
 # alr — Architectural Decisions
@@ -48,6 +48,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [017](#adr-017-the-task-file-is-always-the-run-folders-tasksyaml)    | The task file is always the run folder's tasks.yaml                | Accepted | 2026-10-07 |
 | [018](#adr-018-failed-tasks-are-reset-from-the-menu-or-with---reset-failed)    | Failed tasks are reset from the menu or with --reset-failed         | Accepted | 2026-10-07 |
 | [019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes) | The run log always goes in the run folder's logs folder, in both modes | Accepted | 2026-10-07 |
+| [020](#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column) | The view shows a ticking status line and a Time column | Accepted | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -904,5 +905,49 @@ Logging setting stays in the view).
 - The plain detail log is thinner than the view's: no tool activity, and no gate or git output
 - Another departure from gralph's `--log-dir`
 - A committing run needs `logs/` ignored by git, or it will not start
+
+### ADR-020: The view shows a ticking status line and a Time column
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+The view only redrew when a run event came in. A Claude session or a long gate can go minutes without one, so a run sat
+still and felt dead: nothing said which step was going or for how long, and the Tasks pane showed no times at all. The
+events also could not tell the view when a gate or a commit began, only when a gate finished and when a commit landed.
+
+**Decision:**
+
+- **Two new run events.** `alr.record.events` gains `GateStarted` (the task and the gate) and `CommitStarted` (the
+  task). Both front ends emit them, right after the `→ gate <cmd>` and `→ commit <name>` activity lines. The run log
+  writer ignores them, so `run.jsonl` and `task-<id>.log` are unchanged.
+- **Progress lives in `alr.tui.progress`.** A `Progress` object is fed every run event and returns the status line's
+  text. It counts tasks from `TaskStarted`, gates from `GateStarted` (reset at each task), and marks the commit step at
+  `CommitStarted`. It takes a clock, so tests never wait. The view only feeds it events and asks for the text.
+- **The status line.** One row between the top panes and the Task pane, in the form
+  `task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s`: the task's number out of the tasks pending at Start,
+  the step (`session`, `gate N of M: <first line of the command>`, or `commit`), the step's time, and the run's time.
+  It is blank before the first task starts and is cleared when the run ends.
+- **The Time column.** The Tasks pane gains a `Time` column. The running task's time counts up from its
+  `TaskStarted`; at `TaskFinished` the cell keeps the event's `seconds`. Tasks that have not run this time stay blank.
+- **One ticker.** At Start the view sets a one-second interval that redraws the status line and the running task's
+  time; every run event also redraws the line at once. The ticker stops when the run ends or the app unmounts. Times
+  use `format_elapsed`.
+
+**Consequences:**
+
+*Positive:*
+
+- A run looks alive between events, and the user sees which step is going and how long it has taken
+- The progress logic is plain Python, tested apart from Textual with a fake clock
+- The run log format does not change
+
+*Negative:*
+
+- Two more event types that every consumer of `Event` must handle or ignore
+- One more row of screen space taken from the Task pane
+- The tick redraws the screen every second for the whole run
 
 **Next:** [System Architecture](03_system_architecture.md)
