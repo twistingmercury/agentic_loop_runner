@@ -1,7 +1,7 @@
 ---
-version: 20
+version: 21
 date: 2026-10-08
-notes: "The front-end table lists GateStarted and CommitStarted for both front ends (plain prints the same lines and sends the events too, ADR-020); the status line's form and truncation are ADR-020's, stated here; plain output is no longer described as gralph's (ADR-022)."
+notes: "Plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023); the plain section and the front-end table say so. Earlier: the front-end table lists GateStarted and CommitStarted for both front ends (plain prints the same lines and sends the events too, ADR-020); the status line's form and truncation are ADR-020's, stated here; plain output is no longer described as gralph's (ADR-022)."
 ---
 
 # alr — System Architecture
@@ -242,13 +242,16 @@ How gralph's packages map onto this:
 **Responsibilities:**
 
 - Run a session with no extra Claude flags: echo the combined prompt, copy Claude's stdout to the terminal while keeping
-  it for the result line, and let stderr pass straight through
-- Before each gate, print `gate: <cmd>`; let the gate's output pass straight through
-- Once something is staged, print `commit: <first line of name>`; let git's output pass straight through
+  it for the result line; copy stderr to the terminal too. Each completed line of either stream is reported as
+  `Activity` (ADR-023)
+- Before each gate, print `gate: <cmd>`; copy the gate's stdout and stderr to the terminal as raw bytes and report each
+  line as `Activity` (the gate sees a pipe, not a terminal)
+- Once something is staged, print `commit: <first line of name>`; copy git's output the same way
 - Print the failed-task notice and task table when the file already holds a failed task
 - Record the run (ADR-019): write the run log in `<dir>/logs/<timestamp>/` on every real run, with the ledger
   (`run.jsonl`) and a detail file per task (`task-<id>.log`) holding the lines of Claude's raw stdout plus the
-  `→ gate <cmd>` and `→ commit <first line of name>` markers. Gate and git output is not captured. When the run commits
+  `→ gate <cmd>` and `→ commit <first line of name>` markers, the gate's and git's output, and Claude's stderr
+  (ADR-023). When the run commits
   inside a work tree and the log folder is not git-ignored, refuse to start with the `check_log_dir` error. It checks the unsuffixed folder name, so a `-1` folder is covered only
   because the ignore rule is for the `logs` folder
 - Dry run: print the task table, each `shared.gates` entry with its effective limit and where the limit came from, the
@@ -349,9 +352,9 @@ what the result means. The front end owns how output is handled.
 | Call                | Engine asks the front end to                                             | Plain                                                    | Stream                                                  |
 |---------------------|--------------------------------------------------------------------------|----------------------------------------------------------|---------------------------------------------------------|
 | extra session flags | Give the Claude flags that follow `--print`                              | None                                                     | `--output-format stream-json --verbose`                 |
-| run session         | Run Claude with this argv and stdin; return the result text and the exit | Echo, tee stdout, pass stderr                            | Capture, parse, emit `Activity`                         |
-| run gate            | Run this gate command under this limit; return the exit                  | Print `gate: <cmd>`, pass output, and emit `GateStarted` | Emit marker and output as `Activity`, and `GateStarted` |
-| run git             | Run this git command; return the exit                                    | Pass output                                              | Emit output as `Activity`                               |
+| run session         | Run Claude with this argv and stdin; return the result text and the exit | Echo, tee stdout and stderr, emit `Activity`             | Capture, parse, emit `Activity`                         |
+| run gate            | Run this gate command under this limit; return the exit                  | Print `gate: <cmd>`, tee output as `Activity`, and emit `GateStarted` | Emit marker and output as `Activity`, and `GateStarted` |
+| run git             | Run this git command; return the exit                                    | Tee output as `Activity`                                 | Emit output as `Activity`                               |
 | task started        | Note that a task is starting                                             | Nothing                                                  | Emit `TaskStarted`                                      |
 | session finished    | Note the session outcome and duration                                    | Nothing                                                  | Emit `SessionFinished`                                  |
 | gate finished       | Note a gate's result and duration                                        | Nothing                                                  | Emit `GateFinished`                                     |

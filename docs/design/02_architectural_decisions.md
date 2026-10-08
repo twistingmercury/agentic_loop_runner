@@ -1,7 +1,7 @@
 ---
-version: 20
+version: 21
 date: 2026-10-08
-notes: "Adds ADR-022: alr has evolved beyond gralph and is a tool, not an agent; it supersedes the drop-in parts of ADR-001 and ADR-007 and the agent-layer plans of ADR-001 to ADR-004 and ADR-012 (their status lines point to it); ADR-017 drops the known-differences pointer; ADR-020 gets the status line's exact form in place."
+notes: "Adds ADR-023: plain mode records gate, git, and session-stderr output in the run log; ADR-019 is amended and its sentences about the old limit corrected. Earlier: ADR-022: alr has evolved beyond gralph and is a tool, not an agent; it supersedes the drop-in parts of ADR-001 and ADR-007 and the agent-layer plans of ADR-001 to ADR-004 and ADR-012 (their status lines point to it); ADR-017 drops the known-differences pointer; ADR-020 gets the status line's exact form in place."
 ---
 
 # alr — Architectural Decisions
@@ -51,6 +51,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [020](#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column) | The view shows a ticking status line and a Time column | Accepted | 2026-10-08 |
 | [021](#adr-021-the-bypass-flag-is---yolo) | The bypass flag is `--yolo` | Accepted | 2026-10-08 |
 | [022](#adr-022-alr-has-evolved-beyond-gralph) | alr has evolved beyond gralph | Accepted | 2026-10-08 |
+| [023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output) | Plain mode records gate, git, and session-stderr output | Accepted | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -888,14 +889,17 @@ meant two sets of rules.
   `alr.tui` may import it; `alr.engine` may not.
 - **Plain mode's detail log is thinner.** Plain mode does not ask Claude for stream-json, so there are no parsed
   `→ Tool` lines. `task-<id>.log` holds the lines of Claude's raw stdout and the `→ gate <cmd>` and
-  `→ commit <first line of name>` markers. The gates' and git's own output still passes straight through to the
-  terminal and is not captured. The ledger (`run.jsonl`) is the same in both modes.
+  `→ commit <first line of name>` markers. (ADR-023 later added the gates' and git's output and Claude's stderr to
+  that file.) The ledger (`run.jsonl`) is the same in both modes.
 - **Same-second runs.** If the folder already exists, the writer takes the first free name with a `-1` suffix, then
   `-2`, and so on, so one run never writes into another's record. The final name is not reported back to the caller (a
   known limit). `check_log_dir` checks the unsuffixed name, which the same ignore rule for `logs/` covers.
 
 This amends ADR-004 (the plain front end now records events through `alr.record`) and ADR-015 (no `--log-dir`; the
 Logging setting stays in the view).
+
+*Amended by [ADR-023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output):* plain mode's detail log
+also holds the gates' and git's output and Claude's stderr.
 
 **Consequences:**
 
@@ -907,7 +911,8 @@ Logging setting stays in the view).
 *Negative:*
 
 - No way to put the logs elsewhere, or to turn them off in plain mode
-- The plain detail log is thinner than the view's: no tool activity, and no gate or git output
+- The plain detail log is thinner than the view's: no parsed tool activity (gate, git, and session-stderr lines were
+  added by ADR-023)
 - Another departure from gralph's `--log-dir`
 - A committing run needs `logs/` ignored by git, or it will not start
 
@@ -1036,5 +1041,46 @@ would make each of those changes an argument about compatibility.
 - A reader who knows gralph cannot assume `alr` behaves the same; this document set and the CHANGELOG are the reference
 - Plain mode, its exit codes, and the run log are the interface the outside agent depends on. Changing them needs care,
   a CHANGELOG entry, and the agent program updated with them
+
+### ADR-023: Plain mode records gate, git, and session-stderr output
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+In plain mode the gates, git, and Claude's stderr wrote straight to the terminal through inherited file descriptors, so
+`task-<id>.log` held only Claude's stdout and the `→ gate` and `→ commit` markers (ADR-019). The outside agent
+(ADR-022) reads that log after a failed task. It could see which gate failed but not why.
+
+**Decision:**
+
+- **Pipe the three streams.** The plain front end pipes a gate's, git's, and the session's stdout and stderr (the
+  session's stdout was already piped) and copies them to the terminal as raw bytes, stdout to stdout and stderr to
+  stderr, in the order read, so a progress bar that uses carriage returns still works.
+- **Report each line as `Activity`.** Each completed line (and a last line with no newline) is reported as an `Activity`
+  event, so the run log writer puts it in `task-<id>.log`. The stream front end already does the same for the view.
+  Only stdout is kept for the result line; stderr never reaches it.
+- **The log format does not change.** `run.jsonl` and the `task-<id>.log` line shapes are as before; the file only has
+  more lines.
+
+This amends ADR-019 (its plain detail log), and keeps the interface ADR-022 names.
+
+**Consequences:**
+
+*Positive:*
+
+- The outside agent sees why a gate or a commit failed from the log alone
+- Plain and stream front ends now record the same kinds of output
+
+*Negative:*
+
+- Bigger logs, as gate output can be long
+- A gate that checks for a terminal (`isatty`) now sees a pipe, so it may drop color or progress output
+- Stdout and stderr are read separately, so on the terminal they can interleave slightly differently than with a shared
+  terminal
+- Plain mode's exit codes and log format are the interface the outside agent depends on; changing them needs the care
+  ADR-022 asks for
 
 **Next:** [System Architecture](03_system_architecture.md)

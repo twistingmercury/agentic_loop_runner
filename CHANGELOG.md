@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Plain mode's run log now holds gate output, git output, and Claude's stderr.
+  `task-N.log` gets each line as it completes. The terminal shows the same
+  output as before, but a gate now sees a pipe, not a terminal, and stdout and
+  stderr can interleave slightly differently. The log's format is unchanged.
+
 ## [0.0.8] - 2026-10-08
 
 ### Added
