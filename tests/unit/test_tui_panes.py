@@ -5,6 +5,7 @@ from helpers import HandClock, until
 from textual.app import App, ComposeResult
 from textual.events import Resize
 from textual.geometry import Size
+from textual.widgets.data_table import ColumnKey
 
 from alr.record.events import (
     Activity,
@@ -86,6 +87,22 @@ async def test_tasks_pane_shows_how_long_a_finished_task_took() -> None:
         pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 65.0))
 
         assert _time_cell(pane, 0) == "1m 5s"
+
+
+async def test_tasks_pane_fits_a_run_of_ten_hours_or_more() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test() as pilot:
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+
+        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 39599.0))
+        await pilot.pause()
+
+        column = pane.columns[ColumnKey("time")]
+        assert _time_cell(pane, 0) == "10h 59m 59s"
+        assert (
+            column.get_render_width(pane) >= len("10h 59m 59s") + 2 * pane.cell_padding
+        )
 
 
 async def test_tasks_pane_shows_how_long_a_failed_task_took() -> None:

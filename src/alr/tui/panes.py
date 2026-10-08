@@ -25,8 +25,8 @@ _SYMBOLS = {COMPLETED: "✔", FAILED: "✖"}
 _PENDING = "·"
 _RUNNING = "▶"
 _MIN_NAME = 10
-# Room for any time under ten hours, such as "9h 59m 59s".
-_TIME_WIDTH = 10
+# Room for any time under a hundred hours, such as "10h 59m 59s".
+_TIME_WIDTH = 11
 # Always kept free: the bar appears once the rows outgrow the pane, after the cut was made.
 _SCROLLBAR = 2
 
