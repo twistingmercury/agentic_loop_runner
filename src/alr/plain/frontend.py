@@ -4,6 +4,7 @@ import asyncio
 import sys
 from asyncio.subprocess import PIPE
 from collections.abc import Callable, Sequence
+from typing import BinaryIO
 
 from alr.engine import proc
 from alr.engine.frontend import SessionResult
@@ -71,13 +72,13 @@ class PlainFrontEnd:
         print(f"gate: {gate.cmd}", flush=True)
         self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
         self._report(GateStarted(task, gate))
-        # No stdin, and stdout and stderr inherited, so the output passes straight through.
+        # No stdin. Both outputs are piped so each line can reach the run log.
         try:
-            process = await proc.start(["sh", "-c", gate.cmd])
+            process = await proc.start(["sh", "-c", gate.cmd], stdout=PIPE, stderr=PIPE)
         except OSError as exc:
             return proc.start_failed_text("sh", exc)
 
-        return await proc.finish(process)
+        return await proc.finish(process, _pump_outputs(process, self._raw_line(task)))
 
     def gate_finished(
         self,
@@ -134,16 +135,31 @@ async def _pump(
         raise RuntimeError("the session was started without stdin and stdout pipes")
 
     await asyncio.gather(
-        proc.feed_stdin(process.stdin, stdin), _tee(process.stdout, chunks, on_line)
+        proc.feed_stdin(process.stdin, stdin),
+        _tee(process.stdout, sys.stdout.buffer, on_line, chunks),
+    )
+
+
+async def _pump_outputs(
+    process: asyncio.subprocess.Process, on_line: Callable[[bytes], None]
+) -> None:
+    """Tee stdout and stderr at the same time, so a full pipe never blocks the gate."""
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("the gate was started without output pipes")
+
+    await asyncio.gather(
+        _tee(process.stdout, sys.stdout.buffer, on_line),
+        _tee(process.stderr, sys.stderr.buffer, on_line),
     )
 
 
 async def _tee(
     reader: asyncio.StreamReader,
-    chunks: list[bytes],
+    out: BinaryIO,
     on_line: Callable[[bytes], None],
+    chunks: list[bytes] | None = None,
 ) -> None:
-    """Copy the session's stdout to the terminal as raw bytes, keeping it for the result line.
+    """Copy a stream to out as raw bytes, keeping the chunks if asked (the result line needs them).
 
     Each line also goes to on_line as it completes, and a last line with no
     newline goes when the stream ends.
@@ -152,9 +168,11 @@ async def _tee(
     # long line is not copied again for every chunk.
     pieces: list[bytes] = []
     while chunk := await reader.read(_READ_SIZE):
-        sys.stdout.buffer.write(chunk)
-        sys.stdout.buffer.flush()
-        chunks.append(chunk)
+        out.write(chunk)
+        out.flush()
+        if chunks is not None:
+            chunks.append(chunk)
+
         *ends, rest = chunk.split(b"\n")
         for end in ends:
             on_line(b"".join([*pieces, end]))

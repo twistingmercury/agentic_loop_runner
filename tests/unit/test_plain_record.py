@@ -1,12 +1,14 @@
 """The plain front end reports run events to an optional recorder, and prints what it always did."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
 from helpers import git, run_loop
 
 from alr.engine.commit import open_repo
+from alr.errors import RunError
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
     Activity,
@@ -121,13 +123,62 @@ async def test_the_gate_marker_names_only_the_first_line(tmp_path: Path) -> None
     assert "→ gate echo hi" in _lines(events)
 
 
-async def test_gate_output_is_not_recorded(
+async def test_gate_stdout_and_stderr_reach_the_terminal_and_the_record(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="echo from-gate"))
+    gate = Gate(cmd="echo from-out; echo from-err >&2")
 
-    assert "from-gate" not in _lines(events)
-    assert "from-gate" in capfd.readouterr().out
+    events = await _run(tmp_path / "tasks.yaml", gate)
+
+    captured = capfd.readouterr()
+    assert "from-out" in captured.out
+    assert "from-err" in captured.err
+    assert "from-err\n" not in captured.out
+    assert "from-out\n" not in captured.err
+    lines = _lines(events)
+    marker = lines.index("→ gate echo from-out; echo from-err >&2")
+    assert sorted(lines[marker + 1 : marker + 3]) == ["from-err", "from-out"]
+
+
+async def test_gate_lines_are_recorded_between_the_marker_and_gate_finished(
+    tmp_path: Path,
+) -> None:
+    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="echo one; echo two"))
+
+    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    marker = events.index(Activity(finished.task, "→ gate echo one; echo two"))
+    one, two = Activity(finished.task, "one"), Activity(finished.task, "two")
+    assert marker < events.index(one) < events.index(two) < events.index(finished)
+
+
+async def test_gate_last_line_without_a_newline_is_recorded(tmp_path: Path) -> None:
+    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="printf 'a\\r\\nb'"))
+
+    lines = _lines(events)
+    assert lines[lines.index("a") + 1] == "b"
+
+
+async def test_failing_gate_still_records_its_output_and_returns_the_exit_text(
+    tmp_path: Path,
+) -> None:
+    events: list[Event] = []
+
+    with pytest.raises(RunError):
+        await run_loop(
+            _task_list(Gate(cmd="echo boom >&2; exit 3")),
+            tmp_path / "tasks.yaml",
+            front_end=PlainFrontEnd(events.append),
+        )
+
+    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    assert "boom" in _lines(events)
+    assert finished.error == "exit status 3"
+
+
+async def test_gate_stderr_is_decoded_leniently(tmp_path: Path) -> None:
+    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="printf 'bad\\377\\n' >&2"))
+
+    assert "bad\ufffd" in _lines(events)
 
 
 async def test_commit_marker_and_hash_are_recorded_but_git_output_is_not(
@@ -174,7 +225,7 @@ async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_
     task = Task(id=1, name="First", prompt="p1")
     recorder = PlainFrontEnd(events.append)._raw_line(task)
 
-    await _tee(reader, chunks, recorder)
+    await _tee(reader, sys.stdout.buffer, recorder, chunks)
 
     assert events == [Activity(task, line.decode("utf-8", errors="replace"))]
     assert "\ufffd" not in events[0].line[:-1]
