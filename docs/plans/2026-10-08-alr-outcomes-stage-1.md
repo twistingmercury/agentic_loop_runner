@@ -640,57 +640,133 @@ git commit -m "Exit 4 when a commit fails, with git's first output line as the r
 - Produces: `PASSED = "passed"` in `alr/tasks.py`, a log-only word never saved to `tasks.yaml`.
 - Produces: in `run` mode with a repository, `task_finished` says `passed` for a task whose gates passed, and `tasks.yaml` is written once, at the end, by `_finish_deferred`.
 
-- [ ] **Step 1: Write the failing tests** in `tests/unit/test_commit.py` (these reuse that file's `_two_tasks`, `_work_gate`, `_open`, `_saved_states`, `run_loop`)
+- [ ] **Step 1: Write the failing tests** in `tests/unit/test_commit.py`, which already defines `_two_tasks`, `_NUMBERED`, `_WORK_ONCE`, `_open`, `_task_file`, `_saved_states`, `_install_hook`, and `_cancel_during_commit`
 
 ```python
+class _SnapshotFrontEnd(PlainFrontEnd):
+    """Notes what tasks.yaml holds each time a task finishes."""
+
+    def __init__(self, tasks_file: Path) -> None:
+        super().__init__()
+        self.seen: list[list[tuple[str, str]]] = []
+        self._tasks_file = tasks_file
+
+    def task_finished(self, task: Task, error: str | None, seconds: float) -> None:
+        self.seen.append(_saved_states(self._tasks_file))
+        super().task_finished(task, error, seconds)
+
+
+def _save_first(task_list: TaskList, tasks_file: Path) -> None:
+    """Write the task file as the user left it, so a test can read it mid-run."""
+    tasks_file.parent.mkdir(parents=True, exist_ok=True)
+    tasks.save_tasks(str(tasks_file), task_list)
+
+
 @pytest.mark.usefixtures("fake_claude")
 async def test_run_mode_saves_nothing_until_the_commit_lands(git_repo: Path) -> None:
     tasks_file = _task_file(git_repo)
-    seen: list[list[tuple[str, str]]] = []
-    front_end = _SnapshotFrontEnd(tasks_file, seen)  # a PlainFrontEnd that appends _saved_states(tasks_file) on every task_finished
+    task_list = _two_tasks(_NUMBERED)
+    _save_first(task_list, tasks_file)
+    front_end = _SnapshotFrontEnd(tasks_file)
 
     await run_loop(
-        _two_tasks(_work_gate("one.txt")),
+        task_list,
         tasks_file,
         repo=await _open(tasks_file),
         commit_mode=CommitMode.RUN,
         front_end=front_end,
     )
 
-    assert seen == [[(PENDING, ""), (PENDING, "")]] * 2, "the file stays untouched mid-run"
+    assert front_end.seen == [[(PENDING, ""), (PENDING, "")]] * 2, (
+        "the file must stay untouched until the commit lands"
+    )
     assert _saved_states(tasks_file) == [(COMPLETED, ""), (COMPLETED, "")]
 
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_run_mode_failed_task_leaves_the_others_pending(git_repo: Path) -> None:
-    # the first task passes, the second's gate fails
-    ...
-    assert _saved_states(tasks_file) == [(PENDING, ""), (FAILED, "<the gate's text>")]
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(RunError, match="task 2: Second failed"):
+        await run_loop(
+            _two_tasks(_WORK_ONCE),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    states = _saved_states(tasks_file)
+    assert [state for state, _ in states] == [PENDING, FAILED]
+    assert states[1][1], "the failed task carries its reason"
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_run_mode_failed_commit_marks_only_the_last_task_failed(git_repo: Path) -> None:
-    _install_hook(git_repo, "echo no >&2\nexit 1")
-    ...
-    with pytest.raises(CommitFailedError):
-        ...
-    assert _saved_states(tasks_file) == [(PENDING, ""), (FAILED, "commit failed: no")]
+async def test_run_mode_failed_commit_marks_only_the_last_task_failed(
+    git_repo: Path,
+) -> None:
+    _install_hook(git_repo, "echo hook-says-no >&2\nexit 1")
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _two_tasks(_NUMBERED),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    assert caught.value.exit_code == 4
+    assert commit_subjects(git_repo) == ["init"]
+    assert _saved_states(tasks_file) == [
+        (PENDING, ""),
+        (FAILED, "commit failed: hook-says-no"),
+    ]
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_run_mode_resumed_run_keeps_earlier_completed_tasks(git_repo: Path) -> None:
-    # task 1 is already COMPLETED in the file; task 2's gate fails
-    ...
-    assert _saved_states(tasks_file) == [(COMPLETED, ""), (FAILED, "<text>")]
+async def test_run_mode_resumed_run_keeps_earlier_completed_tasks(
+    git_repo: Path,
+) -> None:
+    resumed = _two_tasks(Gate(cmd="exit 1"))
+    resumed.tasks[0].state = COMPLETED
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(RunError, match="task 2: Second failed"):
+        await run_loop(
+            resumed,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    states = _saved_states(tasks_file)
+    assert states[0] == (COMPLETED, ""), "work committed by an earlier run stays completed"
+    assert states[1][0] == FAILED
 
 
-async def test_run_mode_stop_during_the_final_commit_leaves_all_pending(git_repo: Path) -> None:
-    # adapt test_run_after_all_cancel_during_the_final_commit_stops_the_run (line 843)
-    ...
-    assert _saved_states(tasks_file) == [(PENDING, ""), (PENDING, "")]
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_stop_during_the_final_commit_leaves_all_pending(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_nested_file(
+        _task_file(git_repo),
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
+    )
+
+    await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        CommitMode.RUN,
+    )
+
+    assert _saved_states(tasks_file) == [(PENDING, "")], (
+        "the task passed its gates but its work was never committed"
+    )
 ```
 
-`_SnapshotFrontEnd` is a small subclass of `PlainFrontEnd` defined at the top of the test; fill in each `...` by copying the arrangement of the existing `run`-mode test next to it (`test_run_after_all_later_failed_task_leaves_earlier_work_uncommitted`, `..._commit_failure_stops_the_run`, `..._resumed_run_commits_only_the_tasks_that_ran`), then change only what is asserted. Rewrite those existing tests' `_saved_states` assertions to the new states above.
+Add `from alr.errors import CommitFailedError` and `from alr.plain.frontend import PlainFrontEnd` to the imports. Delete the four older `run`-mode tests these replace (`test_run_after_all_later_failed_task_leaves_earlier_work_uncommitted`, `test_run_after_all_commit_failure_stops_the_run`, and the `_saved_states` assertions elsewhere that expect `COMPLETED` before the commit) or rewrite their state assertions to the new states; the commit-subject and working-tree assertions in them stay.
 
 In `tests/unit/test_tui_panes.py`, a test that a `TaskFinished` with state `passed` shows `✔`.
 
