@@ -311,3 +311,46 @@ async def test_dry_run_commit_without_the_flag_git_is_never_consulted(
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
     assert "commit:" not in await _dry_run(tasks_file)
+
+
+async def test_dry_run_refuses_a_log_folder_that_is_a_file(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    (tmp_path / "logs").write_text("a file", encoding="utf-8")
+
+    out = io.StringIO()
+    with pytest.raises(RefusedError) as caught:
+        await dry_run(out, tasks_file, "", "", False)
+
+    assert caught.value.reason == "log-unwritable"
+    assert out.getvalue() == ""
+
+
+async def test_dry_run_refuses_a_read_only_log_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    (tmp_path / "logs").mkdir()
+    access = os.access
+
+    def deny_logs(path: str | Path, mode: int, **kwargs: bool) -> bool:
+        # chmod 500 would not stop root, so the refusal is made here instead.
+        denied = Path(path).name == "logs" and mode & os.W_OK
+        return not denied and access(path, mode, **kwargs)
+
+    monkeypatch.setattr(os, "access", deny_logs)
+
+    out = io.StringIO()
+    with pytest.raises(RefusedError) as caught:
+        await dry_run(out, tasks_file, "", "", False)
+
+    assert caught.value.reason == "log-unwritable"
+    assert out.getvalue() == ""
+    assert list((tmp_path / "logs").iterdir()) == []
+
+
+async def test_dry_run_creates_no_log_folder(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+
+    await _dry_run(tasks_file)
+
+    assert not (tmp_path / "logs").exists()

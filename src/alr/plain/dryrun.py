@@ -9,7 +9,7 @@ from alr.engine.gates import first_line, gate_limit
 from alr.engine.loop import read_tasks
 from alr.errors import INVALID_TASK_FILE, RefusedError, TaskFileError
 from alr.plain.report import print_tasks, refuse_failed_report, repo_for
-from alr.record.runlog import run_dir
+from alr.record.runlog import check_writable, run_dir
 from alr.tasks import TaskList
 
 
@@ -23,6 +23,7 @@ async def dry_run(
     repo_notes = io.StringIO()
     repo = await repo_for(repo_notes, tasks_file, commit, str(path))
     refuse_failed_report(out, task_list)
+    check_writable(path)
     print_tasks(out, task_list)
     _print_gate_limits(out, task_list, gate_timeout)
     if sandbox_file:

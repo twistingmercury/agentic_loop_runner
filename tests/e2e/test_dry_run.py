@@ -112,3 +112,23 @@ def test_dry_run_invalid_gates(tmp_path: Path, fake_claude: Path) -> None:
         in res.err
     )
     assert f"{tasks_path} is valid" not in res.out
+
+
+def test_dry_run_refuses_a_read_only_log_folder_like_a_real_run(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    logs.chmod(0o500)
+
+    try:
+        res = run_alr("-d", str(tmp_path), "--dry-run")
+    finally:
+        logs.chmod(0o700)
+
+    assert res.code == 3, res
+    assert res.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
+    assert res.out == ""
+    assert list(logs.iterdir()) == []
+    assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML

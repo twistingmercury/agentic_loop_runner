@@ -4,6 +4,7 @@ It only listens to the run's events; the loop knows nothing about it.
 """
 
 import contextlib
+import errno
 import json
 import os
 from collections.abc import Callable
@@ -92,6 +93,26 @@ def _create_run_dir(path: Path) -> Path:
             raise _create_error(candidate, exc) from exc
 
         return candidate
+
+
+def check_writable(path: Path) -> None:
+    """Refuse, as opening the log would, a path whose run folder cannot be made,
+    creating nothing: the dry run must not write, yet must agree with a real run."""
+    ancestor = path.parent
+    while not ancestor.exists() and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+
+    if not ancestor.is_dir():
+        raise _refused_unwritable(path, errno.ENOTDIR)
+
+    if not os.access(ancestor, os.W_OK | os.X_OK):
+        raise _refused_unwritable(path, errno.EACCES)
+
+
+def _refused_unwritable(path: Path, code: int) -> RefusedError:
+    return RefusedError(
+        LOG_UNWRITABLE, str(_create_error(path, OSError(code, os.strerror(code))))
+    )
 
 
 def _create_error(path: Path, exc: OSError) -> RunLogError:

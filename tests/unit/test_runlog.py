@@ -570,3 +570,42 @@ def test_discard_leaves_a_folder_that_holds_something_else(
 
     assert stranger.read_text(encoding="utf-8") == "not ours\n"
     assert not (path / "run.jsonl").exists(), "its own ledger still goes"
+
+
+def test_check_writable_accepts_a_missing_folder_under_a_writable_one(
+    tmp_path: Path,
+) -> None:
+    runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_check_writable_refuses_a_file_where_the_folder_belongs(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "logs").write_text("a file", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+
+
+def test_check_writable_refuses_a_folder_the_user_cannot_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "logs").mkdir()
+    access = os.access
+
+    def deny_logs(path: str | Path, mode: int, **kwargs: bool) -> bool:
+        # chmod 500 would not stop root, so the refusal is made here instead.
+        denied = Path(path).name == "logs" and mode & os.W_OK
+        return not denied and access(path, mode, **kwargs)
+
+    monkeypatch.setattr(os, "access", deny_logs)
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+    assert list(tmp_path.joinpath("logs").iterdir()) == []
