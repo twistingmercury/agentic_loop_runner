@@ -547,6 +547,9 @@ class AlrApp(App[None]):
 
     def _back_to_ready(self, exc: Exception) -> None:
         """A check failed before the run began; show why and let the user try again."""
+        # A stop that landed on this refusal is spent; left set, the next run's first Stop
+        # would count as the second and quit without the graceful cancel.
+        self._stopping = False
         # READY lets the refresh recompute the state from the settings.
         self.state = AppState.READY
         self._refresh()

@@ -739,6 +739,59 @@ async def test_a_second_stop_while_stopping_leaves_exit_code_130(
     assert app.exit_code == 130
 
 
+async def test_sigterm_during_prepare_finishes_stopped_with_exit_code_143(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        assert app.exit_code == 143
+
+
+async def test_a_ctrl_c_after_sigterm_during_prepare_keeps_exit_code_143(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await until(lambda: app._stopping)
+        await pilot.press("ctrl+c")
+        await until(lambda: not app.is_running)
+
+    assert app.exit_code == 143
+
+
+async def test_a_second_sigterm_while_stopping_quits_with_exit_code_143(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await until(lambda: app._stopping)
+        os.kill(os.getpid(), signal.SIGTERM)
+        await until(lambda: not app.is_running)
+
+    assert app.exit_code == 143
+
+
 async def test_a_second_stop_button_press_while_stopping_does_nothing(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -763,6 +816,93 @@ async def test_a_second_stop_button_press_while_stopping_does_nothing(
 
         await pilot.press("ctrl+c")
         await until(lambda: not app.is_running)
+
+
+def _refuse_on_the_first_cancel_then_hold(
+    monkeypatch: pytest.MonkeyPatch, entered: asyncio.Event
+) -> None:
+    """The first prepare fails when Stop cancels it; later ones block and cancel cleanly."""
+    calls = 0
+
+    async def prepare_refusing_once(settings: RunSettings, stop: Stop) -> Prepared:
+        nonlocal calls
+        calls += 1
+        first = calls == 1
+        entered.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            if first:
+                raise OSError("refused while stopping") from None
+
+            raise
+
+        raise AssertionError("the sleep ended")
+
+    monkeypatch.setattr(app_module, "prepare", prepare_refusing_once)
+
+
+async def test_a_refused_start_during_a_stop_clears_the_stop_state(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        await pilot.press("ctrl+c")
+        await until(lambda: app.state is AppState.READY)
+
+        assert not app._stopping
+
+
+async def test_the_first_stop_after_a_refused_start_is_graceful(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+        await pilot.press("ctrl+c")
+        await until(lambda: app.state is AppState.READY)
+        await pilot.click("#close")
+        entered.clear()
+
+        await pilot.press("s")
+        await until(entered.is_set)
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+        assert app.is_running
+        assert app.outcome == "stopped"
+        assert app.exit_code == 130
+
+
+async def test_a_failure_after_a_refused_stop_is_not_called_stopped(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    real_prepare = app_module.prepare
+    _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+        await pilot.press("ctrl+c")
+        await until(lambda: app.state is AppState.READY)
+        await pilot.click("#close")
+        monkeypatch.setattr(app_module, "run", _crashing_run)
+        monkeypatch.setattr(app_module, "prepare", real_prepare)
+
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "failed"
+        assert app.exit_code == 1
 
 
 @pytest.mark.parametrize(
