@@ -113,17 +113,17 @@ A refusal's first line on stderr is `error: refused: <reason>: <message>`, such 
 `error: refused: dirty-tree: --commit needs a clean work tree; commit, stash, or remove:`.
 The reason is one of:
 
-| Reason                     | Why alr will not start                                                    |
-| -------------------------- | ------------------------------------------------------------------------- |
-| `dirty-tree`               | A committing run found uncommitted changes                                |
-| `task-file-visible`        | A committing run found the task file visible to git                       |
-| `log-folder-visible`       | A committing run found the log folder visible to git                      |
-| `failed-tasks`             | The task file holds a failed task; use `--reset-failed`                   |
-| `invalid-task-file`        | The task file cannot be read or is not valid                              |
-| `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                        |
-| `log-unwritable`           | The run log folder cannot be created or opened                            |
-| `task-file-unwritable`     | `--reset-failed` could not save the task file                             |
-| `git-error`                | git failed while alr looked at the repository                             |
+| Reason                     | Why alr will not start                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `dirty-tree`               | A committing run found uncommitted changes                                            |
+| `task-file-visible`        | A committing run found the task file visible to git                                   |
+| `log-folder-visible`       | A committing run found the log folder visible to git                                  |
+| `failed-tasks`             | The task file holds a failed task; fix it and set it to pending (or `--reset-failed`) |
+| `invalid-task-file`        | The task file cannot be read or is not valid                                          |
+| `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                                    |
+| `log-unwritable`           | The run log folder cannot be created or opened                                        |
+| `task-file-unwritable`     | `--reset-failed` could not save the task file                                         |
+| `git-error`                | git failed while alr looked at the repository                                         |
 
 A failed commit's reason is the first line of git's (or the hook's) output, in the task's
 `error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The run log's
@@ -131,7 +131,7 @@ A failed commit's reason is the first line of git's (or the hook's) output, in t
 the `error`, and the `exit` code. `run_started` has `"commit": "none"`, `"task"`, or `"run"`.
 A `--dry-run` is refused like a real run, in the same order and with the same exit 3, including for a task that is
 `failed` (the table prints first). The full-screen view exits with the same codes: a stop by SIGTERM is `143`, and a
-Stop press or Ctrl-C is `130`. A refused run leaves the task file as it was and no folder under `logs/`;
+Stop press or Ctrl-C is `130`. A refused run leaves the task file as it was and nothing under `logs/`, not even a `logs/` it had to create;
 `--reset-failed` is saved only after every check has passed.
 
 A `run` commit shows in `git log` with the subject `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and

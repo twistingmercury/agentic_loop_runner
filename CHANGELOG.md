@@ -74,6 +74,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `failed` with `✖`.
 - A run log that cannot be written while another error is already propagating no
   longer hides that error.
+- `--dry-run` refuses an unwritable log folder like a real run: a `logs/` that
+  is read-only or a regular file exits 3 (`log-unwritable`), and the dry run
+  still creates nothing.
+- A refused save no longer leaves a `logs/` folder that the run created. Saving
+  the task file no longer overwrites, or deletes after a failed save, a
+  `tasks.yaml.tmp` of your own: it writes a uniquely named temporary file and
+  replaces the task file atomically.
+- The full-screen view's stop state resets when a start is refused, so the next
+  run's first Stop press stops it gracefully instead of exiting at once, and a
+  plain failure is no longer reported as a stop.
+- The full-screen view's rows follow the saved state after a stop: a task saved
+  `completed` stays completed, and only rows not saved return to pending.
+- With `--commit task`, a failed save after a commit that landed names the
+  commit hash in the error, as the `run` mode and stopped cases already did,
+  and exits 4.
+- Tests now pin the edges of the task name rule (`\x00`, `\x1f`, `\x7f`, `\x9f`,
+  with tab, space, and `\xa0` allowed), a failing `discard()` that must not hide
+  the refusal, and `--reset-failed` with no failed task leaving `tasks.yaml`
+  byte for byte as it was.
 
 ## [0.0.10] - 2026-10-08
 
