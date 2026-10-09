@@ -15,13 +15,15 @@ from alr.record.events import (
     Committed,
     Event,
     GateFinished,
+    RunDone,
+    RunResult,
     TaskFinished,
     TaskStarted,
 )
 from alr.durations import format_elapsed
 from alr.tasks import COMPLETED, FAILED, PASSED, TaskList
 
-_SYMBOLS = {COMPLETED: "✔", PASSED: "✔", FAILED: "✖"}
+_SYMBOLS = {COMPLETED: "✔", PASSED: "●", FAILED: "✖"}
 _PENDING = "·"
 _RUNNING = "▶"
 _MIN_NAME = 10
@@ -58,6 +60,8 @@ class TasksPane(DataTable[str]):
         """The whole name of each task, for the cut to start from."""
         # A test passes its own clock so the running time moves without waiting.
         self._clock = clock
+        self._passed: list[str] = []
+        """The row keys of the tasks that passed and wait for the commit, in order."""
         self._running_task: tuple[str, float] | None = None
         """The running task's row key and when it started."""
 
@@ -74,6 +78,7 @@ class TasksPane(DataTable[str]):
         """Fill the table from the file's tasks, as they stand now."""
         self.clear()
         self._running_task = None
+        self._passed = []
         self._names = {str(task.id): task.name for task in task_list.tasks}
         longest = max((len(key) for key in self._names), default=2)
         self.columns[ColumnKey("id")].width = max(2, longest)
@@ -120,6 +125,30 @@ class TasksPane(DataTable[str]):
             self._set_state(event.task.id, _SYMBOLS.get(event.task.state, _PENDING))
             self._running_task = None
             self._set_time(str(event.task.id), event.seconds)
+            self._note_passed(event)
+
+        if isinstance(event, RunDone):
+            self._settle_passed(event)
+
+    def _note_passed(self, event: TaskFinished) -> None:
+        if event.task.state == PASSED:
+            self._passed.append(str(event.task.id))
+
+    def _settle_passed(self, event: RunDone) -> None:
+        """Take back the `passed` rows of a run that did not complete.
+
+        A passed task is not complete until the one commit lands, and tasks.yaml
+        calls none of them so. A failed commit is saved on the last task that ran.
+        """
+        passed, self._passed = self._passed, []
+        if event.result is RunResult.COMPLETED:
+            return
+
+        for key in passed:
+            self._set_state(int(key), _PENDING)
+
+        if event.result is RunResult.COMMIT_FAILED and passed:
+            self._set_state(int(passed[-1]), _SYMBOLS[FAILED])
 
     def tick(self) -> None:
         """Count the running task's time up; the view calls this once a second."""

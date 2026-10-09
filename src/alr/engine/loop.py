@@ -22,6 +22,7 @@ from alr.errors import (
     RefusedError,
     RunCancelledError,
     RunError,
+    RunLogError,
     TaskFileError,
     quote,
 )
@@ -141,16 +142,38 @@ async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> 
     """
     started = time.monotonic()
     error: str | None = None
+    ended: BaseException | None = None
     result, exit_code = RunResult.COMPLETED, 0
     try:
         await _run_loop(task_list, options, front_end)
     except BaseException as exc:
         # Whatever ends the run is recorded, so a crash never reads as a clean finish.
+        ended = exc
         error = _error_text(exc)
         result, exit_code = _ending(exc, options.stop)
         raise
     finally:
-        front_end.run_done(error, time.monotonic() - started, result, exit_code)
+        _close_record(
+            front_end, ended, error, time.monotonic() - started, result, exit_code
+        )
+
+
+def _close_record(
+    front_end: FrontEnd,
+    ended: BaseException | None,
+    error: str | None,
+    seconds: float,
+    result: RunResult,
+    exit_code: int,
+) -> None:
+    """Write the run's end; a log that cannot take it must not hide the error that ended the run."""
+    try:
+        front_end.run_done(error, seconds, result, exit_code)
+    except RunLogError as exc:
+        if ended is None:
+            raise
+
+        ended.add_note(f"the run log could not record the end of the run: {exc}")
 
 
 def _ending(exc: BaseException, stop: Stop) -> tuple[RunResult, int]:

@@ -644,7 +644,21 @@ def test_parse_tasks_rejects_a_lone_surrogate(text: str, where: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "brk", ["\n", "\r", "\r\n", "\x85", "\u2028", "\u2029", "\x0b", "\x0c", "\n\n"]
+    "brk",
+    [
+        "\n",
+        "\r",
+        "\r\n",
+        "\x85",
+        "\u2028",
+        "\u2029",
+        "\x0b",
+        "\x0c",
+        "\x1c",
+        "\x1d",
+        "\x1e",
+        "\n\n",
+    ],
 )
 def test_a_task_name_with_a_line_break_is_rejected(brk: str) -> None:
     # json.dumps writes the break as an escape: a raw one inside a quoted YAML
@@ -658,6 +672,31 @@ def test_a_task_name_with_a_line_break_is_rejected(brk: str) -> None:
         tasks.parse_tasks(text)
 
     assert str(exc.value) == "tasks[0] (id 7): name: must be a single line"
+
+
+@pytest.mark.parametrize("char", ["\0", "\x01", "\x07", "\x1b", "\x7f"])
+def test_a_task_name_with_a_control_character_is_rejected(char: str) -> None:
+    # A NUL in a commit subject crashes git's argv with "embedded null byte".
+    name = json.dumps(f"a{char}b")
+    text = (
+        f"shared: {{prompt: s}}\ntasks:\n  - id: 7\n    name: {name}\n    prompt: p\n"
+    )
+
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert str(exc.value) == (
+        "tasks[0] (id 7): name: must not contain control characters"
+    )
+
+
+def test_a_task_name_with_a_tab_or_punctuation_loads() -> None:
+    name = json.dumps("fix\tthe 'thing': (a/b) #1 \u00e9")
+    text = (
+        f"shared: {{prompt: s}}\ntasks:\n  - id: 7\n    name: {name}\n    prompt: p\n"
+    )
+
+    assert tasks.parse_tasks(text).tasks[0].name == "fix\tthe 'thing': (a/b) #1 \u00e9"
 
 
 @pytest.mark.parametrize("brk", ["\n", "\x85", "\u2028"])

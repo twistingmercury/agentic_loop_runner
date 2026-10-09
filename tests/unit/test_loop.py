@@ -20,9 +20,11 @@ from alr.engine import loop
 from alr.engine.commit import CommitMode
 from alr.engine.stop import Stop
 from alr.errors import (
+    CommitFailedError,
     FailedTasksError,
     RefusedError,
     RunError,
+    RunLogError,
     TaskFileError,
     quote,
 )
@@ -649,6 +651,43 @@ async def test_run_done_records_a_stop_as_a_stop(
         await run_loop(task_list, tmp_path / "tasks.yaml", front_end=front_end)
 
     assert front_end.done == ["stopped"]
+
+
+class _BrokenLogFrontEnd(_RecordingFrontEnd):
+    """A front end whose run log cannot take the closing record."""
+
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
+        raise RunLogError("disk full")
+
+
+async def test_a_run_log_error_does_not_hide_the_error_that_ended_the_run(
+    record: Path, tmp_path: Path
+) -> None:
+    crash = CommitFailedError("commit failed: hook said no")
+    front_end = _BrokenLogFrontEnd(crash=crash)
+
+    with pytest.raises(CommitFailedError) as exc:
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+        )
+
+    assert exc.value is crash
+    assert any("disk full" in note for note in exc.value.__notes__)
+
+
+async def test_a_run_log_error_alone_still_ends_the_run(
+    record: Path, tmp_path: Path
+) -> None:
+    with pytest.raises(RunLogError, match="disk full"):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=_BrokenLogFrontEnd(),
+        )
 
 
 async def test_run_done_reports_a_failed_task_and_a_clean_run(

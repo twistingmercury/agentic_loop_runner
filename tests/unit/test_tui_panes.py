@@ -11,6 +11,8 @@ from alr.record.events import (
     Activity,
     Committed,
     GateFinished,
+    RunDone,
+    RunResult,
     TaskFinished,
     TaskStarted,
 )
@@ -46,14 +48,56 @@ async def test_tasks_pane_shows_each_task_and_its_state() -> None:
         assert pane.get_row_at(1)[0] == "·"
 
 
-async def test_tasks_pane_shows_a_passed_task_as_done() -> None:
+async def test_tasks_pane_shows_a_passed_task_with_its_own_symbol() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
         pane.load(TASK_LIST)
 
         pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
 
-        assert pane.get_row_at(0)[0] == "✔"
+        assert pane.get_row_at(0)[0] == "●"
+
+
+def _pass_both(pane: TasksPane) -> None:
+    pane.load(TASK_LIST)
+    pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
+    pane.apply(TaskFinished(Task(2, "Second", "p", state=PASSED), None, 1.0))
+
+
+@pytest.mark.parametrize(
+    ("result", "code"),
+    [(RunResult.FAILED, 1), (RunResult.STOPPED, 130)],
+)
+async def test_tasks_pane_takes_back_passed_rows_when_the_run_does_not_complete(
+    result: RunResult, code: int
+) -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        _pass_both(pane)
+
+        pane.apply(RunDone("boom", 1.0, result, code))
+
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "·"]
+
+
+async def test_tasks_pane_marks_the_commit_failure_on_the_last_task() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        _pass_both(pane)
+
+        pane.apply(RunDone("commit failed", 1.0, RunResult.COMMIT_FAILED, 4))
+
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "✖"]
+
+
+async def test_tasks_pane_keeps_passed_rows_once_the_run_completes() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        _pass_both(pane)
+
+        pane.apply(RunDone(None, 1.0, RunResult.COMPLETED, 0))
+
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["●", "●"]
 
 
 async def test_tasks_pane_marks_a_running_task() -> None:

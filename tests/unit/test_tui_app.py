@@ -134,6 +134,25 @@ async def test_a_clean_run_finishes_done_with_a_summary(git_repo: Path) -> None:
 
 
 @pytest.mark.usefixtures("fake_claude")
+async def test_a_failed_run_commit_leaves_no_check_mark_for_unfinished_tasks(
+    git_repo: Path,
+) -> None:
+    hook = git_repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    settings = _settings(git_repo, WORKING_TASKS, commit_mode=CommitMode.RUN)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+
+        rows = [app.query_one(TasksPane).get_row(key)[0] for key in ("1", "2")]
+
+    assert rows == ["·", "✖"]
+    assert _states(settings) == ["pending", "failed"]
+
+
+@pytest.mark.usefixtures("fake_claude")
 async def test_a_failed_task_finishes_failed(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

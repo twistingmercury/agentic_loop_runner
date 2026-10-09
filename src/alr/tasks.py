@@ -54,6 +54,10 @@ _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 # double-quoted one, which escapes them.
 _UNICODE_BREAKS = frozenset("\x85\u2028\u2029")
 
+# A name becomes a commit subject in git's argv, where a NUL crashes the call and
+# other control characters garble the log; a tab is ordinary spacing.
+_CONTROL = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f]")
+
 
 @dataclass
 class Gate:
@@ -247,6 +251,9 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     # knows every Unicode line break, and drops a trailing one, hence the compare.
     if name.splitlines() != [name]:
         raise TaskFileError(f"{where}: name: must be a single line")
+
+    if _CONTROL.search(name):
+        raise TaskFileError(f"{where}: name: must not contain control characters")
 
     prompt = _text(where, fields, "prompt", required=True)
     state = _text(where, fields, "state")
