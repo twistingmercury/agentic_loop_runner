@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import signal
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -18,7 +19,7 @@ from helpers import (
 )
 
 from alr import tasks
-from alr.engine import proc
+from alr.engine import loop, proc
 from alr.engine.commit import (
     CommitMode,
     Repo,
@@ -26,9 +27,19 @@ from alr.engine.commit import (
     open_repo,
     work_tree_root,
 )
+from alr.engine.stop import Stop
 from alr.errors import CommitFailedError, RefusedError, RunCancelledError, RunError
 from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    Gate,
+    RunResult,
+    Shared,
+    Task,
+    TaskList,
+)
 
 RUN_DIR = "20261001T140211"
 
@@ -346,10 +357,8 @@ def _head_staged(repo: Path) -> list[str]:
     return sorted(git(repo, "diff", "--cached", "--name-only").split())
 
 
-def _install_hook(repo: Path, script: str) -> None:
-    hook = write_nested_file(
-        repo / ".git" / "hooks" / "pre-commit", f"#!/bin/sh\n{script}\n"
-    )
+def _install_hook(repo: Path, script: str, name: str = "pre-commit") -> None:
+    hook = write_nested_file(repo / ".git" / "hooks" / name, f"#!/bin/sh\n{script}\n")
     hook.chmod(0o700)
 
 
@@ -643,26 +652,35 @@ async def _cancel_during_commit(
     ready: Path,
     script: str,
     commit_mode: CommitMode = CommitMode.TASK,
-) -> tuple[float, RunCancelledError]:
-    """Run one task whose pre-commit hook is script and cancel once the hook has started.
+    *,
+    hook: str = "pre-commit",
+    task_list: TaskList | None = None,
+    front_end: PlainFrontEnd | None = None,
+    stop: Stop | None = None,
+    expect: type[RunError] = RunCancelledError,
+) -> tuple[float, RunError]:
+    """Run tasks whose commit hook is script and cancel once the hook has started.
 
-    Returns how long the run took to end after the cancel, and its error.
+    The pre-commit hook runs before the commit exists, the post-commit hook after
+    it. Returns how long the run took to end after the cancel, and its error.
     """
-    _install_hook(repo_dir, script.replace("READY", f"'{ready}'"))
+    _install_hook(repo_dir, script.replace("READY", f"'{ready}'"), hook)
     repo = await _open(tasks_file)
     run = asyncio.ensure_future(
         run_loop(
-            _gated_task(_work_gate("one.txt")),
+            task_list or _gated_task(_work_gate("one.txt")),
             tasks_file,
             repo=repo,
             commit_mode=commit_mode,
+            front_end=front_end,
+            stop=stop,
         )
     )
     await wait_for_text(ready)
 
     started = time.monotonic()
     run.cancel()
-    with pytest.raises(RunCancelledError) as caught:
+    with pytest.raises(expect) as caught:
         await asyncio.wait_for(run, 10)
 
     return time.monotonic() - started, caught.value
@@ -1063,14 +1081,21 @@ async def test_run_mode_resumed_run_keeps_earlier_completed_tasks(
     assert states[1][0] == FAILED
 
 
+# A comment and a flow-style task: a rewrite of the file would lose both.
+_HAND_WRITTEN = (
+    "# keep me\nshared:\n  prompt: shared\ntasks:\n"
+    "  - {id: 1, name: First, prompt: p1, state: pending}\n"
+)
+_HAND_WRITTEN_TWO = (
+    _HAND_WRITTEN + "  - {id: 2, name: Second, prompt: block-second, state: pending}\n"
+)
+
+
 @pytest.mark.usefixtures("fake_claude")
-async def test_run_mode_stop_during_the_final_commit_leaves_all_pending(
+async def test_run_mode_stop_during_the_final_commit_leaves_the_file_as_it_was(
     git_repo: Path, tmp_path: Path
 ) -> None:
-    tasks_file = write_nested_file(
-        _task_file(git_repo),
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n",
-    )
+    tasks_file = write_nested_file(_task_file(git_repo), _HAND_WRITTEN)
 
     await _cancel_during_commit(
         git_repo,
@@ -1080,9 +1105,274 @@ async def test_run_mode_stop_during_the_final_commit_leaves_all_pending(
         CommitMode.RUN,
     )
 
-    assert _saved_states(tasks_file) == [(PENDING, "")], (
-        "the task passed its gates but its work was never committed"
+    # The commit never landed, so the file is as the run found it, byte for byte.
+    assert tasks_file.read_text(encoding="utf-8") == _HAND_WRITTEN
+    assert commit_subjects(git_repo) == ["init"]
+
+
+async def test_run_mode_stop_during_a_session_leaves_the_file_as_it_was(
+    git_repo: Path, record: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK_ON", "block-second")
+    tasks_file = write_nested_file(_task_file(git_repo), _HAND_WRITTEN_TWO)
+    task_list = tasks.parse_tasks(_HAND_WRITTEN_TWO)
+    task_list.shared.gates = [_WORK_ONCE]
+    run = asyncio.ensure_future(
+        run_loop(
+            task_list,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
     )
+    await until(lambda: len(fake_claude_records(record)) == 2)
+
+    run.cancel()
+    with pytest.raises(RunCancelledError, match="task 2"):
+        await asyncio.wait_for(run, 10)
+
+    assert tasks_file.read_text(encoding="utf-8") == _HAND_WRITTEN_TWO
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize(
+    ("commit_mode", "want_error", "want_states", "want_subject"),
+    [
+        pytest.param(
+            CommitMode.TASK,
+            "task 1: First: stopped during commit",
+            [(COMPLETED, ""), (PENDING, "")],
+            "First",
+            id="task mode completes only the committed task",
+        ),
+        pytest.param(
+            CommitMode.RUN,
+            "stopped during the final commit",
+            [(COMPLETED, ""), (COMPLETED, "")],
+            "alr: 2 tasks completed",
+            id="run mode completes every task the commit covers",
+        ),
+    ],
+)
+async def test_a_stop_after_the_commit_landed_saves_the_covered_tasks_completed(
+    git_repo: Path,
+    tmp_path: Path,
+    commit_mode: CommitMode,
+    want_error: str,
+    want_states: list[tuple[str, str]],
+    want_subject: str,
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _two_tasks(_NUMBERED)
+    _save_first(task_list, tasks_file)
+
+    # A post-commit hook runs once git has made the commit, so the stop arrives
+    # with the commit already in the history.
+    _, error = await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        commit_mode,
+        hook="post-commit",
+        task_list=task_list,
+    )
+
+    assert str(error) == want_error
+    assert commit_subjects(git_repo)[0] == want_subject
+    assert _saved_states(tasks_file) == want_states, (
+        "committed work must never be left pending for a rerun to redo"
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_stop_after_the_run_commit_landed_keeps_earlier_completed_tasks(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = TaskList(
+        shared=Shared(prompt="shared", gates=[_NUMBERED]),
+        tasks=[
+            Task(id=1, name="First", prompt="p1", state=COMPLETED),
+            Task(id=2, name="Second", prompt="p2"),
+            Task(id=3, name="Third", prompt="p3"),
+        ],
+    )
+    _save_first(task_list, tasks_file)
+
+    _, error = await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        CommitMode.RUN,
+        hook="post-commit",
+        task_list=task_list,
+    )
+
+    assert str(error) == "stopped during the final commit"
+    assert git(git_repo, "log", "-1", "--format=%b").split("\n")[:2] == [
+        "2: Second",
+        "3: Third",
+    ]
+    assert _saved_states(tasks_file) == [(COMPLETED, "")] * 3
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_second_stop_while_checking_head_still_saves_the_landed_commit(
+    git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _gated_task(_work_gate("one.txt"))
+    _save_first(task_list, tasks_file)
+    _install_hook(
+        git_repo, f"echo ready > '{tmp_path / 'ready'}'\nsleep 60", "post-commit"
+    )
+    real_head = loop.head
+    looking = asyncio.Event()
+    lookups: list[str | None] = []
+
+    async def slow_head_after_the_stop(repo: Repo) -> str | None:
+        # The first call is the one before the commit; the second is the look
+        # after the stop, held open so a second stop can arrive during it.
+        lookups.append(None)
+        if len(lookups) > 1:
+            looking.set()
+            await asyncio.sleep(0.2)
+
+        return await real_head(repo)
+
+    monkeypatch.setattr(loop, "head", slow_head_after_the_stop)
+    run = asyncio.ensure_future(
+        run_loop(task_list, tasks_file, repo=await _open(tasks_file))
+    )
+    await wait_for_text(tmp_path / "ready")
+
+    run.cancel()
+    await asyncio.wait_for(looking.wait(), 10)
+    run.cancel()
+    with pytest.raises(RunCancelledError, match="stopped during commit"):
+        await asyncio.wait_for(run, 10)
+
+    assert _saved_states(tasks_file) == [(COMPLETED, "")]
+
+
+class _EndingFrontEnd(PlainFrontEnd):
+    """Notes how the run ended: its result and the exit code alr will return."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.endings: list[tuple[RunResult, int]] = []
+
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
+        self.endings.append((result, exit_code))
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("hook", ["pre-commit", "post-commit"])
+@pytest.mark.parametrize("commit_mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_a_sigterm_during_a_commit_ends_stopped_with_exit_143(
+    git_repo: Path, tmp_path: Path, commit_mode: CommitMode, hook: str
+) -> None:
+    tasks_file = _task_file(git_repo)
+    front_end = _EndingFrontEnd()
+
+    # Whether or not the commit landed, a stop stays a stop: 143, never 1.
+    await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        commit_mode,
+        hook=hook,
+        front_end=front_end,
+        stop=Stop(signal.SIGTERM),
+    )
+
+    assert front_end.endings == [(RunResult.STOPPED, 143)]
+
+
+def _unsavable_file(repo: Path) -> Path:
+    """A task file whose folder does not exist, so saving it fails.
+
+    A read-only folder would not do: the Docker build runs the tests as root,
+    which ignores folder permissions. The folder is inside the ignored run/.
+    """
+    return repo / "run" / "gone" / "tasks.yaml"
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize(
+    ("commit_mode", "want_failure"),
+    [
+        pytest.param(
+            CommitMode.TASK,
+            "task 1: First failed: commit failed: hook-says-no",
+            id="task mode",
+        ),
+        pytest.param(CommitMode.RUN, "commit failed: hook-says-no", id="run mode"),
+    ],
+)
+async def test_a_commit_failure_that_cannot_be_saved_still_exits_4(
+    git_repo: Path, commit_mode: CommitMode, want_failure: str
+) -> None:
+    _install_hook(git_repo, "echo hook-says-no >&2\nexit 1")
+    tasks_file = _unsavable_file(git_repo)
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _gated_task(_work_gate("one.txt")),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=commit_mode,
+        )
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value).startswith(f"{want_failure}\n")
+    assert "failed to save tasks to" in str(caught.value)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_landed_run_commit_that_cannot_be_saved_names_the_commit(
+    git_repo: Path,
+) -> None:
+    tasks_file = _unsavable_file(git_repo)
+
+    with pytest.raises(RunError) as caught:
+        await run_loop(
+            _two_tasks(_NUMBERED),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    message = str(caught.value)
+    assert git(git_repo, "rev-parse", "HEAD").strip() in message
+    assert "tasks.yaml was not updated" in message
+    assert "failed to save tasks to" in message
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_stop_after_the_commit_landed_that_cannot_be_saved_names_the_commit(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    tasks_file = _unsavable_file(git_repo)
+
+    _, error = await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        CommitMode.RUN,
+        hook="post-commit",
+        expect=RunError,
+    )
+
+    message = str(error)
+    assert git(git_repo, "rev-parse", "HEAD").strip() in message
+    assert "tasks.yaml was not updated" in message
 
 
 async def test_work_tree_root_names_the_repository(git_repo: Path) -> None:

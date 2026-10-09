@@ -1,13 +1,14 @@
 """The run loop: each pending task in a fresh Claude session, saved as soon as it ends."""
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import NamedTuple
 
-from alr.engine.commit import CommitMode, Repo, commit, commit_all
+from alr.engine.commit import CommitMode, Repo, commit, commit_all, head
 from alr.engine.frontend import FrontEnd
 from alr.engine.gates import run_gates
 from alr.engine.result import last_result_line, outcome
@@ -29,7 +30,6 @@ from alr.tasks import (
     FAILED,
     PASSED,
     PENDING,
-    Gate,
     RunResult,
     Task,
     TaskList,
@@ -216,16 +216,75 @@ async def _commit_after_all(
     if not ran:
         return
 
+    before = await head(options.repo)
     try:
         error = await commit_all(options.repo, ran, front_end)
     except asyncio.CancelledError:
-        _finish_deferred(task_list, ran, options)
+        # A stop before the commit lands saves nothing: the file is still as the run found it.
+        await _save_if_landed(options.repo, before, ran, task_list, options.tasks_file)
         raise RunCancelledError("stopped during the final commit") from None
 
     if error is not None:
         raise _commit_failed(task_list, ran, options, error)
 
-    _save(ran[-1], task_list, options.tasks_file, None)
+    await _save_committed(options.repo, ran, task_list, options.tasks_file)
+
+
+async def _save_if_landed(
+    repo: Repo,
+    before: str | None,
+    covered: Sequence[Task],
+    task_list: TaskList,
+    tasks_file: str,
+) -> None:
+    """After a stop in the commit step, save the covered tasks completed if git had already made the commit.
+
+    A stop that lands after the commit exists must not undo it, or a rerun
+    would redo committed work. When HEAD did not move, or git cannot say,
+    nothing is saved.
+    """
+    after = await _head_after_stop(repo)
+    if after is None or after == before:
+        return
+
+    await _save_committed(repo, covered, task_list, tasks_file, after)
+
+
+async def _head_after_stop(repo: Repo) -> str | None:
+    """Read HEAD once more after a stop, shielded so another stop cannot cut the read short."""
+    lookup = asyncio.ensure_future(head(repo))
+    while not lookup.done():
+        # The view lets a user press Stop twice; the answer is still needed.
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.shield(lookup)
+
+    return lookup.result()
+
+
+async def _save_committed(
+    repo: Repo,
+    covered: Sequence[Task],
+    task_list: TaskList,
+    tasks_file: str,
+    commit_hash: str | None = None,
+) -> None:
+    """Save the tasks a landed commit covers as completed.
+
+    If the save fails, the error names the commit: it exists while the file
+    still says otherwise, and a driver must not blindly rerun.
+    """
+    for task in covered:
+        listed = _listed(task_list, task)
+        listed.state, listed.error = COMPLETED, ""
+
+    try:
+        save_tasks(tasks_file, task_list)
+    except TaskFileError as exc:
+        landed = commit_hash or await head(repo) or "(hash unreadable)"
+        raise RunError(
+            f"commit {landed} was made but tasks.yaml was not updated; "
+            f"mark the tasks it covers completed before rerunning: {exc}"
+        ) from exc
 
 
 def _commit_failed(
@@ -239,7 +298,14 @@ def _commit_failed(
     failure = f"commit failed: {error}"
     last = _listed(task_list, ran[-1])
     last.state, last.error = FAILED, failure
-    _finish_deferred(task_list, ran[:-1], options, failed=last, failure=failure)
+    _finish_deferred(
+        task_list,
+        ran[:-1],
+        options,
+        failed=last,
+        failure=failure,
+        error_type=CommitFailedError,
+    )
     return CommitFailedError(failure)
 
 
@@ -254,6 +320,7 @@ def _finish_deferred(
     options: RunOptions,
     failed: Task | None = None,
     failure: str | None = None,
+    error_type: type[RunError] = RunError,
 ) -> None:
     """Save a deferred run that did not land: every task in ran goes back to pending.
 
@@ -267,7 +334,7 @@ def _finish_deferred(
     if anchor is None:
         return
 
-    _save(anchor, task_list, options.tasks_file, failure)
+    _save(anchor, task_list, options.tasks_file, failure, error_type)
 
 
 async def _run_and_save(
@@ -280,24 +347,21 @@ async def _run_and_save(
     # The front end gets copies, so nothing it keeps changes under it.
     front_end.task_started(replace(task))
     started = time.monotonic()
-    ended = await _run_task(
-        task, task_list.shared.prompt, task_list.gate_list(), options, front_end
-    )
+    ended = await _run_task(task, task_list, options, front_end)
     task.state, task.error = ended.state, ended.error
     failure = (
         None
         if ended.state == COMPLETED
         else f"task {task.id}: {task.name} failed: {ended.error}"
     )
-    _save_ended(task, task_list, options, failure, ran)
+    # The commit step has its own exit code, which a save failure must not hide.
+    error_type = CommitFailedError if ended.commit_failed else RunError
+    _save_ended(task, task_list, options, failure, ran, error_type)
     front_end.task_finished(_shown(task, options), failure, time.monotonic() - started)
     if failure is None:
         return
 
-    if ended.commit_failed:
-        raise CommitFailedError(failure)
-
-    raise RunError(failure)
+    raise error_type(failure)
 
 
 def _save_ended(
@@ -306,17 +370,20 @@ def _save_ended(
     options: RunOptions,
     failure: str | None,
     ran: Sequence[Task],
+    error_type: type[RunError],
 ) -> None:
     """Save the file after a task, unless the run saves once at the end."""
     if not _defers_saving(options):
-        _save(task, task_list, options.tasks_file, failure)
+        _save(task, task_list, options.tasks_file, failure, error_type)
         return
 
     # A passed task waits for the commit; a failed one ends the run now.
     if failure is None:
         return
 
-    _finish_deferred(task_list, ran, options, failed=task, failure=failure)
+    _finish_deferred(
+        task_list, ran, options, failed=task, failure=failure, error_type=error_type
+    )
 
 
 def _shown(task: Task, options: RunOptions) -> Task:
@@ -329,13 +396,12 @@ def _shown(task: Task, options: RunOptions) -> Task:
 
 async def _run_task(
     task: Task,
-    prompt: str,
-    gates: Sequence[Gate],
+    task_list: TaskList,
     options: RunOptions,
     front_end: FrontEnd,
 ) -> _Outcome:
     """Run the task's session, the gates, and the commit; return the state and error to save."""
-    stdin_text = f"{prompt}\n\n{task.text()}\n"
+    stdin_text = f"{task_list.shared.prompt}\n\n{task.text()}\n"
     argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
     started = time.monotonic()
     try:
@@ -352,16 +418,32 @@ async def _run_task(
         return _Outcome(state, error)
 
     state, error = await run_gates(
-        replace(task), gates, options.gate_timeout, front_end
+        replace(task), task_list.gate_list(), options.gate_timeout, front_end
     )
     per_task = options.commit_mode is CommitMode.TASK
     if state != COMPLETED or options.repo is None or not per_task:
         return _Outcome(state, error)
 
+    return await _commit_task(
+        task, task_list, options.repo, options.tasks_file, front_end
+    )
+
+
+async def _commit_task(
+    task: Task,
+    task_list: TaskList,
+    repo: Repo,
+    tasks_file: str,
+    front_end: FrontEnd,
+) -> _Outcome:
+    """Commit the task's work; return completed, or failed with git's reason."""
+    before = await head(repo)
     try:
-        reason = await commit(options.repo, replace(task), front_end)
+        reason = await commit(repo, replace(task), front_end)
     except asyncio.CancelledError:
-        # Nothing is saved, so the next run picks the task up again.
+        # Unless git had already made the commit, nothing is saved, so the next
+        # run picks the task up again.
+        await _save_if_landed(repo, before, [task], task_list, tasks_file)
         raise RunCancelledError(
             f"task {task.id}: {task.name}: stopped during commit"
         ) from None
@@ -373,7 +455,11 @@ async def _run_task(
 
 
 def _save(
-    task: Task, task_list: TaskList, tasks_file: str, failure: str | None
+    task: Task,
+    task_list: TaskList,
+    tasks_file: str,
+    failure: str | None,
+    error_type: type[RunError] = RunError,
 ) -> None:
     try:
         save_tasks(tasks_file, task_list)
@@ -385,4 +471,4 @@ def _save(
 
         # Both, each on its own line: the failure alone would hide that the
         # file still says pending, the save error alone why the run stopped.
-        raise RunError(f"{failure}\n{exc}") from exc
+        raise error_type(f"{failure}\n{exc}") from exc

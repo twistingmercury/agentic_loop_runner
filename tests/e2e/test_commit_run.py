@@ -3,6 +3,7 @@
 The fake claude changes no files, so a gate does the "work" a commit picks up.
 """
 
+import signal
 import subprocess
 from pathlib import Path
 
@@ -15,9 +16,13 @@ from e2e_helpers import (
     run_alr,
     run_args,
     shared_block,
+    start_alr,
     task_states,
+    wait_for_file,
     write_tasks_yaml,
 )
+from test_outcomes import assert_run_finished
+from test_signal import stopped_at_exit
 
 # The one gate picks its file by what the first task left behind, so the two
 # tasks leave two files for the single commit to pick up.
@@ -118,3 +123,29 @@ def test_commit_followed_by_a_flag_takes_no_value(
 
     assert res.code == 2, res
     assert "argument --commit: expected one argument\n" in res.err
+
+
+def test_commit_run_sigterm_after_the_commit_landed_keeps_the_tasks_completed(
+    git_repo: Path, tasks_path: Path
+) -> None:
+    hook = git_repo / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(exist_ok=True)
+    ready = tasks_path.parent / "ready"
+    # Git has made the commit by the time a post-commit hook runs, and it waits
+    # for the hook, so the stop arrives with the commit already in the history.
+    hook.write_text(f"#!/bin/sh\necho $$ > {ready}\nsleep 60\n", encoding="utf-8")
+    hook.chmod(0o700)
+    process = start_alr(*run_args(tasks_path), "--commit", "run")
+
+    with stopped_at_exit(process, ready):
+        wait_for_file(ready, 10)
+        process.send_signal(signal.SIGTERM)
+        out, err = process.communicate(timeout=15)
+
+    assert process.returncode == 143, (out, err)
+    assert git(git_repo, "log", "--format=%s").splitlines() == [
+        "alr: 2 tasks completed",
+        "init",
+    ]
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed", 2: "completed"}
+    assert_run_finished(tasks_path.parent, "stopped", 143)

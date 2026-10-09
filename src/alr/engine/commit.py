@@ -110,6 +110,19 @@ async def commit_all(
     return await _commit_changes(repo, tasks[-1], front_end, [title, body])
 
 
+async def head(repo: Repo) -> str | None:
+    """Return the hash HEAD points at, or None when there is no commit yet or git cannot say."""
+    try:
+        returncode, stdout, _ = await _git(repo, "rev-parse", "--verify", "-q", "HEAD")
+    except OSError:
+        return None
+
+    if returncode != 0:
+        return None
+
+    return stdout.strip()
+
+
 async def work_tree_root() -> str | None:
     """Return the root of the work tree around the working directory, or None when there is none."""
     return await _find_root()

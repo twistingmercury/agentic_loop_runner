@@ -4,6 +4,7 @@ The fake claude changes no files, so a gate does the "work" a commit picks up.
 """
 
 import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +21,13 @@ from e2e_helpers import (
     run_args,
     task_errors,
     shared_block,
+    start_alr,
     task_states,
+    wait_for_file,
     write_tasks_yaml,
 )
+from test_outcomes import assert_run_finished
+from test_signal import stopped_at_exit
 
 DIRTY_TREE_ERROR = (
     "error: refused: dirty-tree: --commit needs a clean work tree; "
@@ -299,3 +304,29 @@ def test_commit_dry_run_dirty(repo: CommitRepo) -> None:
     assert res.code == 3, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
     assert "is valid" not in res.out
+
+
+def test_commit_sigterm_after_the_commit_landed_keeps_the_task_completed(
+    repo: CommitRepo,
+) -> None:
+    hook = repo.dir / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(exist_ok=True)
+    ready = repo.tasks_path.parent / "ready"
+    # Git has made the commit by the time a post-commit hook runs, and it waits
+    # for the hook, so the stop arrives with the commit already in the history.
+    hook.write_text(f"#!/bin/sh\necho $$ > {ready}\nsleep 60\n", encoding="utf-8")
+    hook.chmod(0o700)
+    process = start_alr(*run_args(repo.tasks_path), "--commit", "task")
+
+    with stopped_at_exit(process, ready):
+        wait_for_file(ready, 10)
+        process.send_signal(signal.SIGTERM)
+        out, err = process.communicate(timeout=15)
+
+    assert process.returncode == 143, (out, err)
+    assert repo.subjects() == ["First task", "init"]
+    assert task_states(read_tasks_yaml(repo.tasks_path)) == {
+        1: "completed",
+        2: "pending",
+    }
+    assert_run_finished(repo.tasks_path.parent, "stopped", 143)
