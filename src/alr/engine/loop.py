@@ -53,6 +53,9 @@ class _Outcome(NamedTuple):
     commit_failed: bool = False
     """Whether the commit step is what failed, which ends the run with its own exit code."""
 
+    landed: str | None = None
+    """The hash of the commit this task's work landed in, when alr made one."""
+
 
 @dataclass(frozen=True)
 class RunOptions:
@@ -294,7 +297,8 @@ async def _save_committed(
     """Save the tasks a landed commit covers as completed.
 
     If the save fails, the error names the commit: it exists while the file
-    still says otherwise, and a driver must not blindly rerun.
+    still says otherwise, and a driver must not blindly rerun. It exits with
+    the commit step's code, whichever mode or stop led here.
     """
     for task in covered:
         listed = _listed(task_list, task)
@@ -304,7 +308,7 @@ async def _save_committed(
         save_tasks(tasks_file, task_list)
     except TaskFileError as exc:
         landed = commit_hash or await head(repo) or "(hash unreadable)"
-        raise RunError(
+        raise CommitFailedError(
             f"commit {landed} was made but tasks.yaml was not updated; "
             f"mark the tasks it covers completed before rerunning: {exc}"
         ) from exc
@@ -379,7 +383,7 @@ async def _run_and_save(
     )
     # The commit step has its own exit code, which a save failure must not hide.
     error_type = CommitFailedError if ended.commit_failed else RunError
-    _save_ended(task, task_list, options, failure, ran, error_type)
+    await _save_ended(task, ended, task_list, options, failure, ran, error_type)
     front_end.task_finished(_shown(task, options), failure, time.monotonic() - started)
     if failure is None:
         return
@@ -387,8 +391,9 @@ async def _run_and_save(
     raise error_type(failure)
 
 
-def _save_ended(
+async def _save_ended(
     task: Task,
+    ended: _Outcome,
     task_list: TaskList,
     options: RunOptions,
     failure: str | None,
@@ -396,11 +401,28 @@ def _save_ended(
     error_type: type[RunError],
 ) -> None:
     """Save the file after a task, unless the run saves once at the end."""
-    if not _defers_saving(options):
-        _save(task, task_list, options.tasks_file, failure, error_type)
+    if _defers_saving(options):
+        _finish_deferred_task(task, task_list, options, failure, ran, error_type)
         return
 
-    # A passed task waits for the commit; a failed one ends the run now.
+    if ended.landed is not None and options.repo is not None:
+        await _save_committed(
+            options.repo, [task], task_list, options.tasks_file, ended.landed
+        )
+        return
+
+    _save(task, task_list, options.tasks_file, failure, error_type)
+
+
+def _finish_deferred_task(
+    task: Task,
+    task_list: TaskList,
+    options: RunOptions,
+    failure: str | None,
+    ran: Sequence[Task],
+    error_type: type[RunError],
+) -> None:
+    """End a deferred run at a failed task; a passed one waits for the commit."""
     if failure is None:
         return
 
@@ -463,6 +485,8 @@ async def _commit_task(
     before = await head(repo)
     try:
         reason = await commit(repo, replace(task), front_end)
+        # Read inside the try, so a stop here still saves the commit that landed.
+        landed = None if reason is not None else await _landed_since(repo, before)
     except asyncio.CancelledError:
         # Unless git had already made the commit, nothing is saved, so the next
         # run picks the task up again.
@@ -472,9 +496,21 @@ async def _commit_task(
         ) from None
 
     if reason is None:
-        return _Outcome(COMPLETED, "")
+        return _Outcome(COMPLETED, "", landed=landed)
 
     return _Outcome(FAILED, f"commit failed: {reason}", commit_failed=True)
+
+
+async def _landed_since(repo: Repo, before: str | None) -> str | None:
+    """Return the hash HEAD moved to since before, or None when no commit was made.
+
+    A task that changed nothing makes no commit, so there is no hash to name.
+    """
+    after = await head(repo)
+    if after == before:
+        return None
+
+    return after
 
 
 def _save(

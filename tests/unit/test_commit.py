@@ -24,11 +24,18 @@ from alr.engine.commit import (
     CommitMode,
     Repo,
     check_log_dir,
+    head,
     open_repo,
     work_tree_root,
 )
 from alr.engine.stop import Stop
-from alr.errors import CommitFailedError, RefusedError, RunCancelledError, RunError
+from alr.errors import (
+    CommitFailedError,
+    RefusedError,
+    RunCancelledError,
+    RunError,
+    TaskFileError,
+)
 from alr.plain.frontend import PlainFrontEnd
 from alr.tasks import (
     COMPLETED,
@@ -1364,6 +1371,7 @@ async def test_a_landed_run_commit_that_cannot_be_saved_names_the_commit(
         )
 
     message = str(caught.value)
+    assert caught.value.exit_code == 4
     assert git(git_repo, "rev-parse", "HEAD").strip() in message
     assert "tasks.yaml was not updated" in message
     assert "failed to save tasks to" in message
@@ -1386,8 +1394,103 @@ async def test_a_stop_after_the_commit_landed_that_cannot_be_saved_names_the_com
     )
 
     message = str(error)
+    assert error.exit_code == 4
     assert git(git_repo, "rev-parse", "HEAD").strip() in message
     assert "tasks.yaml was not updated" in message
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_landed_task_commit_that_cannot_be_saved_names_the_commit(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _gated_task(_work_gate("one.txt"))
+    tasks.save_tasks(str(tasks_file), task_list)
+    before = tasks_file.read_text(encoding="utf-8")
+
+    # The file exists, so what the save leaves behind can be compared.
+    def refuse_to_save(path: str, task_list: TaskList) -> None:
+        raise TaskFileError(f"failed to save tasks to {path}: disk full")
+
+    monkeypatch.setattr(loop, "save_tasks", refuse_to_save)
+
+    with pytest.raises(RunError) as caught:
+        await run_loop(
+            task_list,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.TASK,
+        )
+
+    message = str(caught.value)
+    assert caught.value.exit_code == 4
+    assert git(git_repo, "rev-parse", "HEAD").strip() in message
+    assert "tasks.yaml was not updated" in message
+    assert "disk full" in message
+    assert tasks_file.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_stop_in_the_commit_step_with_head_unreadable_saves_nothing(
+    git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _gated_task(_work_gate("one.txt"))
+    _save_first(task_list, tasks_file)
+    before = tasks_file.read_text(encoding="utf-8")
+    real_head = loop.head
+    lookups: list[None] = []
+
+    async def unreadable_after_the_stop(repo: Repo) -> str | None:
+        # The first call is the one before the commit; later ones are the look
+        # after the stop, where git cannot say.
+        lookups.append(None)
+        return await real_head(repo) if len(lookups) == 1 else None
+
+    monkeypatch.setattr(loop, "head", unreadable_after_the_stop)
+
+    _, error = await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        hook="post-commit",
+        task_list=task_list,
+    )
+
+    assert str(error) == "task 1: First: stopped during commit"
+    assert len(lookups) > 1, "the stop must have looked at HEAD again"
+    assert tasks_file.read_text(encoding="utf-8") == before, (
+        "with git unable to say, nothing is saved"
+    )
+
+
+async def test_head_names_the_commit_head_points_at(git_repo: Path) -> None:
+    repo = Repo(root=str(git_repo))
+
+    assert await head(repo) == git(git_repo, "rev-parse", "HEAD").strip()
+
+
+async def test_head_is_none_in_a_repository_with_no_commits(
+    git_repo: Path, outside: Path
+) -> None:
+    git(outside, "init", "--quiet", "--initial-branch=main")
+
+    assert await head(Repo(root=str(outside))) is None
+
+
+async def test_head_is_none_when_git_fails(git_repo: Path) -> None:
+    _break_config(git_repo)
+
+    assert await head(Repo(root=str(git_repo))) is None
+
+
+async def test_head_is_none_when_git_is_not_installed(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", "")
+
+    assert await head(Repo(root=str(git_repo))) is None
 
 
 async def test_work_tree_root_names_the_repository(git_repo: Path) -> None:
