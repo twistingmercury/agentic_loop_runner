@@ -9,7 +9,7 @@ import pytest
 from helpers import git, kill_holder_and_let_pipes_close, run_loop, wait_for_text
 
 from alr.engine import proc
-from alr.engine.commit import open_repo
+from alr.engine.commit import CommitMode, open_repo
 from alr.errors import RunError
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
@@ -24,7 +24,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Gate, RunResult, Shared, Task, TaskList
+from alr.tasks import COMPLETED, PASSED, Gate, RunResult, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -79,6 +79,33 @@ async def test_each_step_records_its_event(tmp_path: Path) -> None:
     [done] = [e for e in events if isinstance(e, RunDone)]
     assert done.error is None
     assert (done.result, done.exit_code) == (RunResult.COMPLETED, 0)
+
+
+async def test_a_run_mode_task_is_passed_until_the_commit_completes_it(
+    git_repo: Path,
+) -> None:
+    tasks_file = git_repo / "run" / "tasks.yaml"
+    events: list[Event] = []
+
+    await run_loop(
+        _task_list(Gate(cmd="echo work > one.txt")),
+        tasks_file,
+        repo=await open_repo(str(tasks_file)),
+        front_end=PlainFrontEnd(events.append),
+        commit_mode=CommitMode.RUN,
+    )
+
+    [finished] = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished.task.state == PASSED
+
+
+async def test_a_task_mode_task_is_completed_when_it_finishes(git_repo: Path) -> None:
+    tasks_file = git_repo / "run" / "tasks.yaml"
+
+    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
+
+    [finished] = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished.task.state == COMPLETED
 
 
 async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(

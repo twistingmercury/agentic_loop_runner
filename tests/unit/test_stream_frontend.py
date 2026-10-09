@@ -373,6 +373,29 @@ async def test_nothing_staged_reports_no_committed(git_repo: Path) -> None:
     assert "→ commit First" not in _lines(events)
 
 
+async def test_a_failed_commit_reports_gits_first_line_as_the_reason(
+    git_repo: Path,
+) -> None:
+    hook = git_repo / ".git" / "hooks" / "pre-commit"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\necho '  hook-says-no  '\necho second\nexit 1\n")
+    hook.chmod(0o700)
+    tasks_file = git_repo / "run" / "tasks.yaml"
+    repo = await open_repo(str(tasks_file))
+    events: list[Event] = []
+
+    with pytest.raises(RunError):
+        await _run(
+            _task_list(Gate(cmd="echo work > one.txt")),
+            tasks_file,
+            repo=repo,
+            events=events,
+        )
+
+    [finished] = _of(events, TaskFinished)
+    assert finished.error == "task 1: First failed: commit failed: hook-says-no"
+
+
 async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(
     tmp_path: Path,
 ) -> None:
@@ -494,6 +517,14 @@ def test_first_line_trims_a_long_line_to_200_characters() -> None:
     first.take("x" * 300)
 
     assert first.reason("exit status 1") == "x" * 200
+
+
+def test_first_line_keeps_the_first_200_characters_of_a_mixed_line() -> None:
+    first = FirstLine()
+
+    first.take("a" * 200 + "b" * 100)
+
+    assert first.reason("exit status 1") == "a" * 200
 
 
 def test_first_line_reason_is_none_for_success() -> None:

@@ -36,6 +36,18 @@ SECOND_TASK_FAILS = [
 ]
 SECOND_TASK_FAILS_YAML = shared_block("Body.", SECOND_TASK_FAILS) + TWO_TASKS
 
+TWO_WORK_TASKS_YAML = (
+    shared_block(
+        "Body.",
+        [
+            {
+                "cmd": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
+            }
+        ],
+    )
+    + TWO_TASKS
+)
+
 BLOCKED_TASK_YAML = (
     shared_block()
     + """tasks:
@@ -120,12 +132,16 @@ def test_reset_failed_with_an_unwritable_log_folder_leaves_the_file_alone(
     assert tasks_path.read_text(encoding="utf-8") == failed_yaml
 
 
-def test_commit_failure_exits_4(git_repo: Path, fake_claude: Path) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+def install_pre_commit_hook(git_repo: Path, script: str) -> None:
     hook = git_repo / ".git" / "hooks" / "pre-commit"
     hook.parent.mkdir(exist_ok=True)
-    hook.write_text("#!/bin/sh\necho no\nexit 1\n", encoding="utf-8")
+    hook.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
     hook.chmod(0o700)
+
+
+def test_commit_failure_exits_4(git_repo: Path, fake_claude: Path) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+    install_pre_commit_hook(git_repo, "echo no\nexit 1")
 
     res = run_alr(*run_args(tasks_path), "--commit", "task")
 
@@ -171,3 +187,88 @@ def test_run_mode_failed_run_leaves_nothing_completed(
         "pending",
         "failed",
     ]
+
+
+def test_run_mode_failed_commit_exits_4_and_leaves_the_last_task_failed(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", TWO_WORK_TASKS_YAML)
+    install_pre_commit_hook(git_repo, "echo no\nexit 1")
+
+    res = run_alr(*run_args(tasks_path), "--commit", "run")
+
+    assert res.code == 4, res
+    assert list(task_states(read_tasks_yaml(tasks_path)).values()) == [
+        "pending",
+        "failed",
+    ]
+    assert_run_finished(tasks_path.parent, "commit_failed", 4)
+
+
+def test_task_mode_commit_failure_names_the_task_in_the_run_finished_error(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+    install_pre_commit_hook(git_repo, "echo no\nexit 1")
+
+    run_alr(*run_args(tasks_path), "--commit", "task")
+
+    assert run_log(tasks_path.parent)[-1]["error"] == (
+        "task 1: First task failed: commit failed: no"
+    )
+
+
+def test_run_mode_commit_failure_has_no_task_in_the_run_finished_error(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+    install_pre_commit_hook(git_repo, "echo no\nexit 1")
+
+    run_alr(*run_args(tasks_path), "--commit", "run")
+
+    assert run_log(tasks_path.parent)[-1]["error"] == "commit failed: no"
+
+
+def test_run_mode_ledger_says_passed_until_the_commit_lands(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+
+    res = run_alr(*run_args(tasks_path), "--commit", "run")
+
+    assert res.code == 0, res
+    finished = [e for e in run_log(tasks_path.parent) if e["event"] == "task_finished"]
+    assert [e["state"] for e in finished] == ["passed"]
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
+
+
+def test_task_mode_ledger_says_completed(git_repo: Path, fake_claude: Path) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+
+    res = run_alr(*run_args(tasks_path), "--commit", "task")
+
+    assert res.code == 0, res
+    finished = [e for e in run_log(tasks_path.parent) if e["event"] == "task_finished"]
+    assert [e["state"] for e in finished] == ["completed"]
+
+
+@pytest.mark.parametrize("mode", ["task", "run"])
+def test_a_signal_during_a_commit_exits_143(
+    git_repo: Path, fake_claude: Path, mode: str
+) -> None:
+    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
+    ready_file = tasks_path.parent / "ready"
+    # The pre-commit hook runs before the commit exists, so the stop arrives mid-commit.
+    install_pre_commit_hook(git_repo, f"echo $$ > {ready_file}\nsleep 60")
+
+    with stopped_at_exit(
+        start_alr(*run_args(tasks_path), "--commit", mode), ready_file
+    ) as process:
+        wait_for_file(ready_file, 10)
+
+        process.send_signal(signal.SIGTERM)
+        out, err = process.communicate(timeout=15)
+
+        assert process.returncode == 143, (out, err)
+        assert_run_finished(tasks_path.parent, "stopped", 143)
+        assert tasks_path.read_text(encoding="utf-8") == ONE_WORK_TASK_YAML

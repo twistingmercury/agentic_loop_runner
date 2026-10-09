@@ -740,6 +740,21 @@ async def test_a_failed_task_ends_failed_with_exit_1(
     assert front_end.endings == [(RunResult.FAILED, 1)]
 
 
+async def test_a_crash_that_is_not_an_alr_error_ends_failed_with_exit_1(
+    record: Path, tmp_path: Path
+) -> None:
+    front_end = _RecordingFrontEnd(crash=RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+        )
+
+    assert front_end.endings == [(RunResult.FAILED, 1)]
+
+
 @pytest.mark.parametrize(
     ("stop", "exit_code"),
     [(Stop(), 130), (Stop(signal.SIGTERM), 143)],

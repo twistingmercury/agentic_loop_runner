@@ -19,7 +19,7 @@ from helpers import (
 )
 
 from alr import tasks
-from alr.engine import loop, proc
+from alr.engine import commit, loop, proc
 from alr.engine.commit import (
     CommitMode,
     Repo,
@@ -300,6 +300,21 @@ async def test_a_broken_repository_is_refused_with_git_error(git_repo: Path) -> 
 
     assert caught.value.reason == "git-error"
     assert str(caught.value).startswith("refused: git-error: --commit: git rev-parse: ")
+
+
+async def test_ignored_refuses_with_git_error_when_check_ignore_fails(
+    git_repo: Path,
+) -> None:
+    repo = await _open(_task_file(git_repo))
+    _break_config(git_repo)
+
+    with pytest.raises(RefusedError) as caught:
+        await commit._ignored(repo, "logs")
+
+    assert caught.value.reason == "git-error"
+    assert str(caught.value).startswith(
+        "refused: git-error: --commit: git check-ignore: "
+    )
 
 
 async def test_open_repo_status_failure_carries_gits_message(
