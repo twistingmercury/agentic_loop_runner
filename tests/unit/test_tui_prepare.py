@@ -7,6 +7,7 @@ import pytest
 from helpers import write_file, write_nested_file
 
 from alr.engine.commit import CommitMode, Repo, find_repo
+from alr.engine.stop import Stop
 from alr.errors import FailedTasksError, RefusedError, RunLogError
 from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
@@ -29,6 +30,16 @@ def _settings(repo: Path, **changes: object) -> RunSettings:
         tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False
     )
     return replace(settings, **changes)
+
+
+async def test_prepare_puts_the_apps_stop_into_the_run_options(
+    git_repo: Path,
+) -> None:
+    stop = Stop()
+
+    prepared = await prepare(_settings(git_repo), stop)
+
+    assert prepared.options.stop is stop
 
 
 async def test_prepare_returns_the_options_for_a_valid_setup(git_repo: Path) -> None:

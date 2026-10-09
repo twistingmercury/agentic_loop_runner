@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from alr.engine.stop import Stop
 from alr.errors import RefusedError, RunLogError
 from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
@@ -615,7 +617,7 @@ def _hold_prepare(
 ) -> None:
     """Make prepare block, optionally ignoring the first cancel like a stuck check."""
 
-    async def held(settings: RunSettings) -> Prepared:
+    async def held(settings: RunSettings, stop: Stop) -> Prepared:
         entered.set()
         refusals = 1 if refuse_first_cancel else 0
         while True:
@@ -652,7 +654,7 @@ async def test_pressing_the_stop_button_twice_leaves_the_app_open(
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_to_stop(settings: RunSettings) -> Prepared:
+    async def slow_to_stop(settings: RunSettings, stop: Stop) -> Prepared:
         entered.set()
         try:
             await asyncio.sleep(3600)
@@ -755,7 +757,7 @@ async def test_a_second_stop_button_press_while_stopping_does_nothing(
 async def test_an_unexpected_error_in_prepare_returns_to_ready_with_a_dialog(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch, error: OSError, shown: str
 ) -> None:
-    async def failing(settings: RunSettings) -> Prepared:
+    async def failing(settings: RunSettings, stop: Stop) -> Prepared:
         raise error
 
     monkeypatch.setattr(app_module, "prepare", failing)
@@ -1109,6 +1111,103 @@ async def test_the_users_stop_leaves_exit_code_130(
         await _finished(app)
 
         assert app.exit_code == 130
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_sigterm_during_a_run_leaves_exit_code_143_in_the_app_and_the_ledger(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_logged_settings(git_repo, TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.state is AppState.RUNNING)
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await _finished(app)
+
+        assert app.exit_code == 143
+        assert '"exit":143' in _ledger(git_repo)
+
+
+async def test_sigterm_with_no_run_leaves_exit_code_143(git_repo: Path) -> None:
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await until(lambda: not app.is_running)
+
+    assert app.exit_code == 143
+
+
+def _press_ctrl_c(pilot: Pilot) -> Awaitable[None]:
+    return pilot.press("ctrl+c")
+
+
+def _send_sigterm(pilot: Pilot) -> Awaitable[None]:
+    os.kill(os.getpid(), signal.SIGTERM)
+    return pilot.pause()
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize(
+    ("first_stop", "code"),
+    [(_press_ctrl_c, 130), (_send_sigterm, 143)],
+    ids=["ctrl-c", "sigterm"],
+)
+async def test_a_second_stop_during_a_stuck_commit_exits_with_the_stops_code(
+    git_repo: Path,
+    tmp_path: Path,
+    first_stop: Callable[[Pilot], Awaitable[None]],
+    code: int,
+) -> None:
+    ready = tmp_path / "hook.ready"
+    # Ignoring TERM keeps git alive after the first stop, so the engine is still stopping.
+    hook = write_nested_file(
+        git_repo / ".git" / "hooks" / "pre-commit",
+        f"#!/bin/sh\ntrap '' TERM\necho ready > {ready}\nsleep 1\n",
+    )
+    hook.chmod(0o700)
+    app = AlrApp(_logged_settings(git_repo, WORKING_TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await wait_for_text(ready)
+
+        await first_stop(pilot)
+        await until(lambda: app._stopping)
+        await pilot.press("ctrl+c")
+        await until(lambda: not app.is_running)
+        # Let the hook end, so no subprocess outlives the event loop.
+        await asyncio.sleep(1.2)
+
+    assert app.exit_code == code
+
+
+async def _no_run_done(*args: object) -> None:
+    """A run that returns without ever posting a RunDone."""
+
+
+async def _crashing_run(*args: object) -> None:
+    raise RuntimeError("boom")
+
+
+@pytest.mark.parametrize(
+    "fake_run", [_no_run_done, _crashing_run], ids=["no result", "crash"]
+)
+async def test_a_run_that_dies_without_a_result_leaves_exit_code_1(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_run: Callable[..., Awaitable[None]],
+) -> None:
+    monkeypatch.setattr(app_module, "run", fake_run)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+
+        assert app.outcome == "failed"
+        assert app.exit_code == 1
 
 
 async def test_stop_during_prepare_leaves_exit_code_130(
@@ -1571,7 +1670,7 @@ async def test_the_dropdowns_are_disabled_while_running_and_enabled_after_a_fail
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def held_then_failing(settings: RunSettings) -> Prepared:
+    async def held_then_failing(settings: RunSettings, stop: Stop) -> Prepared:
         entered.set()
         await release.wait()
         raise OSError("gone")

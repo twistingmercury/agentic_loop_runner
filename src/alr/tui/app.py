@@ -112,6 +112,8 @@ class AlrApp(App[None]):
         self.exit_code = 0
         """What `run_app` returns: the final run's code, 0 when no run ever ended."""
         self._stopping = False
+        self._stop = Stop()
+        """The one signal object: the SIGTERM handler fills it, the engine and the exit code read it."""
         self._worker: Worker[None] | None = None
         self._started = 0.0
         self._task_list: TaskList | None = None
@@ -175,7 +177,7 @@ class AlrApp(App[None]):
         self.call_after_refresh(self._show_tasks)
         self._refresh()
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, self.action_stop)
+        loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
         self.run_worker(self.launch_sequence(), exit_on_error=False)
 
     def _look_for_work_tree(self) -> None:
@@ -469,9 +471,23 @@ class AlrApp(App[None]):
         self._refresh()
         self._worker = self.run_worker(self._run(), name="run", exit_on_error=False)
 
+    def _on_sigterm(self) -> None:
+        self._stop.signum = signal.SIGTERM
+        # A finished run keeps its own code; with no run going SIGTERM is the whole outcome.
+        if self.state in (AppState.SETUP, AppState.READY):
+            self.exit_code = self._stop.exit_code()
+
+        self.action_stop()
+
     def action_stop(self) -> None:
         # A second Stop quits whatever the run is doing, so nobody is ever trapped.
-        if self.state is not AppState.RUNNING or self._stopping:
+        if self.state is AppState.RUNNING and self._stopping:
+            # The run never reported, and a stopped run must not look like a success.
+            self.exit_code = self._stop.exit_code()
+            self.exit()
+            return
+
+        if self.state is not AppState.RUNNING:
             self.exit()
             return
 
@@ -485,7 +501,7 @@ class AlrApp(App[None]):
 
     async def _run(self) -> None:
         try:
-            prepared = await prepare(self.settings)
+            prepared = await prepare(self.settings, self._stop)
         except asyncio.CancelledError:
             # Stop before the engine started: it never posts a RunDone, so this does.
             self._finish_or_fail(_STOPPED)
@@ -562,7 +578,7 @@ class AlrApp(App[None]):
 
         # Only the user's Stop is a stop; anything else here is a run that died without a result.
         if self._stopping:
-            result, exit_code = RunResult.STOPPED, Stop().exit_code()
+            result, exit_code = RunResult.STOPPED, self._stop.exit_code()
         else:
             result, exit_code = RunResult.FAILED, 1
 

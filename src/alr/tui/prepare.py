@@ -14,6 +14,7 @@ from alr.engine.loop import (
     reset_in_memory,
     save_for_start,
 )
+from alr.engine.stop import Stop
 from alr.errors import LOG_FOLDER_VISIBLE, RefusedError
 from alr.record.events import Event
 from alr.record.runlog import Info, RunLog, run_dir
@@ -43,12 +44,14 @@ class Prepared:
             self.log.discard()
 
 
-async def prepare(settings: RunSettings) -> Prepared:
+async def prepare(settings: RunSettings, stop: Stop | None = None) -> Prepared:
     """Check everything a run starts with; nothing is written before every check passes.
 
     The dialogs checked their own answers as they were given, but the files
     and the repository can change meanwhile, so the checks run again here on
-    the values the run will use.
+    the values the run will use. The run's `RunOptions` carry `stop`, the
+    app's own object, so the engine reports the signal the app was given; the
+    default is for callers that handle no signals.
     """
     task_list = read_tasks(settings.tasks_file)
     repo = await _find_repo(settings)
@@ -68,6 +71,7 @@ async def prepare(settings: RunSettings) -> Prepared:
         session_args=session_args,
         repo=repo,
         commit_mode=settings.commit_mode,
+        stop=Stop() if stop is None else stop,
     )
     log = None if log_path is None else _open_log(settings, log_path)
     prepared = Prepared(task_list, options, log)
