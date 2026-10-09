@@ -17,9 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** a refusal's first stderr line is now
   `error: refused: <reason>: <message>`, with the reason `dirty-tree`,
   `task-file-visible`, `log-folder-visible`, `failed-tasks`,
-  `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, or
-  `git-error`. A refusal writes no run log and changes nothing on disk, and
-  `--reset-failed` is applied only after the checks pass.
+  `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`,
+  `task-file-unwritable` (a `--reset-failed` that cannot save the task file), or
+  `git-error`. A refusal leaves nothing on disk: no run log, and the task file
+  as it was. `--reset-failed` is applied in memory first and saved only after
+  every other check and the log folder have passed.
 - **Breaking:** `run_started.commit` in the run log is a string, `"none"`,
   `"task"`, or `"run"`, where it was a boolean.
 - **Breaking:** `--commit run` saves nothing until the commit lands. If a task
@@ -31,8 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** with `--commit task`, `completed` also means committed. A commit
   that fails (git, a hook, a missing identity) marks the task `failed` with
   `commit failed: <reason>`, leaves the work staged, and exits 4.
-- **Breaking:** a task name with a line break is rejected when the file loads,
-  with an error that names the task id.
+- **Breaking:** a task name with a line break or any other control character
+  (a tab is fine) is rejected when the file loads, with an error that names the
+  task id.
 
 ### Added
 
@@ -43,6 +46,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A commit failure's reason is the first line of git's output, up to 200
   characters; `task-N.log` keeps the full text.
 - The full-screen view exits with the same codes as plain mode.
+
+### Fixed
+
+- A refused run no longer leaves anything behind. `--reset-failed` used to
+  reach the disk before the later checks, so a dirty tree, a visible log folder,
+  or an unwritable `logs/` left the file reset; a failed log open left an empty
+  run folder; and the view saved the gates and the reset before it opened the
+  log. Quitting the view before Start now leaves the file untouched too.
+- `--dry-run` refuses like a real run: a task that is `failed` and a log folder
+  git can see both exit 3 (`failed-tasks`, `log-folder-visible`), and its
+  invalid-file message no longer carries `failed to start loop runner:`.
+- The full-screen view exits 143 after SIGTERM, not 130, and a second Stop
+  press while a run is stopping no longer turns the stop into exit 0.
+- A stop that lands after git has already made the commit no longer undoes it:
+  the tasks that commit covers are saved `completed` before the stop is
+  reported, in `task` and `run` mode, so a rerun never redoes committed work.
+- A stop in `run` mode before the commit lands no longer rewrites `tasks.yaml`;
+  the file stays byte for byte as it was.
+- A commit failure and a failed save together still exit 4, and a successful
+  `run` commit whose final save fails names the commit, so a driver does not
+  blindly rerun.
+- A task `name` with a NUL or another control character could crash a commit;
+  it is rejected when the file loads.
+- The full-screen view gives `passed` rows their own symbol, returns them to
+  pending when a `run` ends other than completed, and marks a task saved
+  `failed` with `✖`.
+- A run log that cannot be written while another error is already propagating no
+  longer hides that error.
 
 ## [0.0.10] - 2026-10-08
 

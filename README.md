@@ -81,7 +81,7 @@ a commit mode shows a note that nothing will be committed), and it keeps run log
 | `--dry-run`                 |       | Validate and report only                                                                 |
 | `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--yolo`                    |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
-| `--commit {none,task,run}`  |       | When to commit: `none` (the default) never touches git, `task` commits each completed task after its gates pass, `run` commits once after the last task (a failed or stopped run makes no commit) |
+| `--commit {none,task,run}`  |       | When to commit: `none` (the default) never touches git, `task` commits each task after its gates pass and marks it completed only once the commit succeeds, `run` commits once after the last task (a failed or stopped run makes no commit) |
 | `--reset-failed`            |       | Set every failed task back to pending before the run, without asking                     |
 | `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
 | `--plain`                   |       | Use plain output instead of the full-screen view                                         |
@@ -104,7 +104,7 @@ they should edit.
 | `0`   | Every task completed (or the dry run found the file valid)                                |
 | `1`   | A task or gate failed, or the run hit an error such as a failed save                      |
 | `2`   | Usage error: a bad or missing flag, or a run folder with no `tasks.yaml`                  |
-| `3`   | Refused to start; nothing ran and nothing was written, not even a run log                 |
+| `3`   | Refused to start; nothing ran and nothing was left on disk: no run log, and the task file unchanged |
 | `4`   | A commit failed; the task is `failed` and its work stays staged                           |
 | `130` | Stopped by SIGINT (Ctrl-C)                                                                |
 | `143` | Stopped by SIGTERM                                                                        |
@@ -122,13 +122,17 @@ The reason is one of:
 | `invalid-task-file`        | The task file cannot be read or is not valid                              |
 | `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                        |
 | `log-unwritable`           | The run log folder cannot be created or opened                            |
+| `task-file-unwritable`     | `--reset-failed` could not save the task file                             |
 | `git-error`                | git failed while alr looked at the repository                             |
 
 A failed commit's reason is the first line of git's (or the hook's) output, in the task's
 `error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The run log's
 `run_finished` line has the `result` (`completed`, `failed`, `commit_failed`, or `stopped`),
 the `error`, and the `exit` code. `run_started` has `"commit": "none"`, `"task"`, or `"run"`.
-A `--dry-run` that is refused exits 3 as well. The full-screen view exits with the same codes.
+A `--dry-run` is refused like a real run, in the same order and with the same exit 3, including for a task that is
+`failed` (the table prints first). The full-screen view exits with the same codes: a stop by SIGTERM is `143`, and a
+Stop press or Ctrl-C is `130`. A refused run leaves the task file as it was and no folder under `logs/`;
+`--reset-failed` is saved only after every check has passed.
 
 A `run` commit shows in `git log` with the subject `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and
 a body that lists `<id>: <name>` for each task that ran. A `task` commit uses the task's name as its subject.
@@ -153,7 +157,10 @@ After a failed or stopped run, the work tree holds the leftovers, and the next
 committing run refuses to start until the tree is clean; the error lists the
 files. A failed run leaves its task `failed` and needs `--reset-failed`. A
 stopped run leaves the interrupted task `pending`, which needs no reset. In
-`task` mode a task is `completed` only after its commit lands. Clean up by mode:
+`task` mode a task is `completed` only after its commit lands. A stop that
+arrives after git has already made a commit does not undo it: the tasks that
+commit covers are saved `completed`, so a rerun never redoes committed work.
+Clean up by mode:
 
 - `task`: each earlier task is already committed, so the leftovers are only the
   work of the failed or interrupted task. Discard it with `git reset` (this
@@ -161,7 +168,8 @@ stopped run leaves the interrupted task `pending`, which needs no reset. In
   `git clean -fd` leaves the ignored task file and `logs/` alone. Then run
   again, with `--reset-failed` after a failure.
 - `run`: `tasks.yaml` is saved once, at the end, and no task is marked
-  `completed` until the one commit lands. A failed or stopped run leaves
+  `completed` until the one commit lands. A stop before the commit lands does
+  not touch the file at all. A failed or stopped run leaves
   nothing completed: the failed task is `failed` and every other task that ran
   is back to `pending`. The leftovers are only work this run made, so discard
   them the same way as in `task` mode, then run again, with `--reset-failed`

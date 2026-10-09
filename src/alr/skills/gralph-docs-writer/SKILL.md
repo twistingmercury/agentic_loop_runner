@@ -31,12 +31,14 @@ result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand.
 
-With `--commit task`, Gralph also commits each task itself: once a task is
-`completed`, it commits what a plain `git add -A` would stage, with the task's
-`name` as the commit message. With `--commit run`, it makes one commit after the
-last task, titled `alr: <n> tasks completed` (`alr: 1 task completed` for one task),
-with the task names listed in the
-body. A failed task is not committed; its changes stay
+With `--commit task`, Gralph also commits each task itself: once a task's
+gates pass, it commits what a plain `git add -A` would stage, with the task's
+`name` as the commit message, and marks the task `completed` only after that
+commit succeeds. If the commit fails, the task is `failed`. With `--commit run`,
+it makes one commit after the last task, titled `alr: <n> tasks completed`
+(`alr: 1 task completed` for one task), with the task names listed in the
+body, and marks the tasks `completed` only after that commit succeeds. A failed
+task is not committed; its changes stay
 in the work tree for a person to sort out. For a committing run the task file
 must be ignored by Git or kept outside the repository; Gralph refuses to start
 otherwise. A sandbox settings file should also be ignored or kept outside, so it does
