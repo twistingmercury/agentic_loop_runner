@@ -1,7 +1,7 @@
 ---
-version: 28
+version: 29
 date: 2026-10-08
-notes: "Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+notes: "ADR-025 after the stage 1 review: adds the refusal reason task-file-unwritable; the dry run exits 3 on a failed task like a real run; a refusal leaves nothing on disk in plain mode and the view; a stop after a commit landed saves the tasks completed; a stop in run mode before the commit leaves tasks.yaml untouched; the view carries the stop signal. Earlier: Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -1208,10 +1208,11 @@ identical.
 | Stopped | 130 (SIGINT), 143 (SIGTERM) | result `stopped` | none |
 
 Refusal reasons: `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`,
-`invalid-sandbox-settings`, `log-unwritable`, `git-error`, `locked`. Whenever alr can tell for sure why it will not
+`invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `git-error`, `locked`. Whenever alr can tell for sure why it will not
 start, it names the reason; a refusal never falls back to a bare exit 1. `git-error` covers git failing while alr looks
 at the repository (`rev-parse`, `status`, `check-ignore`), `invalid-sandbox-settings` an unreadable or invalid sandbox
-settings file, and `log-unwritable` a run log folder that cannot be created or opened at startup (a log write that fails
+settings file, `log-unwritable` a run log folder that cannot be created or opened at startup, and `task-file-unwritable` a
+`--reset-failed` that cannot save the task file at startup (a log write that fails
 mid-run is a run failure, exit 1, and its text carries the cause). The text after the reason is the existing message. A refusal writes no run log: nothing ran, and a log for a
 "log folder visible" refusal would create the dirt it refused over.
 
@@ -1237,14 +1238,23 @@ mid-run is a run failure, exit 1, and its text carries the cause). The text afte
   commit succeeds, every task that ran becomes `completed`. If a task or gate fails, that task is `failed` and the
   others `pending`. If the commit fails, the last task is `failed` with the reason and the others stay `pending`. A
   failed or stopped `run` leaves nothing marked completed, so the leftover work may be discarded and the run repeated.
-- A stop leaves the interrupted task `pending`, as today.
+- A stop leaves the interrupted task `pending`, as today. In `run` mode a stop before the commit lands leaves
+  `tasks.yaml` untouched, byte for byte. A stop that arrives after `git commit` has already made the commit (a
+  post-commit hook, the hash lookup) does not undo it: the tasks that commit covers are saved `completed` before the
+  stop is re-raised, so a rerun never redoes committed work. The full-screen view exits with the same codes: it
+  carries the signal that stopped it (SIGTERM is 143), and a second Stop press exits with the code of the stop under
+  way. `run_finished.error` for a failed `task`-mode commit carries the usual `task N: <name> failed:` prefix, as a
+  gate failure does.
 
 *Implementation.*
 
 - Each error class carries its exit code and `main` maps it: refused (with the reason word), commit failed, stopped
   (with the signal), run failed. No scattered `return 1`.
 - Refusals are raised before the run log opens. `--reset-failed` is applied only after the refusal checks pass, so a
-  refused run changes nothing on disk. `--dry-run --commit task|run` runs the same refusal checks.
+  refused run changes nothing on disk. `--dry-run --commit task|run` runs the same refusal checks in the same order, including a failed task
+  (`failed-tasks`: the table is printed, then exit 3) and the log folder. In plain mode and the view alike,
+  `--reset-failed` is applied in memory first and saved to disk only after every other refusal check and the log
+  folder have passed; a refusal after the run log is open removes the folder it made.
 - The commit failure reason is the first non-empty line of git's combined output, trimmed to 200 characters; the full
   text is in `task-N.log`.
 - A task `name` containing a line break (anything `str.splitlines` splits on) is rejected at load, with an error naming
