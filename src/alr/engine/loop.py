@@ -14,9 +14,11 @@ from alr.engine.result import last_result_line, outcome
 from alr.engine.stop import Stop
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
+    TASK_FILE_UNWRITABLE,
     AlrError,
     CommitFailedError,
     FailedTasksError,
+    RefusedError,
     RunCancelledError,
     RunError,
     TaskFileError,
@@ -35,7 +37,7 @@ from alr.tasks import (
     save_tasks,
 )
 
-__all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "load_tasks", "run"]
+__all__ = ["FAILED_TASKS_MESSAGE", "RunOptions", "read_tasks", "run"]
 
 # What a stop that carries no task of its own is recorded as; a stop inside a
 # task says "task N: name: stopped" through RunCancelledError.
@@ -94,13 +96,19 @@ def read_tasks(path: str) -> TaskList:
     return task_list
 
 
-def load_tasks(path: str) -> TaskList:
-    """Read the task file for a run; a file holding a failed task is refused."""
-    task_list = read_tasks(path)
+def refuse_failed(task_list: TaskList) -> None:
+    """Refuse a list that holds a failed task."""
     if any(task.state == FAILED for task in task_list.tasks):
         raise FailedTasksError(task_list)
 
-    return task_list
+
+def reset_in_memory(task_list: TaskList) -> int:
+    """Set every failed task back to pending, in the list only, and return how many there were."""
+    failed = [task for task in task_list.tasks if task.state == FAILED]
+    for task in failed:
+        task.state, task.error = PENDING, ""
+
+    return len(failed)
 
 
 def reset_failed(tasks_file: str) -> int:
@@ -110,15 +118,20 @@ def reset_failed(tasks_file: str) -> int:
     nothing failed stays exactly as the user left it.
     """
     task_list = read_tasks(tasks_file)
-    failed = [task for task in task_list.tasks if task.state == FAILED]
-    if not failed:
+    count = reset_in_memory(task_list)
+    if count == 0:
         return 0
 
-    for task in failed:
-        task.state, task.error = PENDING, ""
-
     save_tasks(tasks_file, task_list)
-    return len(failed)
+    return count
+
+
+def save_for_start(tasks_file: str, task_list: TaskList) -> None:
+    """Save the changes a start made to the list; a file that cannot be written refuses the run."""
+    try:
+        save_tasks(tasks_file, task_list)
+    except TaskFileError as exc:
+        raise RefusedError(TASK_FILE_UNWRITABLE, str(exc)) from exc
 
 
 async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> None:

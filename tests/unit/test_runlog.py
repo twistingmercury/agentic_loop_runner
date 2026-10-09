@@ -1,5 +1,6 @@
 """The run log: a ledger line per event and a detail file per task."""
 
+import errno
 import json
 import os
 import stat
@@ -11,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from alr.errors import RefusedError, RunLogError
+from alr.record import runlog
 from alr.record.events import (
     Activity,
     CommitStarted,
@@ -527,3 +529,44 @@ def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:
     log.close()
 
     log.close()
+
+
+def test_open_that_cannot_start_the_ledger_removes_the_folder_it_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path) -> None:
+        raise runlog._io_error(path, OSError(errno.EACCES, "Permission denied"))
+
+    monkeypatch.setattr(runlog, "_open_append", refuse)
+    path = tmp_path / "logs" / "20261001T140211"
+
+    with pytest.raises(RefusedError) as raised:
+        RunLog.open(path, INFO, now=fixed_now)
+
+    assert raised.value.reason == "log-unwritable"
+    assert "Permission denied" in raised.value.message
+    assert not path.exists(), "a refused run leaves no run folder"
+
+
+def test_discard_removes_the_run_folder_and_close_stays_safe(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+
+    log.discard()
+    log.close()
+
+    assert not path.exists()
+
+
+def test_discard_leaves_a_folder_that_holds_something_else(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    stranger = path / "notes.txt"
+    stranger.write_text("not ours\n", encoding="utf-8")
+
+    log.discard()
+
+    assert stranger.read_text(encoding="utf-8") == "not ours\n"
+    assert not (path / "run.jsonl").exists(), "its own ledger still goes"

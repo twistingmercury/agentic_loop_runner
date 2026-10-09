@@ -3,13 +3,8 @@
 from typing import TextIO
 
 from alr.engine.commit import Repo, check_clean, check_log_dir, find_repo
-from alr.engine.loop import load_tasks
-from alr.errors import (
-    INVALID_TASK_FILE,
-    FailedTasksError,
-    RefusedError,
-    TaskFileError,
-)
+from alr.engine.loop import refuse_failed
+from alr.errors import FailedTasksError
 from alr.tasks import COMPLETED, FAILED, Task, TaskList
 
 _RED = "\033[1;91m"
@@ -40,27 +35,23 @@ def _row(task: Task, id_width: int) -> str:
     return f"{emoji} {task.id:>{id_width}}  {state}  {task.name}{note}\n"
 
 
-def load_tasks_report(out: TextIO, tasks_file: str) -> TaskList:
-    """Load the task file; when it holds a failed task, write the notice and the table first."""
+def refuse_failed_report(out: TextIO, task_list: TaskList) -> None:
+    """Refuse a list that holds a failed task, writing the notice and the table first."""
     try:
-        return load_tasks(tasks_file)
-    except FailedTasksError as exc:
+        refuse_failed(task_list)
+    except FailedTasksError:
         out.write("Some tasks failed previous runs:\n")
-        print_tasks(out, exc.task_list)
+        print_tasks(out, task_list)
         raise
-    except TaskFileError as exc:
-        raise RefusedError(
-            INVALID_TASK_FILE, f"failed to start loop runner: {exc}"
-        ) from exc
 
 
 async def repo_for(
-    out: TextIO, tasks_file: str, commit: bool, run_dir: str | None = None
+    out: TextIO, tasks_file: str, commit: bool, run_dir: str
 ) -> Repo | None:
     """Open the work tree for a --commit run; None without the flag or outside a repository.
 
-    With run_dir, the run's log folder is checked before the tree is: a tree
-    dirty only with that folder needs it ignored, not committed.
+    The run's log folder is checked before the tree is: a tree dirty only
+    with that folder needs it ignored, not committed.
     """
     if not commit:
         return None
@@ -71,8 +62,6 @@ async def repo_for(
         out.write("commit: not a git repository, nothing will be committed\n")
         return None
 
-    if run_dir is not None:
-        await check_log_dir(repo, run_dir)
-
+    await check_log_dir(repo, run_dir)
     await check_clean(repo)
     return repo

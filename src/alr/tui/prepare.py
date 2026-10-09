@@ -7,11 +7,17 @@ from importlib import metadata
 from pathlib import Path
 
 from alr.engine.commit import CommitMode, Repo, check_clean, check_log_dir, find_repo
-from alr.engine.loop import RunOptions, load_tasks
-from alr.errors import LOG_FOLDER_VISIBLE, RefusedError, TaskFileError
+from alr.engine.loop import (
+    RunOptions,
+    read_tasks,
+    refuse_failed,
+    reset_in_memory,
+    save_for_start,
+)
+from alr.errors import LOG_FOLDER_VISIBLE, RefusedError
 from alr.record.events import Event
 from alr.record.runlog import Info, RunLog, run_dir
-from alr.tasks import TaskList, save_tasks
+from alr.tasks import TaskList
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -31,6 +37,11 @@ class Prepared:
         if self.log is not None:
             self.log.close()
 
+    def discard(self) -> None:
+        """Close the log and remove its folder, for a run refused after the log opened."""
+        if self.log is not None:
+            self.log.discard()
+
 
 async def prepare(settings: RunSettings) -> Prepared:
     """Check everything a run starts with; nothing is written before every check passes.
@@ -39,7 +50,7 @@ async def prepare(settings: RunSettings) -> Prepared:
     and the repository can change meanwhile, so the checks run again here on
     the values the run will use.
     """
-    task_list = load_tasks(settings.tasks_file)
+    task_list = read_tasks(settings.tasks_file)
     repo = await _find_repo(settings)
     session_args = settings.session_args()
     log_path = await _check_log_folder(settings, repo)
@@ -47,6 +58,10 @@ async def prepare(settings: RunSettings) -> Prepared:
     if repo is not None:
         await check_clean(repo)
 
+    # In memory only: the view's own copy was reset for display, and this one
+    # is read again from disk.
+    reset_count = reset_in_memory(task_list) if settings.reset_failed else 0
+    refuse_failed(task_list)
     options = RunOptions(
         tasks_file=settings.tasks_file,
         gate_timeout=settings.gate_timeout,
@@ -56,11 +71,11 @@ async def prepare(settings: RunSettings) -> Prepared:
     )
     log = None if log_path is None else _open_log(settings, log_path)
     prepared = Prepared(task_list, options, log)
-    # Last, so a check or the log failing never leaves the task file rewritten.
+    # After the log opens, so a check or the log failing never leaves the task file rewritten.
     try:
-        _save_gates(settings, task_list)
-    except TaskFileError:
-        prepared.close()
+        _save_changes(settings, task_list, reset_count)
+    except RefusedError:
+        prepared.discard()
         raise
 
     return prepared
@@ -96,12 +111,15 @@ async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | 
     return path
 
 
-def _save_gates(settings: RunSettings, task_list: TaskList) -> None:
-    if settings.gates is None:
+def _save_changes(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:
+    """Save the edited gates and the reset together, once; nothing to save leaves the file alone."""
+    if settings.gates is not None:
+        task_list.shared.gates = settings.gates
+
+    if settings.gates is None and not reset_count:
         return
 
-    task_list.shared.gates = settings.gates
-    save_tasks(settings.tasks_file, task_list)
+    save_for_start(settings.tasks_file, task_list)
 
 
 def _open_log(settings: RunSettings, path: Path) -> RunLog:

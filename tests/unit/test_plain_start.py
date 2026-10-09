@@ -234,6 +234,50 @@ async def test_reset_failed_waits_for_the_other_refusals(
     assert _calls(record) == 0, "claude must not run"
 
 
+async def test_reset_failed_leaves_the_file_alone_when_the_log_cannot_open(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    # A file where the log folder belongs fails for every user, root included.
+    (tmp_path / "logs").write_text("a file, not a folder", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, reset_failed=True)
+
+    assert caught.value.reason == "log-unwritable"
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_that_cannot_save_refuses_and_leaves_no_run_folder(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    # A folder where the temporary file goes fails the save for every user, root included.
+    (tmp_path / "tasks.yaml.tmp").mkdir()
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, reset_failed=True)
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert "failed to save tasks to" in caught.value.message
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert list((tmp_path / "logs").iterdir()) == [], "the run folder is removed"
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_runs_the_reset_list_and_saves_it(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+
+    await _start(tasks_file, reset_failed=True)
+
+    saved = saved_tasks(Path(tasks_file)).tasks[0]
+    assert (saved.state, saved.error) == ("completed", "")
+    assert _calls(record) == 1
+
+
 async def test_a_failed_task_is_refused_after_the_repository_checks(
     record: Path, git_repo: Path
 ) -> None:

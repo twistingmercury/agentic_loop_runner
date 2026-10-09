@@ -1,33 +1,46 @@
 """The dry run: validate the task file and report on it, without starting Claude or writing a file."""
 
+import io
+from datetime import datetime
+from pathlib import Path
 from typing import TextIO
 
 from alr.engine.gates import first_line, gate_limit
-from alr.errors import FailedTasksError
-from alr.plain.report import load_tasks_report, print_tasks, repo_for
+from alr.engine.loop import read_tasks
+from alr.errors import INVALID_TASK_FILE, RefusedError, TaskFileError
+from alr.plain.report import print_tasks, refuse_failed_report, repo_for
+from alr.record.runlog import run_dir
 from alr.tasks import TaskList
 
 
 async def dry_run(
     out: TextIO, tasks_file: str, gate_timeout: str, sandbox_file: str, commit: bool
 ) -> None:
-    """Apply the checks a real run starts with and write what it would run under."""
-    try:
-        task_list = load_tasks_report(out, tasks_file)
-    except FailedTasksError:
-        # The notice and the table are the report; the file itself is valid.
-        return
-
+    """Apply the checks a real run starts with, in its order, and write what it would run under."""
+    task_list = _read_for_dry_run(tasks_file)
+    path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
+    # Held back so its note lands after the gate lines, where it always was.
+    repo_notes = io.StringIO()
+    repo = await repo_for(repo_notes, tasks_file, commit, str(path))
+    refuse_failed_report(out, task_list)
     print_tasks(out, task_list)
     _print_gate_limits(out, task_list, gate_timeout)
     if sandbox_file:
         out.write(f"sandbox settings: {sandbox_file}\n")
 
-    repo = await repo_for(out, tasks_file, commit)
+    out.write(repo_notes.getvalue())
     if repo is not None:
         out.write(f"commit: {repo.root}\n")
 
     out.write(f"{tasks_file} is valid\n")
+
+
+def _read_for_dry_run(tasks_file: str) -> TaskList:
+    """Read the task file, failed tasks and all, so a bad file is refused before the repository is looked at."""
+    try:
+        return read_tasks(tasks_file)
+    except TaskFileError as exc:
+        raise RefusedError(INVALID_TASK_FILE, str(exc)) from exc
 
 
 def _print_gate_limits(out: TextIO, task_list: TaskList, override: str) -> None:

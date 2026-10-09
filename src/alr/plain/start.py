@@ -7,7 +7,13 @@ from importlib import metadata
 from pathlib import Path
 
 from alr.engine.commit import CommitMode, Repo
-from alr.engine.loop import RunOptions, read_tasks, reset_failed, run
+from alr.engine.loop import (
+    RunOptions,
+    read_tasks,
+    reset_in_memory,
+    run,
+    save_for_start,
+)
 from alr.engine.stop import Stop
 from alr.errors import (
     INVALID_TASK_FILE,
@@ -18,7 +24,7 @@ from alr.errors import (
     TaskFileError,
 )
 from alr.plain.frontend import PlainFrontEnd
-from alr.plain.report import load_tasks_report, repo_for
+from alr.plain.report import refuse_failed_report, repo_for
 from alr.record.runlog import Info, RunLog, run_dir
 from alr.tasks import TaskList
 
@@ -35,20 +41,22 @@ async def start(
     """Run the loop in plain mode: load, check, then run every pending task.
 
     With reset, failed tasks go back to pending, without a word, once the
-    repository checks have passed: a refused run changes nothing on disk.
+    repository checks have passed. The reset reaches the disk only after the
+    run log has opened, so a refused run changes nothing on disk.
     Every run is logged in a new folder under logs/ beside the task file.
     """
-    _read_for_start(tasks_file)
+    task_list = _read_for_start(tasks_file)
     commits = commit is not CommitMode.NONE
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
     repo = await repo_for(sys.stdout, tasks_file, commits, str(path))
-    if reset:
-        reset_failed(tasks_file)
-
-    task_list = load_tasks_report(sys.stdout, tasks_file)
+    reset_count = reset_in_memory(task_list) if reset else 0
+    refuse_failed_report(sys.stdout, task_list)
     info = _info(tasks_file, gate_timeout, sandbox_settings, commit)
     log = RunLog.open(path, info)
     try:
+        if reset_count:
+            _save_reset(tasks_file, task_list, log)
+
         await _run_logged(
             task_list,
             tasks_file,
@@ -71,6 +79,15 @@ def _read_for_start(tasks_file: str) -> TaskList:
         raise RefusedError(
             INVALID_TASK_FILE, f"failed to start loop runner: {exc}"
         ) from exc
+
+
+def _save_reset(tasks_file: str, task_list: TaskList, log: RunLog) -> None:
+    """Save the reset; a refused save takes the run folder it just made with it."""
+    try:
+        save_for_start(tasks_file, task_list)
+    except RefusedError:
+        log.discard()
+        raise
 
 
 def _info(

@@ -102,6 +102,24 @@ def test_refusal_exits_3_and_writes_no_log(git_repo: Path, fake_claude: Path) ->
     assert not (tasks_path.parent / "logs").exists()
 
 
+def test_reset_failed_with_an_unwritable_log_folder_leaves_the_file_alone(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    failed_yaml = (
+        shared_block()
+        + "tasks:\n  - {id: 1, name: First, prompt: p1, state: failed, error: boom}\n"
+    )
+    tasks_path = write_tasks_yaml(tmp_path, failed_yaml)
+    # A file where the log folder belongs fails for every user, root included.
+    (tmp_path / "logs").write_text("a file, not a folder", encoding="utf-8")
+
+    res = run_alr(*run_args(tasks_path), "--reset-failed")
+
+    assert res.code == 3, res
+    assert res.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
+    assert tasks_path.read_text(encoding="utf-8") == failed_yaml
+
+
 def test_commit_failure_exits_4(git_repo: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
     hook = git_repo / ".git" / "hooks" / "pre-commit"

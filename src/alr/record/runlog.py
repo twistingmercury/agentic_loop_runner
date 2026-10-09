@@ -3,6 +3,7 @@
 It only listens to the run's events; the loop knows nothing about it.
 """
 
+import contextlib
 import json
 import os
 from collections.abc import Callable
@@ -154,7 +155,7 @@ class RunLog:
         try:
             log._start(info)
         except RunLogError as exc:
-            log.close()
+            log.discard()
             raise RefusedError(LOG_UNWRITABLE, str(exc)) from exc
 
         return log
@@ -205,6 +206,23 @@ class RunLog:
             _close(detail, self._detail_path or self._path)
         finally:
             _close(ledger, self._ledger_path)
+
+    def discard(self) -> None:
+        """Close the record and remove the run folder this log made.
+
+        For a run that was refused after the log opened. Only this log's own
+        ledger is deleted, and the folder only if nothing else is in it.
+        """
+        # The record is being thrown away, so a failing close has nothing to lose.
+        with contextlib.suppress(RunLogError):
+            self.close()
+
+        # rmdir refuses a folder that holds anything, so it cannot delete more
+        # than this log made. Cleanup is best effort: the caller is already
+        # raising the real error, and a leftover must not replace it.
+        with contextlib.suppress(OSError):
+            self._ledger_path.unlink(missing_ok=True)
+            self._path.rmdir()
 
     def _write_ledger(self, event: str, fields: dict[str, Any]) -> None:
         line = {"time": _rfc3339(self._now()), "event": event, **fields}

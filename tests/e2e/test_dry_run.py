@@ -26,12 +26,13 @@ def test_dry_run_invalid_file(tmp_path: Path, fake_claude: Path) -> None:
     )
 
     assert res.code == 3, res
-    assert "error: refused: invalid-task-file: " in res.err
+    assert "error: refused: invalid-task-file: failed to parse tasks yaml" in res.err
+    assert "failed to start loop runner" not in res.err
     assert res.err.count("failed to parse tasks yaml") == 1
     assert f"{tasks_path} is valid" not in res.out
 
 
-def test_dry_run_flags_failed_task_and_exits_zero(
+def test_dry_run_refuses_a_failed_task_like_a_real_run(
     tmp_path: Path, fake_claude: Path
 ) -> None:
     tasks_yaml = (
@@ -48,9 +49,11 @@ def test_dry_run_flags_failed_task_and_exits_zero(
 """
     )
 
+    # run_dry_run also asserts the file is untouched and claude never ran.
     res, _ = run_dry_run(tmp_path, tasks_yaml)
 
-    assert res.code == 0, res
+    assert res.code == 3, res
+    assert res.err.splitlines()[0].startswith("error: refused: failed-tasks: ")
     assert res.out == (
         "Some tasks failed previous runs:\n"
         "   ID  STATE      NAME\n"

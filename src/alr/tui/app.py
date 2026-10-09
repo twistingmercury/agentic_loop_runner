@@ -15,7 +15,7 @@ from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine.commit import CommitMode, work_tree_root
-from alr.engine.loop import read_tasks, reset_failed, run
+from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
 from alr.engine.stop import Stop
@@ -220,11 +220,16 @@ class AlrApp(App[None]):
             return
 
     def _open_file(self, tasks_file: str) -> TaskList:
-        """Read a task file, first resetting its failed tasks when --reset-failed asked."""
-        if self.settings.reset_failed:
-            reset_failed(tasks_file)
+        """Read a task file; --reset-failed resets the failed tasks in this copy only.
 
-        return read_tasks(tasks_file)
+        Start saves the reset once its checks pass, so quitting before Start
+        leaves the file as the user wrote it.
+        """
+        task_list = read_tasks(tasks_file)
+        if self.settings.reset_failed:
+            reset_in_memory(task_list)
+
+        return task_list
 
     def _show_tasks(self) -> None:
         """Show the tasks before Start."""

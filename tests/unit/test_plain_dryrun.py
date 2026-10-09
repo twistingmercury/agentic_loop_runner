@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 
 import pytest
-from helpers import write_file
+from helpers import write_file, write_nested_file
 
-from alr.errors import RefusedError
+from alr.errors import FailedTasksError, RefusedError
 from alr.plain.dryrun import dry_run
 
 VALID_TASKS_YAML = """shared:
@@ -79,6 +79,8 @@ async def test_dry_run_invalid_file(tmp_path: Path) -> None:
         await dry_run(out, tasks_file, "", "", False)
 
     assert caught.value.reason == "invalid-task-file"
+    assert "failed to start loop runner" not in str(caught.value)
+    assert str(caught.value).count("failed to parse tasks yaml") == 1
     assert out.getvalue() == ""
 
 
@@ -92,12 +94,12 @@ async def test_dry_run_commit_invalid_task_file_is_refused_once(
         await dry_run(out, tasks_file, "", "", True)
 
     assert caught.value.reason == "invalid-task-file"
+    assert "failed to start loop runner" not in str(caught.value)
     assert str(caught.value).count("failed to parse tasks yaml") == 1
     assert out.getvalue() == ""
 
 
-async def test_dry_run_flags_failed_tasks(tmp_path: Path) -> None:
-    content = """shared:
+FAILED_TASKS_YAML = """shared:
   prompt: shared
 tasks:
   - id: 1
@@ -113,19 +115,73 @@ tasks:
     name: Third task
     prompt: Do the third thing.
 """
-    tasks_file = write_file(tmp_path / "tasks.yaml", content)
+FAILED_TASKS_REPORT = (
+    "Some tasks failed previous runs:\n"
+    "    ID  STATE      NAME\n"
+    "   ---  ---------  ----\n"
+    "✅   1  \033[92mCOMPLETED\033[0m  First task\n"
+    "❌   2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n"
+    "   100  PENDING    Third task\n"
+)
 
-    assert await _dry_run(tasks_file) == (
-        "Some tasks failed previous runs:\n"
-        "    ID  STATE      NAME\n"
-        "   ---  ---------  ----\n"
-        "✅   1  \033[92mCOMPLETED\033[0m  First task\n"
-        "❌   2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n"
-        "   100  PENDING    Third task\n"
-    )
-    assert Path(tasks_file).read_text(encoding="utf-8") == content, (
+
+async def test_dry_run_refuses_failed_tasks_after_showing_them(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASKS_YAML)
+
+    out = io.StringIO()
+    with pytest.raises(FailedTasksError) as caught:
+        await dry_run(out, tasks_file, "", "", False)
+
+    assert caught.value.reason == "failed-tasks"
+    assert out.getvalue() == FAILED_TASKS_REPORT
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASKS_YAML, (
         "the tasks file must be unchanged"
     )
+
+
+async def test_dry_run_commit_refuses_failed_tasks_on_a_clean_repository(
+    git_repo: Path,
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASKS_YAML)
+
+    out = io.StringIO()
+    with pytest.raises(FailedTasksError):
+        await dry_run(out, tasks_file, "", "", True)
+
+    assert out.getvalue() == FAILED_TASKS_REPORT
+
+
+async def test_dry_run_commit_tells_a_dirty_tree_before_failed_tasks(
+    git_repo: Path,
+) -> None:
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASKS_YAML)
+
+    out = io.StringIO()
+    with pytest.raises(RefusedError) as caught:
+        await dry_run(out, tasks_file, "", "", True)
+
+    assert caught.value.reason == "dirty-tree"
+    assert out.getvalue() == ""
+
+
+async def test_dry_run_commit_refuses_a_log_folder_git_can_see(
+    git_repo: Path,
+) -> None:
+    # Only the task file is ignored, so the logs folder beside it stays visible.
+    exclude = git_repo / ".git" / "info" / "exclude"
+    exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
+    tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
+
+    out = io.StringIO()
+    with pytest.raises(RefusedError, match="log directory") as caught:
+        await dry_run(out, tasks_file, "", "", True)
+
+    assert caught.value.reason == "log-folder-visible"
+    assert "is valid" not in out.getvalue()
+    assert not (git_repo / "work" / "logs").exists(), "a dry run writes nothing"
 
 
 # Each gate is listed once for the file, not once per task.

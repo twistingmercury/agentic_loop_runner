@@ -7,7 +7,7 @@ import pytest
 from helpers import write_file, write_nested_file
 
 from alr.engine.commit import CommitMode, Repo, find_repo
-from alr.errors import RefusedError, RunLogError, TaskFileError
+from alr.errors import FailedTasksError, RefusedError, RunLogError
 from alr.record.runlog import RunLog
 from alr.tasks import Gate, parse_tasks
 from alr.tui import prepare as prepare_module
@@ -248,24 +248,131 @@ async def test_prepare_leaves_the_task_file_alone_when_the_log_cannot_open(
     assert Path(settings.tasks_file).read_bytes() == before
 
 
-async def test_prepare_closes_the_log_when_saving_the_gates_fails(
-    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+def _block_saving(settings: RunSettings) -> None:
+    """Make every save of the task file fail, for any user: a folder holds the temporary file's name."""
+    Path(settings.tasks_file + ".tmp").mkdir()
+
+
+async def test_prepare_refuses_and_removes_the_run_folder_when_saving_the_gates_fails(
+    git_repo: Path,
 ) -> None:
-    def refuse(path: str, task_list: object) -> None:
-        raise TaskFileError("read-only")
-
-    closed: list[RunLog] = []
-    close = RunLog.close
-
-    def spy(self: RunLog) -> None:
-        closed.append(self)
-        close(self)
-
-    monkeypatch.setattr(prepare_module, "save_tasks", refuse)
-    monkeypatch.setattr(RunLog, "close", spy)
     settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+    _block_saving(settings)
+    before = Path(settings.tasks_file).read_bytes()
 
-    with pytest.raises(TaskFileError):
+    with pytest.raises(RefusedError) as caught:
         await prepare(settings)
 
-    assert len(closed) == 1
+    assert caught.value.reason == "task-file-unwritable"
+    assert "failed to save tasks to" in caught.value.message
+    assert Path(settings.tasks_file).read_bytes() == before
+    assert list((git_repo / "run" / "logs").iterdir()) == [], "no run folder is left"
+
+
+FAILED_TASKS = TASKS + "    state: failed\n    error: boom\n"
+
+
+def _failed_settings(repo: Path, **changes: object) -> RunSettings:
+    settings = _settings(repo, **changes)
+    Path(settings.tasks_file).write_text(FAILED_TASKS, encoding="utf-8")
+    return settings
+
+
+async def test_prepare_reset_failed_with_a_dirty_tree_leaves_the_file_and_logs_alone(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(
+        git_repo, reset_failed=True, logging=True, commit_mode=CommitMode.TASK
+    )
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "dirty-tree"
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+    assert not (git_repo / "run" / "logs").exists()
+
+
+async def test_prepare_reset_failed_resets_the_list_and_saves_the_file(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(git_repo, reset_failed=True)
+
+    prepared = await prepare(settings)
+
+    saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
+    assert [(task.state, task.error) for task in prepared.task_list.tasks] == [
+        ("pending", "")
+    ]
+    assert [(task.state, task.error) for task in saved.tasks] == [("pending", "")]
+
+
+async def test_prepare_reset_failed_and_edited_gates_are_saved_together(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(git_repo, reset_failed=True, gates=[Gate(cmd="true")])
+
+    await prepare(settings)
+
+    saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
+    assert saved.tasks[0].state == "pending"
+    assert saved.gate_list() == [Gate(cmd="true")]
+
+
+async def test_prepare_reset_failed_leaves_the_file_alone_when_the_log_cannot_open(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(git_repo, reset_failed=True, logging=True)
+    # A file where the log folder belongs fails for every user, root included.
+    (git_repo / "run" / "logs").write_text("a file, not a folder", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "log-unwritable"
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+
+
+async def test_prepare_reset_failed_that_cannot_save_refuses_and_removes_the_run_folder(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(git_repo, reset_failed=True, logging=True)
+    _block_saving(settings)
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+    assert list((git_repo / "run" / "logs").iterdir()) == [], "no run folder is left"
+
+
+async def test_prepare_reset_failed_that_cannot_save_refuses_without_a_log(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(git_repo, reset_failed=True, logging=False)
+    _block_saving(settings)
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "task-file-unwritable"
+
+
+async def test_prepare_refuses_a_failed_task_after_the_repository_checks(
+    git_repo: Path,
+) -> None:
+    settings = _failed_settings(git_repo, logging=True, commit_mode=CommitMode.TASK)
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as dirty:
+        await prepare(settings)
+
+    (git_repo / "stray.txt").unlink()
+    with pytest.raises(FailedTasksError):
+        await prepare(settings)
+
+    assert dirty.value.reason == "dirty-tree"
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+    assert not (git_repo / "run" / "logs").exists()

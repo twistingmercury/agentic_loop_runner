@@ -1323,17 +1323,58 @@ FAILED_TASKS = TASKS.replace(
 )
 
 
-async def test_reset_failed_flag_resets_the_file_at_launch(git_repo: Path) -> None:
+async def test_reset_failed_flag_leaves_the_file_alone_at_launch(
+    git_repo: Path,
+) -> None:
     settings = _settings(git_repo, FAILED_TASKS, reset_failed=True)
     app = AlrApp(settings)
-    async with app.run_test():
+    async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
-        await until(
-            lambda: saved_tasks(Path(settings.tasks_file)).tasks[0].state == "pending"
-        )
+        await pilot.pause()
 
         assert not isinstance(app.screen, ModalScreen)
-        assert saved_tasks(Path(settings.tasks_file)).tasks[0].error == ""
+        assert not app.query_one("#start").disabled
+        assert app.query_one(TasksPane).get_row("1")[0] != "✖"
+
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+
+
+async def test_a_refused_start_with_reset_failed_leaves_the_file_and_logs_alone(
+    git_repo: Path,
+) -> None:
+    settings = _settings(
+        git_repo, FAILED_TASKS, reset_failed=True, commit_mode=CommitMode.TASK
+    )
+    settings.logging = True
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        assert app.state is AppState.READY
+        assert "clean work tree" in str(app.screen.query_one("#message").render())
+
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+    assert not (git_repo / "run" / "logs").exists()
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_start_with_reset_failed_runs_the_reset_task_and_completes_it(
+    git_repo: Path,
+) -> None:
+    settings = _settings(git_repo, FAILED_TASKS, reset_failed=True)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        await pilot.press("s")
+        await _finished(app)
+
+    assert _states(settings) == ["completed", "completed"]
+    assert saved_tasks(Path(settings.tasks_file)).tasks[0].error == ""
 
 
 DONE_AND_FAILED = FAILED_TASKS.replace(
@@ -1483,7 +1524,7 @@ async def test_r_does_nothing_once_finished(git_repo: Path) -> None:
         assert not isinstance(app.screen, ModalScreen)
 
 
-async def test_the_flag_resets_a_file_picked_in_the_folder_dialog(
+async def test_the_flag_resets_a_file_picked_in_the_folder_dialog_in_memory_only(
     git_repo: Path,
 ) -> None:
     write_file(git_repo / "run" / "tasks.yaml", FAILED_TASKS)
@@ -1497,7 +1538,7 @@ async def test_the_flag_resets_a_file_picked_in_the_folder_dialog(
         await pilot.press("end", *"/run", "enter")
         await until(lambda: app.state is AppState.READY)
 
-        assert _states(settings) == ["pending", "pending"]
+        assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
         assert app.query_one(TasksPane).get_row("1")[0] != "✖"
 
 
