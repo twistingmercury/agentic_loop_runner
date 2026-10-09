@@ -100,6 +100,83 @@ async def test_tasks_pane_keeps_passed_rows_once_the_run_completes() -> None:
         assert [pane.get_row_at(i)[0] for i in range(2)] == ["●", "●"]
 
 
+def _rows(pane: TasksPane) -> list[str]:
+    return [pane.get_row_at(i)[0] for i in range(2)]
+
+
+async def test_tasks_pane_keeps_run_rows_completed_after_a_stop_past_the_commit() -> (
+    None
+):
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        _pass_both(pane)
+        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
+
+        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
+
+        assert _rows(pane) == ["✔", "✔"]
+
+
+async def test_tasks_pane_takes_back_run_rows_when_the_save_after_the_commit_fails() -> (
+    None
+):
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        _pass_both(pane)
+        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
+
+        pane.apply(RunDone("not saved", 1.0, RunResult.FAILED, 1))
+
+        assert _rows(pane) == ["·", "·"]
+
+
+async def test_tasks_pane_keeps_a_task_mode_row_completed_after_a_stop_past_the_commit() -> (
+    None
+):
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
+        pane.apply(TaskStarted(SECOND))
+        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
+
+        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
+
+        assert _rows(pane) == ["✔", "✔"]
+
+
+async def test_tasks_pane_returns_the_running_task_to_pending_after_a_stop_before_the_commit() -> (
+    None
+):
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
+        pane.apply(TaskStarted(SECOND))
+
+        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
+
+        assert _rows(pane) == ["✔", "·"]
+
+
+async def test_tasks_pane_keeps_a_failed_task_mode_row_failed_after_the_run_ends() -> (
+    None
+):
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+        pane.apply(TaskStarted(FIRST))
+        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
+        pane.apply(TaskStarted(SECOND))
+        pane.apply(TaskFinished(Task(2, "Second", "p", state=FAILED), "boom", 1.0))
+
+        pane.apply(RunDone("boom", 1.0, RunResult.FAILED, 1))
+
+        assert _rows(pane) == ["✔", "✖"]
+
+
 async def test_tasks_pane_marks_a_running_task() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
