@@ -572,6 +572,71 @@ def test_discard_leaves_a_folder_that_holds_something_else(
     assert not (path / "run.jsonl").exists(), "its own ledger still goes"
 
 
+def test_discard_removes_the_log_folder_it_created(tmp_path: Path) -> None:
+    log = RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    log.discard()
+
+    assert list(tmp_path.iterdir()) == [], "a discarded log leaves no logs/"
+
+
+def test_discard_keeps_a_log_folder_that_was_already_there(tmp_path: Path) -> None:
+    (tmp_path / "logs").mkdir()
+    log = RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    log.discard()
+
+    assert list((tmp_path / "logs").iterdir()) == []
+
+
+def test_discard_keeps_a_created_log_folder_that_holds_something_else(
+    tmp_path: Path,
+) -> None:
+    log = RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+    stranger = tmp_path / "logs" / "notes.txt"
+    stranger.write_text("not ours\n", encoding="utf-8")
+
+    log.discard()
+
+    assert stranger.read_text(encoding="utf-8") == "not ours\n"
+    assert not (tmp_path / "logs" / "20261001T140211").exists()
+
+
+def test_discard_removes_every_parent_it_created_and_no_other(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    path = tmp_path / "a" / "b" / "c" / "logs" / "20261001T140211"
+    log = RunLog.open(path, INFO, now=fixed_now)
+
+    log.discard()
+
+    assert list(tmp_path.rglob("*")) == [tmp_path / "a"], "only a, which was there"
+
+
+def test_discard_stops_at_the_first_parent_that_is_not_empty(tmp_path: Path) -> None:
+    path = tmp_path / "a" / "logs" / "20261001T140211"
+    log = RunLog.open(path, INFO, now=fixed_now)
+    stranger = tmp_path / "a" / "notes.txt"
+    stranger.write_text("not ours\n", encoding="utf-8")
+
+    log.discard()
+
+    assert sorted(tmp_path.rglob("*")) == [tmp_path / "a", stranger]
+
+
+def test_open_that_cannot_start_the_ledger_leaves_no_log_folder_it_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path) -> None:
+        raise runlog._io_error(path, OSError(errno.EACCES, "Permission denied"))
+
+    monkeypatch.setattr(runlog, "_open_append", refuse)
+
+    with pytest.raises(RefusedError):
+        RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_check_writable_accepts_a_missing_folder_under_a_writable_one(
     tmp_path: Path,
 ) -> None:

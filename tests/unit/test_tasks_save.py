@@ -1,7 +1,9 @@
+import os
 import random
 from pathlib import Path
 
 import pytest
+from helpers import block_saving
 
 from alr import tasks
 from alr.errors import TaskFileError, quote
@@ -13,6 +15,10 @@ PROMPT = 'Line one: with "quotes" and a colon\n\n  indented line\nhéllo — don
 
 def _saved(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _one_task_list() -> TaskList:
+    return TaskList(shared=SHARED, tasks=[Task(id=1, name="a", prompt="p")])
 
 
 @pytest.mark.parametrize(
@@ -92,7 +98,7 @@ def test_save_tasks_round_trip(
 
     tasks.save_tasks(str(path), want)
 
-    assert not Path(f"{path}.tmp").exists()
+    assert sorted(tmp_path.iterdir()) == [path], "no temporary file is left"
     assert tasks.parse_tasks(_saved(path)) == want
 
 
@@ -123,20 +129,21 @@ def test_save_tasks_path_is_directory(tmp_path: Path) -> None:
     assert isinstance(excinfo.value.__cause__, OSError)
     assert quote(str(target)) in str(excinfo.value)
     assert target.is_dir()
-    assert not Path(f"{target}.tmp").exists()
+    assert sorted(tmp_path.iterdir()) == [target], "no temporary file is left"
 
 
-def test_save_tasks_failed_save_leaves_existing_file_untouched(tmp_path: Path) -> None:
-    # The file itself stays writable; only the temporary file's name is taken,
-    # by a directory. A save that wrote to the target directly would succeed
-    # and replace the contents, so this passes only when the write goes to a
-    # sibling file first. A read-only directory would not do: the release
-    # build runs the tests as root, which ignores directory permissions.
+def test_save_tasks_failed_save_leaves_existing_file_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The file itself stays writable; only the final replace fails. A save that
+    # wrote to the target directly would never replace, so it would succeed and
+    # change the contents: this passes only when the write goes to a sibling
+    # file first.
     path = tmp_path / "tasks.yaml"
     original = TaskList(shared=SHARED, tasks=[Task(id=1, name="Original", prompt="p")])
     tasks.save_tasks(str(path), original)
     before = path.read_bytes()
-    Path(f"{path}.tmp").mkdir(mode=0o700)
+    block_saving(monkeypatch)
 
     changed = TaskList(
         shared=SHARED,
@@ -146,7 +153,76 @@ def test_save_tasks_failed_save_leaves_existing_file_untouched(tmp_path: Path) -
         tasks.save_tasks(str(path), changed)
 
     assert quote(str(path)) in str(excinfo.value)
+    assert "failed to save tasks to" in str(excinfo.value)
     assert path.read_bytes() == before
+
+
+def test_save_tasks_failed_save_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The temporary name is unique, so a leftover would never be reused: it
+    # would stay as litter beside the user's file.
+    path = tmp_path / "tasks.yaml"
+    path.write_text("old\n", encoding="utf-8")
+    block_saving(monkeypatch)
+
+    with pytest.raises(TaskFileError):
+        tasks.save_tasks(str(path), _one_task_list())
+
+    assert sorted(tmp_path.iterdir()) == [path]
+
+
+def test_save_tasks_removes_its_temporary_file_when_the_failure_is_not_an_oserror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "tasks.yaml"
+
+    def explode(src: object, dst: object) -> None:
+        raise RuntimeError("not an OSError")
+
+    monkeypatch.setattr(os, "replace", explode)
+
+    with pytest.raises(RuntimeError):
+        tasks.save_tasks(str(path), _one_task_list())
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_save_tasks_cannot_make_its_temporary_file(tmp_path: Path) -> None:
+    missing = tmp_path / "nowhere" / "tasks.yaml"
+
+    with pytest.raises(TaskFileError) as excinfo:
+        tasks.save_tasks(str(missing), _one_task_list())
+
+    assert quote(str(missing)) in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_save_tasks_keeps_a_users_own_tmp_file_after_a_save(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.yaml"
+    users = tmp_path / "tasks.yaml.tmp"
+    users.write_bytes(b"precious\n")
+
+    tasks.save_tasks(str(path), _one_task_list())
+
+    assert users.read_bytes() == b"precious\n"
+    assert sorted(tmp_path.iterdir()) == [path, users], "no temporary file is left"
+
+
+def test_save_tasks_keeps_a_users_own_tmp_file_after_a_failed_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "tasks.yaml"
+    path.write_text("old\n", encoding="utf-8")
+    users = tmp_path / "tasks.yaml.tmp"
+    users.write_bytes(b"precious\n")
+    block_saving(monkeypatch)
+
+    with pytest.raises(TaskFileError):
+        tasks.save_tasks(str(path), _one_task_list())
+
+    assert users.read_bytes() == b"precious\n"
+    assert sorted(tmp_path.iterdir()) == [path, users]
 
 
 def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:

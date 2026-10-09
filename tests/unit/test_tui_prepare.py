@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from helpers import write_file, write_nested_file
+from helpers import block_saving, write_file, write_nested_file
 
 from alr.engine.commit import CommitMode, Repo, find_repo
 from alr.engine.stop import Stop
@@ -259,16 +259,11 @@ async def test_prepare_leaves_the_task_file_alone_when_the_log_cannot_open(
     assert Path(settings.tasks_file).read_bytes() == before
 
 
-def _block_saving(settings: RunSettings) -> None:
-    """Make every save of the task file fail, for any user: a folder holds the temporary file's name."""
-    Path(settings.tasks_file + ".tmp").mkdir()
-
-
 async def test_prepare_refuses_and_removes_the_run_folder_when_saving_the_gates_fails(
-    git_repo: Path,
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
-    _block_saving(settings)
+    block_saving(monkeypatch)
     before = Path(settings.tasks_file).read_bytes()
 
     with pytest.raises(RefusedError) as caught:
@@ -277,7 +272,20 @@ async def test_prepare_refuses_and_removes_the_run_folder_when_saving_the_gates_
     assert caught.value.reason == "task-file-unwritable"
     assert "failed to save tasks to" in caught.value.message
     assert Path(settings.tasks_file).read_bytes() == before
-    assert list((git_repo / "run" / "logs").iterdir()) == [], "no run folder is left"
+    assert not (git_repo / "run" / "logs").exists(), "the logs/ it made is removed too"
+
+
+async def test_prepare_keeps_a_logs_folder_that_was_there_when_saving_the_gates_fails(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+    (git_repo / "run" / "logs").mkdir()
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError):
+        await prepare(settings)
+
+    assert list((git_repo / "run" / "logs").iterdir()) == [], "only the run folder goes"
 
 
 FAILED_TASKS = TASKS + "    state: failed\n    error: boom\n"
@@ -346,24 +354,37 @@ async def test_prepare_reset_failed_leaves_the_file_alone_when_the_log_cannot_op
 
 
 async def test_prepare_reset_failed_that_cannot_save_refuses_and_removes_the_run_folder(
-    git_repo: Path,
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _failed_settings(git_repo, reset_failed=True, logging=True)
-    _block_saving(settings)
+    block_saving(monkeypatch)
 
     with pytest.raises(RefusedError) as caught:
         await prepare(settings)
 
     assert caught.value.reason == "task-file-unwritable"
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
-    assert list((git_repo / "run" / "logs").iterdir()) == [], "no run folder is left"
+    assert not (git_repo / "run" / "logs").exists(), "the logs/ it made is removed too"
+
+
+async def test_prepare_reset_failed_that_cannot_save_keeps_a_logs_folder_that_was_there(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _failed_settings(git_repo, reset_failed=True, logging=True)
+    (git_repo / "run" / "logs").mkdir()
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError):
+        await prepare(settings)
+
+    assert list((git_repo / "run" / "logs").iterdir()) == [], "only the run folder goes"
 
 
 async def test_prepare_reset_failed_that_cannot_save_refuses_without_a_log(
-    git_repo: Path,
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _failed_settings(git_repo, reset_failed=True, logging=False)
-    _block_saving(settings)
+    block_saving(monkeypatch)
 
     with pytest.raises(RefusedError) as caught:
         await prepare(settings)

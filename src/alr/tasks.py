@@ -3,6 +3,7 @@
 import contextlib
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -474,18 +475,36 @@ def save_tasks(path: str, task_list: TaskList) -> None:
         width=float("inf"),
     )
     target = Path(path)
-    tmp = target.with_name(target.name + ".tmp")
     try:
-        _write_file(tmp, text)
-        tmp.replace(target)
+        _replace_with(target, text)
     except OSError as exc:
-        # Only the temporary file is alr's to remove.
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-
         raise TaskFileError(
             f"failed to save tasks to {quote(str(target))}: {exc.strerror}"
         ) from exc
+
+
+def _replace_with(target: Path, text: str) -> None:
+    """Write text beside target and rename it over target.
+
+    The name is unique, so a file of the user's own is never touched. Whatever
+    goes wrong, only that temporary file is removed.
+    """
+    # The task file can hold prompts and commands, so only its owner may read
+    # it; mkstemp makes the file 0o600.
+    fd, name = tempfile.mkstemp(
+        dir=target.parent, prefix=f"{target.name}.", suffix=".tmp"
+    )
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+
+        tmp.replace(target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+        raise
 
 
 class _TaskDumper(yaml.SafeDumper):
@@ -551,10 +570,3 @@ def _task_entry(task: Task) -> dict[str, int | str]:
         entry["error"] = task.error
 
     return entry
-
-
-def _write_file(path: Path, text: str) -> None:
-    # The task file can hold prompts and commands, so only its owner may read it.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        file.write(text)

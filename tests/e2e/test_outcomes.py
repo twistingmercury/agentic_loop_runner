@@ -12,6 +12,7 @@ import pytest
 from e2e_helpers import (
     ONE_TASK,
     TWO_TASKS,
+    assert_no_tmp_file,
     read_tasks_yaml,
     run_alr,
     run_args,
@@ -130,6 +131,25 @@ def test_reset_failed_with_an_unwritable_log_folder_leaves_the_file_alone(
     assert res.code == 3, res
     assert res.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
     assert tasks_path.read_text(encoding="utf-8") == failed_yaml
+
+
+def test_reset_failed_keeps_a_users_own_tmp_file(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    failed_yaml = (
+        shared_block()
+        + "tasks:\n  - {id: 1, name: First, prompt: p1, state: failed, error: boom}\n"
+    )
+    tasks_path = write_tasks_yaml(tmp_path, failed_yaml)
+    users = tmp_path / "tasks.yaml.tmp"
+    users.write_text("precious", encoding="utf-8")
+
+    res = run_alr(*run_args(tasks_path), "--reset-failed")
+
+    assert res.code == 0, res
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
+    assert users.read_bytes() == b"precious"
+    assert_no_tmp_file(tasks_path)
 
 
 def install_pre_commit_hook(git_repo: Path, script: str) -> None:

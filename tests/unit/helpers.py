@@ -6,6 +6,7 @@ Test modules never import each other.
 """
 
 import asyncio
+import errno
 import json
 import os
 import signal
@@ -43,6 +44,21 @@ def write_nested_file(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def block_saving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every save of a task file fail, for any user, root included.
+
+    A read-only folder would not do: the release build runs the tests as root,
+    which ignores folder permissions. The save still runs for real, writes its
+    temporary file, and fails only at the final replace, so a save that wrote
+    the target directly would not fail and the test using this would notice.
+    """
+
+    def refuse(src: object, dst: object) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(os, "replace", refuse)
 
 
 def saved_tasks(path: Path) -> TaskList:

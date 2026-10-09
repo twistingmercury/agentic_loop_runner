@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from helpers import (
+    block_saving,
     cancel_run,
     commit_subjects,
     saved_tasks,
@@ -250,11 +251,10 @@ async def test_reset_failed_leaves_the_file_alone_when_the_log_cannot_open(
 
 
 async def test_reset_failed_that_cannot_save_refuses_and_leaves_no_run_folder(
-    record: Path, tmp_path: Path
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
-    # A folder where the temporary file goes fails the save for every user, root included.
-    (tmp_path / "tasks.yaml.tmp").mkdir()
+    block_saving(monkeypatch)
 
     with pytest.raises(RefusedError) as caught:
         await _start(tasks_file, reset_failed=True)
@@ -262,8 +262,34 @@ async def test_reset_failed_that_cannot_save_refuses_and_leaves_no_run_folder(
     assert caught.value.reason == "task-file-unwritable"
     assert "failed to save tasks to" in caught.value.message
     assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
-    assert list((tmp_path / "logs").iterdir()) == [], "the run folder is removed"
+    assert not (tmp_path / "logs").exists(), "the logs/ it made is removed too"
     assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_that_cannot_save_keeps_a_logs_folder_that_was_there(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    (tmp_path / "logs").mkdir()
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError):
+        await _start(tasks_file, reset_failed=True)
+
+    assert list((tmp_path / "logs").iterdir()) == [], "only the run folder goes"
+
+
+async def test_reset_failed_keeps_a_users_own_tmp_file(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    users = tmp_path / "tasks.yaml.tmp"
+    users.write_bytes(b"precious\n")
+
+    await _start(tasks_file, reset_failed=True)
+
+    assert users.read_bytes() == b"precious\n"
+    assert saved_tasks(Path(tasks_file)).tasks[0].state == "completed"
 
 
 async def test_reset_failed_runs_the_reset_list_and_saves_it(

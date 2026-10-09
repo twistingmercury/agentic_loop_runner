@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from helpers import (
     SHARED,
+    block_saving,
     cancel_run,
     fake_claude_records,
     run_loop,
@@ -212,11 +213,12 @@ def test_save_for_start_saves_the_list(tmp_path: Path) -> None:
     ]
 
 
-def test_save_for_start_refuses_when_the_file_cannot_be_saved(tmp_path: Path) -> None:
+def test_save_for_start_refuses_when_the_file_cannot_be_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
     task_list = loop.read_tasks(path)
-    # A folder where the temporary file goes fails for every user, root included.
-    (tmp_path / "tasks.yaml.tmp").mkdir()
+    block_saving(monkeypatch)
 
     with pytest.raises(RefusedError) as caught:
         loop.save_for_start(path, task_list)
