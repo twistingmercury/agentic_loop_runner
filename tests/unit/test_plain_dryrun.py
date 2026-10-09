@@ -325,6 +325,21 @@ async def test_dry_run_refuses_a_log_folder_that_is_a_file(tmp_path: Path) -> No
     assert out.getvalue() == ""
 
 
+async def test_dry_run_refuses_failed_tasks_before_an_unwritable_log_folder(
+    tmp_path: Path,
+) -> None:
+    # A real run opens its log after the failed-tasks check, so it never gets
+    # to say log-unwritable for a file it refuses first.
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASKS_YAML)
+    (tmp_path / "logs").write_text("a file", encoding="utf-8")
+
+    out = io.StringIO()
+    with pytest.raises(FailedTasksError):
+        await dry_run(out, tasks_file, "", "", False)
+
+    assert out.getvalue() == FAILED_TASKS_REPORT
+
+
 async def test_dry_run_refuses_a_read_only_log_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

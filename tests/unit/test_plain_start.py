@@ -12,6 +12,7 @@ from helpers import (
     block_saving,
     cancel_run,
     commit_subjects,
+    refuse_removal,
     saved_tasks,
     wait_for_text,
     wait_until_gone,
@@ -277,6 +278,42 @@ async def test_reset_failed_that_cannot_save_keeps_a_logs_folder_that_was_there(
         await _start(tasks_file, reset_failed=True)
 
     assert list((tmp_path / "logs").iterdir()) == [], "only the run folder goes"
+
+
+async def test_reset_failed_that_cannot_save_refuses_even_when_the_cleanup_fails(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    block_saving(monkeypatch)
+    monkeypatch.setattr(Path, "rmdir", refuse_removal)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, reset_failed=True)
+
+    assert caught.value.reason == "task-file-unwritable", "the refusal, not the cleanup"
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_with_nothing_failed_leaves_the_file_alone(
+    record: Path, tmp_path: Path
+) -> None:
+    # Odd spacing, so any rewrite would change the bytes; the mtime is set far
+    # back so a rewrite would move it even within the clock's resolution.
+    content = (
+        "shared: {prompt: shared}\n"
+        "tasks:\n"
+        "  - {id: 1,   name: First,  prompt: p1,  state: completed}\n"
+    )
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
+    os.utime(tasks_file, ns=(1_000_000_000, 1_000_000_000))
+    before = Path(tasks_file).stat()
+
+    await _start(tasks_file, reset_failed=True)
+
+    after = Path(tasks_file).stat()
+    assert Path(tasks_file).read_text(encoding="utf-8") == content
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert _calls(record) == 0, "nothing was pending, so claude must not run"
 
 
 async def test_reset_failed_keeps_a_users_own_tmp_file(

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from helpers import refuse_removal
 
 from alr.errors import RefusedError, RunLogError
 from alr.record import runlog
@@ -621,6 +622,49 @@ def test_discard_stops_at_the_first_parent_that_is_not_empty(tmp_path: Path) -> 
     log.discard()
 
     assert sorted(tmp_path.rglob("*")) == [tmp_path / "a", stranger]
+
+
+@pytest.mark.parametrize("removal", ["unlink", "rmdir"])
+def test_discard_suppresses_an_error_while_removing(
+    opened: tuple[RunLog, Path], monkeypatch: pytest.MonkeyPatch, removal: str
+) -> None:
+    log, path = opened
+    monkeypatch.setattr(Path, removal, refuse_removal)
+
+    log.discard()
+
+    assert path.exists(), "what could not be removed is left, not raised over"
+
+
+def test_discard_suppresses_an_error_while_closing_and_still_removes(
+    opened: tuple[RunLog, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log, path = opened
+
+    def fail(file: object, where: Path) -> None:
+        raise RunLogError(f"{where}: Input/output error")
+
+    monkeypatch.setattr(runlog, "_close", fail)
+
+    log.discard()
+
+    assert not path.exists(), "a record being thrown away needs no clean close"
+
+
+def test_open_that_cannot_start_the_ledger_refuses_even_when_the_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path) -> None:
+        raise runlog._io_error(path, OSError(errno.EIO, "Input/output error"))
+
+    monkeypatch.setattr(runlog, "_open_append", refuse)
+    monkeypatch.setattr(Path, "rmdir", refuse_removal)
+
+    with pytest.raises(RefusedError) as raised:
+        RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    assert raised.value.reason == "log-unwritable"
+    assert "Input/output error" in raised.value.message, "the cause, not the cleanup"
 
 
 def test_open_that_cannot_start_the_ledger_leaves_no_log_folder_it_made(

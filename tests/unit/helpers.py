@@ -61,6 +61,14 @@ def block_saving(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "replace", refuse)
 
 
+def refuse_removal(*_: object, **__: object) -> None:
+    """Stand in for Path.unlink or Path.rmdir where the removal must fail.
+
+    A read-only folder would not do: the release build runs the tests as root.
+    """
+    raise PermissionError(errno.EACCES, "Permission denied")
+
+
 def saved_tasks(path: Path) -> TaskList:
     return tasks.parse_tasks(path.read_text(encoding="utf-8"))
 

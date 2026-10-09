@@ -674,7 +674,13 @@ def test_a_task_name_with_a_line_break_is_rejected(brk: str) -> None:
     assert str(exc.value) == "tasks[0] (id 7): name: must be a single line"
 
 
-@pytest.mark.parametrize("char", ["\0", "\x01", "\x07", "\x1b", "\x7f"])
+@pytest.mark.parametrize(
+    "char",
+    # The ends of the rule's three ranges: \x00-\x08, \x0a-\x1f, \x7f-\x9f. The
+    # line feed that starts the second is a line break, so it is pinned with the
+    # others above and answers with the single-line message.
+    ["\0", "\x01", "\x07", "\x08", "\x1b", "\x1f", "\x7f", "\x80", "\x9f"],
+)
 def test_a_task_name_with_a_control_character_is_rejected(char: str) -> None:
     # A NUL in a commit subject crashes git's argv with "embedded null byte".
     name = json.dumps(f"a{char}b")
@@ -697,6 +703,20 @@ def test_a_task_name_with_a_tab_or_punctuation_loads() -> None:
     )
 
     assert tasks.parse_tasks(text).tasks[0].name == "fix\tthe 'thing': (a/b) #1 \u00e9"
+
+
+@pytest.mark.parametrize("char", ["\t", " ", "\xa0"])
+def test_a_task_name_with_spacing_just_outside_the_control_range_loads(
+    char: str,
+) -> None:
+    # The tab sits between the rejected \x08 and the line feed, the space just
+    # above \x1f, and the no-break space just past the C1 block.
+    name = json.dumps(f"a{char}b")
+    text = (
+        f"shared: {{prompt: s}}\ntasks:\n  - id: 7\n    name: {name}\n    prompt: p\n"
+    )
+
+    assert tasks.parse_tasks(text).tasks[0].name == f"a{char}b"
 
 
 @pytest.mark.parametrize("brk", ["\n", "\x85", "\u2028"])
