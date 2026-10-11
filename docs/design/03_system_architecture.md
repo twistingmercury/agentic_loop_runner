@@ -1,7 +1,7 @@
 ---
-version: 27
-date: 2026-10-09
-notes: "Corrects the document to ADR-025 as amended after the stage 1 review: a refusal leaves nothing on disk, in a fixed order (--reset-failed is applied in memory and saved last, and a failed save is the new reason task-file-unwritable, nine reasons in all); the dry run refuses like a real run (exit 3, failed tasks included); the view carries the stop signal (SIGTERM 143, a second Stop press keeps the code); a stop after the commit landed saves the tasks it covers completed, and a stop in run mode leaves tasks.yaml untouched. Earlier: Documents ADR-025: each AlrError class carries its exit code (usage 2, refused 3, commit failed 4, stop 130 or 143) and the new Exit Codes table lists them; refusals name a reason and write no run log; run_done carries the result and exit code; run mode keeps task states in memory, shows passed, and saves tasks.yaml once at the end; task mode completes a task only after its commit lands. The error table lists the classes alr has. Earlier: Startup order: argparse rejects a bad --commit value, a bare --commit, and --commit-after-all before every step with exit 2, which is said apart from UsageError exiting 1; the log folder is checked before the clean tree; the run commit says 1 task for one task (ADR-024). Earlier: The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
+version: 28
+date: 2026-10-11
+notes: "Corrects the document to ADR-025 after the stage 1c re-review: the dry run also refuses an unwritable log folder (log-unwritable) without creating it; a refused start also removes a logs/ folder it created, when it is empty, not only the run folder; task-file-unwritable covers the save of edited gates when the view starts, as well as the --reset-failed save. Earlier: Corrects the document to ADR-025 as amended after the stage 1 review: a refusal leaves nothing on disk, in a fixed order (--reset-failed is applied in memory and saved last, and a failed save is the new reason task-file-unwritable, nine reasons in all); the dry run refuses like a real run (exit 3, failed tasks included); the view carries the stop signal (SIGTERM 143, a second Stop press keeps the code); a stop after the commit landed saves the tasks it covers completed, and a stop in run mode leaves tasks.yaml untouched. Earlier: Documents ADR-025: each AlrError class carries its exit code (usage 2, refused 3, commit failed 4, stop 130 or 143) and the new Exit Codes table lists them; refusals name a reason and write no run log; run_done carries the result and exit code; run mode keeps task states in memory, shows passed, and saves tasks.yaml once at the end; task mode completes a task only after its commit lands. The error table lists the classes alr has. Earlier: Startup order: argparse rejects a bad --commit value, a bare --commit, and --commit-after-all before every step with exit 2, which is said apart from UsageError exiting 1; the log folder is checked before the clean tree; the run commit says 1 task for one task (ADR-024). Earlier: The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
 ---
 
 # alr — System Architecture
@@ -278,10 +278,13 @@ How gralph's packages map onto this:
 - Raise the refusals in a fixed order, so a refused run leaves nothing on disk: an unreadable or invalid task file
   (`invalid-task-file`), the repository checks, `--reset-failed` applied to the in-memory list, the failed-task check on
   that list, opening the run log (`log-unwritable`), and last saving the reset (`task-file-unwritable`, after which the
-  log is closed and the run folder it made is removed). A refusal never leaves a run folder: opening the log removes the
-  folder it made when `run.jsonl` cannot be opened. The dry run takes the same steps with the same `logs/` path it would
-  use, minus the reset and the log, so it refuses as a real run does: a `failed` task prints the table and then exits 3
-  (`failed-tasks`), and a visible log folder exits 3 (`log-folder-visible`). Only the plain start adds
+  log is closed and the run folder it made is removed, with the `logs/` folder too when the run created it and it is
+  empty). A refusal never leaves a run folder: opening the log removes the folder it made when `run.jsonl` cannot be
+  opened, and that cleanup also removes a `logs/` folder it made while empty. The dry run takes the same steps with the
+  same `logs/` path it would use, minus the reset and opening the log. It checks that the log folder can be written
+  (`log-unwritable`) without creating it, so it refuses as a real run does: a `failed` task prints the table and then
+  exits 3 (`failed-tasks`), a visible log folder exits 3 (`log-folder-visible`), and an unwritable one exits 3
+  (`log-unwritable`). Only the plain start adds
   `failed to start loop runner:` to an invalid-file message
 - Record the run (ADR-019): write the run log in `<dir>/logs/<timestamp>/` on every real run, with the ledger
   (`run.jsonl`) and a detail file per task (`task-<id>.log`) holding the lines of Claude's raw stdout plus the
@@ -507,7 +510,9 @@ Before step 1, argparse checks the command line. `--commit` takes `none`, `task`
    `error: refused: <reason>: <message>` as its first stderr line and leaves nothing on disk: no run log, and the task
    file as it was. With `--reset-failed`, a real run sets failed tasks back to pending silently, in memory first (the view
    does that when it first reads the file, so Start is enabled), and saves the file only after every other check and the
-   run log have passed; if that save fails the run is refused as `task-file-unwritable` and the run folder is removed.
+   run log have passed; if that save fails (or, in the view, the save of edited gates does) the run is
+   refused as `task-file-unwritable` and the run folder it made is removed, with
+   the `logs/` folder too when the run created it and it is empty.
    The dry run refuses like a real run (exit 3, including `failed-tasks` and `log-folder-visible`);
    `--reset-failed` with `--dry-run` is a usage error (exit 2, ADR-018). The view repeats steps 1 to 5 on Start with the dialogs' values
 
@@ -560,7 +565,7 @@ having to match it word for word (ADR-007).
 | `UsageError`        | 2          | A flag is missing, conflicts with another, or has a bad value (argparse's own rejections exit 2) |
 | `RefusedError`      | 3          | alr declines to start; carries a reason word (`dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `git-error`) |
 | `FailedTasksError`  | 3          | The task file already holds a failed task; a kind of `RefusedError`                          |
-| `TaskFileError`     | 1          | The task file cannot be read, parsed, validated (including `shared.prompt` and task names without line breaks or other control characters), or saved; at startup it is refused as `invalid-task-file`, or as `task-file-unwritable` when the `--reset-failed` save fails |
+| `TaskFileError`     | 1          | The task file cannot be read, parsed, validated (including `shared.prompt` and task names without line breaks or other control characters), or saved; at startup it is refused as `invalid-task-file`, or as `task-file-unwritable` when a save at startup fails (the `--reset-failed` reset, or the edited gates in the view) |
 | `RunLogError`       | 1          | The run log cannot be written mid-run; when it cannot be opened at startup it is refused as `log-unwritable` |
 | `RunError`          | 1          | A task failed (after its state was saved), or its state cannot be saved                      |
 | `CommitFailedError` | 4          | A commit git refuses; a kind of `RunError`                                                   |
