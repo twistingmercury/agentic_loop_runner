@@ -18,6 +18,8 @@ from helpers import (
     write_nested_file,
 )
 
+from textual.app import App, ComposeResult
+
 from alr import tasks
 from alr.engine import commit, loop, proc
 from alr.engine.commit import (
@@ -36,7 +38,10 @@ from alr.errors import (
     RunError,
     TaskFileError,
 )
+from alr.engine.frontend import FrontEnd
 from alr.plain.frontend import PlainFrontEnd
+from alr.record.events import Event
+from alr.stream.frontend import StreamFrontEnd
 from alr.tasks import (
     COMPLETED,
     FAILED,
@@ -47,6 +52,7 @@ from alr.tasks import (
     Task,
     TaskList,
 )
+from alr.tui.panes import TasksPane
 
 RUN_DIR = "20261001T140211"
 
@@ -677,7 +683,7 @@ async def _cancel_during_commit(
     *,
     hook: str = "pre-commit",
     task_list: TaskList | None = None,
-    front_end: PlainFrontEnd | None = None,
+    front_end: FrontEnd | None = None,
     stop: Stop | None = None,
     expect: type[RunError] = RunCancelledError,
 ) -> tuple[float, RunError]:
@@ -1207,6 +1213,59 @@ async def test_a_stop_after_the_commit_landed_saves_the_covered_tasks_completed(
     )
 
 
+class _PaneHost(App[None]):
+    def __init__(self, pane: TasksPane) -> None:
+        super().__init__()
+        self._pane = pane
+
+    def compose(self) -> ComposeResult:
+        yield self._pane
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize(
+    ("commit_mode", "want_states"),
+    [
+        pytest.param(CommitMode.TASK, [(COMPLETED, ""), (PENDING, "")], id="task mode"),
+        pytest.param(CommitMode.RUN, [(COMPLETED, "")] * 2, id="run mode"),
+    ],
+)
+async def test_the_tasks_pane_follows_the_saved_file_after_a_stop_past_the_commit(
+    git_repo: Path,
+    tmp_path: Path,
+    commit_mode: CommitMode,
+    want_states: list[tuple[str, str]],
+) -> None:
+    tasks_file = _task_file(git_repo)
+    _save_first(_two_tasks(_NUMBERED), tasks_file)
+    events: list[Event] = []
+
+    # The post-commit hook is still running when the stop arrives, so the engine
+    # never saw the commit finish; the rows must still match the file.
+    await _cancel_during_commit(
+        git_repo,
+        tasks_file,
+        tmp_path / "ready",
+        "echo ready > READY\nsleep 60",
+        commit_mode,
+        hook="post-commit",
+        task_list=_two_tasks(_NUMBERED),
+        front_end=StreamFrontEnd(events.append),
+    )
+
+    assert _saved_states(tasks_file) == want_states
+    pane = TasksPane()
+    async with _PaneHost(pane).run_test():
+        pane.load(_two_tasks(_NUMBERED))
+        for event in events:
+            pane.apply(event)
+
+        symbols = {COMPLETED: "✔", PENDING: "·"}
+        assert [pane.get_row_at(i)[0] for i in range(2)] == [
+            symbols[state] for state, _ in want_states
+        ]
+
+
 @pytest.mark.usefixtures("fake_claude")
 async def test_a_stop_after_the_run_commit_landed_keeps_earlier_completed_tasks(
     git_repo: Path, tmp_path: Path
@@ -1375,6 +1434,32 @@ async def test_a_landed_run_commit_that_cannot_be_saved_names_the_commit(
     assert git(git_repo, "rev-parse", "HEAD").strip() in message
     assert "tasks.yaml was not updated" in message
     assert "failed to save tasks to" in message
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_the_tasks_pane_marks_no_row_failed_when_the_save_after_the_run_commit_fails(
+    git_repo: Path,
+) -> None:
+    tasks_file = _unsavable_file(git_repo)
+    events: list[Event] = []
+
+    with pytest.raises(CommitFailedError):
+        await run_loop(
+            _two_tasks(_NUMBERED),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+            front_end=StreamFrontEnd(events.append),
+        )
+
+    pane = TasksPane()
+    async with _PaneHost(pane).run_test():
+        pane.load(_two_tasks(_NUMBERED))
+        for event in events:
+            pane.apply(event)
+
+        # The commit landed and the file says pending: nothing failed.
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "·"]
 
 
 @pytest.mark.usefixtures("fake_claude")

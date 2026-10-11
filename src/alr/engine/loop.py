@@ -247,7 +247,9 @@ async def _commit_after_all(
         error = await commit_all(options.repo, ran, front_end)
     except asyncio.CancelledError:
         # A stop before the commit lands saves nothing: the file is still as the run found it.
-        await _save_if_landed(options.repo, before, ran, task_list, options.tasks_file)
+        await _save_if_landed(
+            options.repo, before, ran, task_list, options.tasks_file, front_end
+        )
         raise RunCancelledError("stopped during the final commit") from None
 
     if error is not None:
@@ -262,17 +264,20 @@ async def _save_if_landed(
     covered: Sequence[Task],
     task_list: TaskList,
     tasks_file: str,
+    front_end: FrontEnd,
 ) -> None:
     """After a stop in the commit step, save the covered tasks completed if git had already made the commit.
 
     A stop that lands after the commit exists must not undo it, or a rerun
     would redo committed work. When HEAD did not move, or git cannot say,
-    nothing is saved.
+    nothing is saved. The stop cut the commit step short before it could tell
+    the front end, so the front end is told here, and its rows follow the file.
     """
     after = await _head_after_stop(repo)
     if after is None or after == before:
         return
 
+    front_end.committed(covered[-1], after)
     await _save_committed(repo, covered, task_list, tasks_file, after)
 
 
@@ -490,7 +495,7 @@ async def _commit_task(
     except asyncio.CancelledError:
         # Unless git had already made the commit, nothing is saved, so the next
         # run picks the task up again.
-        await _save_if_landed(repo, before, [task], task_list, tasks_file)
+        await _save_if_landed(repo, before, [task], task_list, tasks_file, front_end)
         raise RunCancelledError(
             f"task {task.id}: {task.name}: stopped during commit"
         ) from None

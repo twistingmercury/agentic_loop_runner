@@ -174,7 +174,9 @@ class TasksPane(DataTable[str]):
             symbol = _SYMBOLS[COMPLETED] if key in landed else _PENDING
             self._set_state(int(key), symbol)
 
-        if event.result is RunResult.COMMIT_FAILED and passed:
+        # A landed commit whose save failed is exit 4 too, but nothing failed:
+        # the file says pending and no task carries the failure.
+        if event.result is RunResult.COMMIT_FAILED and passed and not committed:
             self._set_state(int(passed[-1]), _SYMBOLS[FAILED])
 
     def tick(self) -> None:

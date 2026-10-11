@@ -125,9 +125,11 @@ async def test_tasks_pane_takes_back_run_rows_when_the_save_after_the_commit_fai
         _pass_both(pane)
         pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
 
-        pane.apply(RunDone("not saved", 1.0, RunResult.FAILED, 1))
+        pane.apply(RunDone("not saved", 1.0, RunResult.COMMIT_FAILED, 4))
 
-        assert _rows(pane) == ["·", "·"]
+        assert _rows(pane) == ["·", "·"], (
+            "the commit landed, so no row is the failed one"
+        )
 
 
 async def test_tasks_pane_keeps_a_task_mode_row_completed_after_a_stop_past_the_commit() -> (
