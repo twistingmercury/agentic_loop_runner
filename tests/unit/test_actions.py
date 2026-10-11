@@ -10,12 +10,28 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from helpers import cancel_run, run_loop, saved_tasks, wait_for_text, wait_until_gone
+from helpers import (
+    RecordingFrontEnd,
+    cancel_run,
+    run_loop,
+    saved_tasks,
+    wait_for_text,
+    wait_until_gone,
+)
 
 from alr.engine import actions
 from alr.engine.actions import action_env
-from alr.errors import RunError
-from alr.tasks import COMPLETED, FAILED, PENDING, Action, Shared, Task, TaskList
+from alr.errors import AfterRunFailedError, RunError
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    Action,
+    RunResult,
+    Shared,
+    Task,
+    TaskList,
+)
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -535,3 +551,117 @@ async def test_the_loop_gives_an_action_the_task_and_the_run_paths(
     await run_loop(task_list, tasks_file, repo=None)
 
     assert seen.read_text() == f"1|{tasks_file}|{tmp_path / 'logs'}"
+
+
+def _after_run_list(
+    *,
+    tasks_count: int = 2,
+    state: str = PENDING,
+    after_task: list[Action] | None = None,
+    after_run: list[Action],
+) -> TaskList:
+    return TaskList(
+        shared=Shared(prompt="shared", after_task=after_task, after_run=after_run),
+        tasks=[
+            Task(id=n, name=f"T{n}", prompt=f"p{n}", state=state)
+            for n in range(1, tasks_count + 1)
+        ],
+    )
+
+
+def _log_action(log: Path, label: str) -> Action:
+    """An action that appends its label to log, so the order of runs shows."""
+    return Action(command=f"echo {label} >> '{log}'")
+
+
+async def test_after_run_runs_once_after_the_last_task(tmp_path: Path) -> None:
+    log = tmp_path / "order"
+    task_list = _after_run_list(
+        after_task=[_log_action(log, "a")], after_run=[_log_action(log, "z")]
+    )
+
+    await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert log.read_text().split() == ["a", "a", "z"]
+
+
+async def test_after_run_gets_the_run_variables_and_no_task(tmp_path: Path) -> None:
+    out = tmp_path / "env"
+    command = f'printf \'%s|%s|%s\' "${{ALR_TASK_ID-unset}}" "$ALR_TASK_FILE" "$ALR_LOG_DIR" > \'{out}\''
+    task_list = _after_run_list(after_run=[Action(command=command)])
+    tasks_file = tmp_path / "tasks.yaml"
+
+    await run_loop(task_list, tasks_file)
+
+    assert (
+        out.read_text()
+        == f"unset|{tasks_file.resolve()}|{(tmp_path / 'logs').resolve()}"
+    )
+
+
+async def test_after_run_failure_keeps_tasks_completed_and_exits_4(
+    tmp_path: Path,
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    task_list = _after_run_list(after_run=[Action(command="exit 1")])
+
+    with pytest.raises(AfterRunFailedError, match='action "exit 1" failed'):
+        await run_loop(task_list, tasks_file)
+
+    assert AfterRunFailedError.exit_code == 4
+    assert [t.state for t in saved_tasks(tasks_file).tasks] == [COMPLETED, COMPLETED]
+
+
+async def test_after_run_failure_ends_the_run_as_run_failed(tmp_path: Path) -> None:
+    front_end = RecordingFrontEnd()
+    task_list = _after_run_list(after_run=[Action(command="exit 1")])
+
+    with pytest.raises(AfterRunFailedError):
+        await run_loop(task_list, tmp_path / "tasks.yaml", front_end=front_end)
+
+    assert front_end.endings == [(RunResult.RUN_FAILED, 4)]
+    assert front_end.done[0] is not None
+    assert front_end.done[0].startswith('action "exit 1" failed')
+
+
+async def test_after_run_runs_even_when_every_task_was_completed(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "order"
+    task_list = _after_run_list(state=COMPLETED, after_run=[_log_action(log, "z")])
+
+    await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert log.read_text().split() == ["z"]
+
+
+async def test_after_run_does_not_run_after_a_failed_task(tmp_path: Path) -> None:
+    log = tmp_path / "order"
+    task_list = _after_run_list(
+        after_task=[Action(command="exit 1")], after_run=[_log_action(log, "z")]
+    )
+
+    with pytest.raises(RunError):
+        await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert not log.exists()
+
+
+async def test_a_stop_during_after_run_is_a_stop_without_a_task_prefix(
+    tmp_path: Path,
+) -> None:
+    ready = tmp_path / "ready"
+    tasks_file = tmp_path / "tasks.yaml"
+    front_end = RecordingFrontEnd()
+    task_list = _after_run_list(
+        tasks_count=1,
+        after_run=[Action(command=f"echo ready > '{ready}'; sleep 60")],
+    )
+
+    run = asyncio.ensure_future(run_loop(task_list, tasks_file, front_end=front_end))
+    await wait_for_text(ready)
+    error = await cancel_run(run)
+
+    assert str(error).startswith("stopped during action")
+    assert [t.state for t in saved_tasks(tasks_file).tasks] == [COMPLETED]
+    assert front_end.endings == [(RunResult.STOPPED, 130)]

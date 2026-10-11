@@ -25,6 +25,7 @@ from alr.engine.stop import Stop
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
     TASK_FILE_UNWRITABLE,
+    AfterRunFailedError,
     AlrError,
     CommitFailedError,
     FailedTasksError,
@@ -40,6 +41,7 @@ from alr.tasks import (
     FAILED,
     PASSED,
     PENDING,
+    RUN_SCOPE,
     RunResult,
     Task,
     TaskList,
@@ -202,6 +204,9 @@ def _ending(exc: BaseException, stop: Stop) -> tuple[RunResult, int]:
     if isinstance(exc, CommitFailedError):
         return RunResult.COMMIT_FAILED, exc.exit_code
 
+    if isinstance(exc, AfterRunFailedError):
+        return RunResult.RUN_FAILED, exc.exit_code
+
     if isinstance(exc, AlrError):
         return RunResult.FAILED, exc.exit_code
 
@@ -242,6 +247,30 @@ async def _run_loop(
         ran.append(replace(task))
 
     await _commit_after_all(task_list, ran, options, front_end)
+    await _run_after_run(task_list, options, front_end)
+
+
+async def _run_after_run(
+    task_list: TaskList, options: RunOptions, front_end: FrontEnd
+) -> None:
+    """Run the file's after_run actions once; a failure ends the run with its own exit code.
+
+    The tasks are already saved completed, so nothing here changes them. It
+    runs even when every task was already completed, so a rerun after a
+    failure here tries again.
+    """
+    actions = task_list.after_run_list()
+    if not actions:
+        return
+
+    env = action_env(None, options.tasks_file, options.log_dir)
+    state, error = await run_actions(
+        RUN_SCOPE, actions, options.action_timeout, front_end, env
+    )
+    if state == COMPLETED:
+        return
+
+    raise AfterRunFailedError(error)
 
 
 async def _commit_after_all(

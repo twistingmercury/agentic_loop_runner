@@ -21,7 +21,7 @@ from alr.record.events import (
     TaskStarted,
 )
 from alr.durations import format_elapsed
-from alr.tasks import COMPLETED, FAILED, PASSED, TaskList
+from alr.tasks import COMPLETED, FAILED, PASSED, RUN_SCOPE, TaskList
 
 _SYMBOLS = {COMPLETED: "✔", PASSED: "●", FAILED: "✖"}
 _PENDING = "·"
@@ -167,6 +167,13 @@ class TasksPane(DataTable[str]):
         if event.result is RunResult.COMPLETED:
             return
 
+        # Only the after_run actions failed: the file says every task is completed.
+        if event.result is RunResult.RUN_FAILED:
+            for key in passed:
+                self._set_state(int(key), _SYMBOLS[COMPLETED])
+
+            return
+
         # Only a stop saves the covered tasks after the commit; a failure there
         # is a failed save, so the file still says pending.
         landed = committed if event.result is RunResult.STOPPED else []
@@ -268,6 +275,10 @@ class ActivityPane(RichLog):
     def apply(self, event: Event) -> None:
         if not isinstance(event, Activity):
             return
+
+        # The after_run actions have no row to select, so their lines take the pane.
+        if event.task.id == RUN_SCOPE.id:
+            self.show(event.task.id, event.task.name)
 
         self._by_task.setdefault(event.task.id, deque(maxlen=ACTIVITY_LINE_CAP)).append(
             event.line

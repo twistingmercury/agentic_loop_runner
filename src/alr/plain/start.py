@@ -18,6 +18,7 @@ from alr.engine.loop import (
 from alr.engine.stop import Stop
 from alr.errors import (
     INVALID_TASK_FILE,
+    AfterRunFailedError,
     CommitFailedError,
     RefusedError,
     RunCancelledError,
@@ -157,5 +158,7 @@ async def _run_logged(
     except CommitFailedError as exc:
         # Its own class, so the exit code 4 survives the prefix.
         raise CommitFailedError(f"loop error: {exc}") from exc
+    except AfterRunFailedError as exc:
+        raise AfterRunFailedError(f"loop error: {exc}") from exc
     except RunError as exc:
         raise RunError(f"loop error: {exc}") from exc

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from alr.engine.frontend import FrontEnd
 from alr.errors import RunCancelledError, quote
-from alr.tasks import COMPLETED, FAILED, Action, Task, parse_timeout
+from alr.tasks import COMPLETED, FAILED, RUN_SCOPE, Action, Task, parse_timeout
 
 # Applies to every action that neither the flag nor the file gives a timeout;
 # there is deliberately no way to run an action without a limit.
@@ -59,6 +59,15 @@ def action_failure(
     return f"action {name} failed: {error}"
 
 
+def _stopped_text(task: Task, action: Action) -> str:
+    """Word a stop during an action; the run's own actions belong to no task."""
+    stopped = f"stopped during action {quote(first_line(action.command))}"
+    if task.id == RUN_SCOPE.id:
+        return stopped
+
+    return f"task {task.id}: {task.name}: {stopped}"
+
+
 async def run_actions(
     task: Task,
     actions: Sequence[Action],
@@ -73,9 +82,7 @@ async def run_actions(
             error, timed_out = await _run_action(task, action, limit, front_end, env)
         except asyncio.CancelledError:
             # Nothing is saved, so the next run picks the task up again.
-            raise RunCancelledError(
-                f"task {task.id}: {task.name}: stopped during action {quote(first_line(action.command))}"
-            ) from None
+            raise RunCancelledError(_stopped_text(task, action)) from None
 
         if error is None and not timed_out:
             continue

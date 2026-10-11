@@ -78,6 +78,12 @@ class CommitFailedError(RunError):
     exit_code = 4
 
 
+class AfterRunFailedError(RunError):
+    """An after_run action failed; every task is still completed."""
+
+    exit_code = 4
+
+
 class RunCancelledError(RunError):
     """The run was stopped before a task finished."""
 

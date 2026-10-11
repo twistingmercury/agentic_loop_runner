@@ -2,6 +2,7 @@ import pytest
 
 from alr.errors import (
     FAILED_TASKS,
+    AfterRunFailedError,
     CommitFailedError,
     FailedTasksError,
     RefusedError,
@@ -33,6 +34,7 @@ def test_exit_codes() -> None:
     assert UsageError("x").exit_code == 2
     assert RefusedError("dirty-tree", "x").exit_code == 3
     assert CommitFailedError("x").exit_code == 4
+    assert AfterRunFailedError("x").exit_code == 4
 
 
 def test_a_refusal_names_its_reason_and_keeps_the_message() -> None:
@@ -53,3 +55,8 @@ def test_failed_tasks_is_a_refusal() -> None:
 
 def test_a_commit_failure_is_a_run_error() -> None:
     assert issubclass(CommitFailedError, RunError)
+
+
+def test_an_after_run_failure_is_a_run_error_but_not_a_commit_failure() -> None:
+    assert issubclass(AfterRunFailedError, RunError)
+    assert not issubclass(AfterRunFailedError, CommitFailedError)

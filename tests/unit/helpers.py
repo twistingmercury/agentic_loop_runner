@@ -27,7 +27,7 @@ from alr.engine.sandbox import bypass_args
 from alr.engine.stop import Stop
 from alr.errors import RunCancelledError
 from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import Shared, TaskList
+from alr.tasks import RunResult, Shared, TaskList
 
 SHARED = Shared(prompt="shared")
 ALR = Path(sys.executable).parent / "alr"
@@ -97,6 +97,21 @@ def git(repo: Path, *args: str) -> str:
 def commit_subjects(repo: Path) -> list[str]:
     """The commit subjects, newest first."""
     return git(repo, "log", "--format=%s").strip().split("\n")
+
+
+class RecordingFrontEnd(PlainFrontEnd):
+    """The plain front end that notes how the run ended and what it said."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.done: list[str | None] = []
+        self.endings: list[tuple[RunResult, int]] = []
+
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
+        self.done.append(error)
+        self.endings.append((result, exit_code))
 
 
 async def run_loop(

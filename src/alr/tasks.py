@@ -27,6 +27,7 @@ class RunResult(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     COMMIT_FAILED = "commit_failed"
+    RUN_FAILED = "run_failed"
     STOPPED = "stopped"
 
 

@@ -16,7 +16,16 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import COMPLETED, FAILED, PASSED, Action, Shared, Task, TaskList
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PASSED,
+    RUN_SCOPE,
+    Action,
+    Shared,
+    Task,
+    TaskList,
+)
 from alr.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, ActionsPane, TasksPane
 
 FIRST = Task(id=1, name="First", prompt="p")
@@ -88,6 +97,53 @@ async def test_tasks_pane_marks_the_commit_failure_on_the_last_task() -> None:
         pane.apply(RunDone("commit failed", 1.0, RunResult.COMMIT_FAILED, 4))
 
         assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "✖"]
+
+
+async def test_tasks_pane_shows_run_mode_rows_completed_when_after_run_fails() -> None:
+    pane = TasksPane()
+    async with Host(pane).run_test():
+        _pass_both(pane)
+        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
+
+        pane.apply(RunDone("action failed", 1.0, RunResult.RUN_FAILED, 4))
+
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["✔", "✔"]
+
+
+async def test_tasks_pane_has_no_row_for_the_after_run_scope() -> None:
+    pane = TasksPane()
+    action = Action(command="z")
+    async with Host(pane).run_test():
+        pane.load(TASK_LIST)
+
+        pane.apply(Activity(RUN_SCOPE, "z output"))
+        pane.apply(ActionFinished(RUN_SCOPE, action, "10m", None, False, 0.1))
+
+        assert pane.row_count == 2
+
+
+async def test_activity_pane_shows_the_after_run_lines_as_they_arrive() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test() as pilot:
+        pane.show(2, "Second")
+        pane.apply(Activity(SECOND, "→ edit b.py"))
+
+        pane.apply(Activity(RUN_SCOPE, "z output"))
+        await pilot.pause()
+
+        assert shown_text(pane) == ["z output"]
+        assert pane.border_title == "Task: 0 after the run"
+
+
+async def test_actions_pane_shows_an_after_run_action_result() -> None:
+    pane = ActionsPane()
+    async with Host(pane).run_test() as pilot:
+        pane.apply(
+            ActionFinished(RUN_SCOPE, Action(command="z"), "10m", "x", False, 0.2)
+        )
+        await pilot.pause()
+
+        assert shown_text(pane) == ["0. ✖ z 0.2s"]
 
 
 async def test_tasks_pane_keeps_passed_rows_once_the_run_completes() -> None:

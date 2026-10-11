@@ -25,7 +25,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Task
+from alr.tasks import RUN_SCOPE, Task
 
 # The record holds Claude's text and whatever an action or git printed, so it is
 # private to the user.
@@ -305,6 +305,11 @@ class RunLog:
     def _activity(self, event: Activity) -> None:
         clock = self._now().strftime("%H:%M:%S")
         text = f"{clock} {event.line}\n"
+        if event.task.id == RUN_SCOPE.id:
+            # The after_run actions belong to no task, and may run when no task did.
+            self._append_after_finish(self._path / f"task-{RUN_SCOPE.id}.log", text)
+            return
+
         if self._detail is not None or self._detail_path is None:
             _write(self._detail, self._detail_path or self._path, text)
             return

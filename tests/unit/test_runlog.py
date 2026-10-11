@@ -27,7 +27,7 @@ from alr.record.events import (
     TaskStarted,
 )
 from alr.record.runlog import Info, RunLog, run_dir
-from alr.tasks import COMPLETED, FAILED, Action, RunResult, Task
+from alr.tasks import COMPLETED, FAILED, RUN_SCOPE, Action, RunResult, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'
 
@@ -128,6 +128,7 @@ def test_open_writes_the_commit_mode_as_a_string(tmp_path: Path, mode: str) -> N
         (RunResult.COMPLETED, 0),
         (RunResult.FAILED, 1),
         (RunResult.COMMIT_FAILED, 4),
+        (RunResult.RUN_FAILED, 4),
         (RunResult.STOPPED, 143),
     ],
 )
@@ -539,6 +540,34 @@ def test_record_activity_after_the_task_finished_appends_to_its_detail_file(
         "14:02:11 working",
         "14:02:11 → commit First",
     ]
+
+
+def test_record_after_run_output_gets_its_own_file_even_with_no_task_run(
+    opened: tuple[RunLog, Path],
+) -> None:
+    # A rerun after an after_run failure has every task completed, so no task file is open.
+    log, path = opened
+    record(log, Activity(RUN_SCOPE, "z output"))
+
+    assert read_lines(path / "task-0.log") == ["14:02:11 z output"]
+
+
+def test_record_after_run_output_stays_out_of_the_last_tasks_file(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    record(
+        log,
+        TaskStarted(FIRST),
+        TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
+        Activity(RUN_SCOPE, "z output"),
+    )
+
+    assert (
+        not (path / "task-1.log").exists()
+        or "z output" not in (path / "task-1.log").read_text()
+    )
+    assert read_lines(path / "task-0.log") == ["14:02:11 z output"]
 
 
 def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:

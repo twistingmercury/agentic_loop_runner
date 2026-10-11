@@ -25,6 +25,7 @@ from alr.engine.commit import CommitMode, find_repo, held_lock
 from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
+    AfterRunFailedError,
     CommitFailedError,
     FailedTasksError,
     RefusedError,
@@ -142,6 +143,22 @@ async def test_start_commit_failure_keeps_its_exit_code_under_the_loop_prefix(
         str(caught.value)
         == "loop error: task 1: First failed: commit failed: hook-says-no"
     )
+
+
+async def test_start_after_run_failure_keeps_its_exit_code_under_the_loop_prefix(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(
+        tmp_path / "tasks.yaml",
+        "shared:\n  prompt: shared\n  after_run:\n    - action: exit 1\n"
+        "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
+    )
+
+    with pytest.raises(AfterRunFailedError) as caught:
+        await _start(tasks_file)
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value) == 'loop error: action "exit 1" failed: exit status 1'
 
 
 async def test_start_success(record: Path, tmp_path: Path) -> None:
