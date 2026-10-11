@@ -194,6 +194,18 @@ async def test_prepare_saves_edited_gates_once_every_check_passes(
     assert prepared.task_list.gate_list() == saved.gate_list()
 
 
+async def test_prepare_save_keeps_a_users_own_tmp_file(git_repo: Path) -> None:
+    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    users = Path(f"{settings.tasks_file}.tmp")
+    users.write_text("precious", encoding="utf-8")
+
+    await prepare(settings)
+
+    saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
+    assert saved.gate_list() == [Gate(cmd="true")]
+    assert users.read_bytes() == b"precious"
+
+
 async def test_prepare_log_folder_git_can_see_is_an_error(git_repo: Path) -> None:
     # Only the task file is ignored, so the logs folder beside it stays visible.
     (git_repo / ".git" / "info" / "exclude").write_text(
