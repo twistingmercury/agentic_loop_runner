@@ -718,3 +718,79 @@ def test_check_writable_refuses_a_folder_the_user_cannot_write(
 
     assert caught.value.reason == "log-unwritable"
     assert list(tmp_path.joinpath("logs").iterdir()) == []
+
+
+def test_check_writable_refuses_a_file_where_the_folder_belongs_naming_why(
+    tmp_path: Path,
+) -> None:
+    logs = tmp_path / "logs"
+    logs.write_text("a file", encoding="utf-8")
+    logs.chmod(0o644)
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(logs / "20261009T000000")
+
+    assert "Not a directory" in str(caught.value)
+
+
+def test_check_writable_refuses_a_folder_the_user_cannot_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "logs").mkdir()
+    access = os.access
+
+    def deny_searching_logs(path: str | Path, mode: int, **kwargs: bool) -> bool:
+        # chmod 200 would not stop root, so the refusal is made here instead.
+        denied = Path(path).name == "logs" and mode & os.X_OK
+        return not denied and access(path, mode, **kwargs)
+
+    monkeypatch.setattr(os, "access", deny_searching_logs)
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+
+
+def test_check_writable_refuses_a_dangling_symlink_where_the_folder_belongs(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "logs").symlink_to(tmp_path / "nonexistent" / "x")
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+    assert "File exists" in str(caught.value)
+
+
+def test_a_dangling_logs_symlink_is_refused_by_the_real_open_too(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "logs").symlink_to(tmp_path / "nonexistent" / "x")
+
+    with pytest.raises(RefusedError) as caught:
+        RunLog.open(tmp_path / "logs" / "20261009T000000", INFO, now=fixed_now)
+
+    assert caught.value.reason == "log-unwritable"
+    assert "File exists" in str(caught.value)
+
+
+def test_check_writable_accepts_a_symlink_to_an_existing_folder(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "logs").symlink_to(tmp_path / "real")
+
+    runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert list((tmp_path / "real").iterdir()) == []
+
+
+def test_open_accepts_a_symlink_to_an_existing_folder(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "logs").symlink_to(tmp_path / "real")
+
+    RunLog.open(tmp_path / "logs" / "20261009T000000", INFO, now=fixed_now).close()
+
+    assert (tmp_path / "real" / "20261009T000000").is_dir()

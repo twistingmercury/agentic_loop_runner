@@ -6,6 +6,7 @@ from e2e_helpers import (
     ONE_TASK_TABLE,
     VALID_TASKS_YAML,
     run_alr,
+    run_args,
     run_dry_run,
     shared_block,
     write_tasks_yaml,
@@ -132,3 +133,39 @@ def test_dry_run_refuses_a_read_only_log_folder_like_a_real_run(
     assert res.out == ""
     assert list(logs.iterdir()) == []
     assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
+
+
+def test_dry_run_refuses_a_dangling_logs_symlink_like_a_real_run(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    logs = tmp_path / "logs"
+    logs.symlink_to("/nonexistent/x")
+
+    dry = run_alr("-d", str(tmp_path), "--dry-run")
+    real = run_alr(*run_args(tasks_path))
+
+    assert dry.code == 3, dry
+    assert dry.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
+    assert dry.out == ""
+    assert real.code == 3, real
+    assert real.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
+    assert "File exists" in real.err
+    assert "File exists" in dry.err
+    assert logs.is_symlink()
+    assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
+
+
+def test_dry_run_accepts_a_logs_symlink_to_an_existing_folder(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (tmp_path / "logs").symlink_to(target)
+
+    res = run_alr("-d", str(tmp_path), "--dry-run")
+
+    assert res.code == 0, res
+    assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
+    assert list(target.iterdir()) == []

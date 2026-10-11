@@ -116,14 +116,23 @@ def check_writable(path: Path) -> None:
     """Refuse, as opening the log would, a path whose run folder cannot be made,
     creating nothing: the dry run must not write, yet must agree with a real run."""
     ancestor = path.parent
-    while not ancestor.exists() and ancestor != ancestor.parent:
+    while not _present(ancestor) and ancestor != ancestor.parent:
         ancestor = ancestor.parent
+
+    # A symlink that leads nowhere is there, so mkdir cannot make it a folder.
+    if ancestor.is_symlink() and not ancestor.exists():
+        raise _refused_unwritable(path, errno.EEXIST)
 
     if not ancestor.is_dir():
         raise _refused_unwritable(path, errno.ENOTDIR)
 
     if not os.access(ancestor, os.W_OK | os.X_OK):
         raise _refused_unwritable(path, errno.EACCES)
+
+
+def _present(path: Path) -> bool:
+    """Report whether anything is at path, a symlink that leads nowhere included."""
+    return path.is_symlink() or path.exists()
 
 
 def _refused_unwritable(path: Path, code: int) -> RefusedError:
