@@ -7,6 +7,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** exit codes. A stop now exits 130 (SIGINT) or 143 (SIGTERM), not
+  1; a refusal to start exits 3, not 1; a usage error (a missing `--dir`,
+  neither or both of `--sandbox-settings` and `--yolo`, a run folder with no
+  `tasks.yaml`) exits 2; a failed commit exits 4. A failed task or gate still
+  exits 1.
+- **Breaking:** a refusal's first stderr line is now
+  `error: refused: <reason>: <message>`, with the reason `dirty-tree`,
+  `task-file-visible`, `log-folder-visible`, `failed-tasks`,
+  `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`,
+  `task-file-unwritable` (a save at startup that fails: the `--reset-failed`
+  reset or, in the view, the edited gates), `git-error`, or `locked` (another
+  committing run holds the repository's commit lock). A refusal leaves
+  nothing on disk: no run log, and the task file as it was. `--reset-failed` is
+  applied in memory first and saved only after every other check and the log
+  folder have passed.
+- **Breaking:** `run_started.commit` in the run log is a string, `"none"`,
+  `"task"`, or `"run"`, where it was a boolean.
+- **Breaking:** `--commit run` saves nothing until the commit lands. If a task
+  or gate fails, that task is `failed` and the others that ran are `pending`; if
+  the commit fails, the last task is `failed` and the others `pending`; a stop
+  leaves every task that ran `pending`. A failed or stopped `run` leaves nothing
+  completed, so its leftover work can be discarded and the run repeated. The
+  README no longer tells you to commit it by hand.
+- **Breaking:** with `--commit task`, `completed` also means committed. A commit
+  that fails (git, a hook, a missing identity) marks the task `failed` with
+  `commit failed: <reason>`, leaves the work staged, and exits 4.
+- **Breaking:** a task name with a line break or any other control character
+  (a tab is fine) is rejected when the file loads, with an error that names the
+  task id.
+
+### Added
+
+- Commit safety. A committing run (`--commit task` or `run`) takes an exclusive
+  lock on `alr.lock` in the repository's git directory until it ends; a second
+  committing run, or a dry run with a commit mode, is refused with exit 3 and
+  the reason `locked`. The kernel drops the lock when alr dies, so a killed run
+  leaves none stuck. The `git add` and `git commit` alr starts run in their own
+  session, with no controlling terminal, so a program that prompts on `/dev/tty`
+  (a signing program, say) fails instead of waiting. A program that opens a
+  terminal by path, or a GUI pinentry, can still wait, and a stop still ends it.
+  On Linux the kernel also sends that git SIGTERM if alr dies
+  (`PR_SET_PDEATHSIG`); elsewhere a SIGKILL of alr during a commit can still let
+  the commit land. Right before every `git add`, alr checks again that git
+  ignores the task file and the `logs/` directory: if a task's commands made
+  either visible, nothing is staged, the task is `failed` with
+  `commit failed: task file visible: <path>` or `commit failed: log folder
+  visible: <logs dir>`, and the run exits 4. If git cannot answer that check,
+  the task fails the same way with git's message.
+- `run_finished` in the run log has `result` (`completed`, `failed`,
+  `commit_failed`, or `stopped`) and `exit`, the code alr returns.
+- In `run` mode a task whose gates passed is logged and shown as `passed` until
+  the commit lands.
+- A commit failure's reason is the first line of git's output, up to 200
+  characters; `task-N.log` keeps the full text.
+- The full-screen view exits with the same codes as plain mode.
+
+### Fixed
+
+- A refused run no longer leaves anything behind. `--reset-failed` used to
+  reach the disk before the later checks, so a dirty tree, a visible log folder,
+  or an unwritable `logs/` left the file reset; a failed log open left an empty
+  run folder; and the view saved the gates and the reset before it opened the
+  log. Quitting the view before Start now leaves the file untouched too.
+- `--dry-run` refuses like a real run: a task that is `failed` exits 3
+  (`failed-tasks`), and with `--commit task` or `--commit run` a log folder git
+  can see exits 3 (`log-folder-visible`). Its invalid-file message no longer
+  carries `failed to start loop runner:`.
+- The full-screen view exits 143 after SIGTERM, not 130, and a second Stop
+  press while a run is stopping no longer turns the stop into exit 0.
+- A stop that lands after git has already made the commit no longer undoes it:
+  the tasks that commit covers are saved `completed` before the stop is
+  reported, in `task` and `run` mode, so a rerun never redoes committed work.
+- A stop in `run` mode before the commit lands no longer rewrites `tasks.yaml`;
+  the file stays byte for byte as it was.
+- A commit failure and a failed save together still exit 4, and a successful
+  `run` commit whose final save fails names the commit, so a driver does not
+  blindly rerun.
+- A task `name` with a NUL or another control character could crash a commit;
+  it is rejected when the file loads.
+- The full-screen view gives `passed` rows their own symbol, returns them to
+  pending when a `run` ends other than completed, and marks a task saved
+  `failed` with `✖`.
+- A run log that cannot be written while another error is already propagating no
+  longer hides that error.
+- `--dry-run` refuses an unwritable log folder like a real run: a `logs/` that
+  is read-only or a regular file exits 3 (`log-unwritable`), and the dry run
+  still creates nothing.
+- A refused save no longer leaves a `logs/` folder that the run created. Saving
+  the task file no longer overwrites, or deletes after a failed save, a
+  `tasks.yaml.tmp` of your own: it writes a uniquely named temporary file and
+  replaces the task file atomically.
+- The full-screen view's stop state resets when a start is refused, so the next
+  run's first Stop press stops it gracefully instead of exiting at once, and a
+  plain failure is no longer reported as a stop.
+- The full-screen view's rows follow the saved state after a stop: a task saved
+  `completed` stays completed, and only rows not saved return to pending.
+- A failed save after a commit that landed names the commit hash in the error
+  and exits 4 in every commit mode. After a stop, that exit 4 replaces the
+  stop's 130 or 143.
+- Tests now pin the edges of the task name rule (`\x00`, `\x1f`, `\x7f`, `\x9f`,
+  with tab, space, and `\xa0` allowed), a failing `discard()` that must not hide
+  the refusal, and `--reset-failed` with no failed task leaving `tasks.yaml`
+  byte for byte as it was.
+
 ## [0.0.10] - 2026-10-08
 
 ### Changed

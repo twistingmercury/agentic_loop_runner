@@ -3,29 +3,33 @@
 import asyncio
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 from helpers import (
+    block_saving,
     cancel_run,
     commit_subjects,
+    refuse_removal,
+    saved_tasks,
     wait_for_text,
     wait_until_gone,
     write_file,
     write_nested_file,
 )
 
-from alr.engine.commit import CommitMode
+from alr.engine.commit import CommitMode, find_repo, held_lock
 from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
+    CommitFailedError,
     FailedTasksError,
-    RunLogError,
-    RepoError,
+    RefusedError,
     RunError,
-    TaskFileError,
+    RunLogError,
 )
 from alr.plain.start import start
 from alr.record.events import Activity, Event
@@ -82,9 +86,10 @@ def _ledger(folder: Path) -> list[dict[str, Any]]:
 
 
 async def test_start_missing_tasks_file(tmp_path: Path) -> None:
-    with pytest.raises(TaskFileError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await _start(str(tmp_path / "missing.yaml"))
 
+    assert caught.value.reason == "invalid-task-file"
     assert "missing.yaml" in str(caught.value)
 
 
@@ -94,8 +99,10 @@ async def test_start_invalid_tasks_yaml(tmp_path: Path) -> None:
         "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p, state: bogus}\n",
     )
 
-    with pytest.raises(TaskFileError, match="state"):
+    with pytest.raises(RefusedError, match="state") as caught:
         await _start(tasks_file)
+
+    assert caught.value.reason == "invalid-task-file"
 
 
 async def test_start_run_loop_failure_is_wrapped_with_loop_error_prefix(
@@ -111,6 +118,30 @@ async def test_start_run_loop_failure_is_wrapped_with_loop_error_prefix(
     assert str(caught.value).startswith("loop error: ")
     assert "task 1" in str(caught.value)
     assert "First task" in str(caught.value)
+
+
+async def test_start_commit_failure_keeps_its_exit_code_under_the_loop_prefix(
+    record: Path, git_repo: Path
+) -> None:
+    hook = write_nested_file(
+        git_repo / ".git" / "hooks" / "pre-commit",
+        "#!/bin/sh\necho hook-says-no >&2\nexit 1\n",
+    )
+    hook.chmod(0o700)
+    tasks_file = write_file(
+        git_repo / "run" / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
+        "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
+    )
+
+    with pytest.raises(CommitFailedError) as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert caught.value.exit_code == 4
+    assert (
+        str(caught.value)
+        == "loop error: task 1: First failed: commit failed: hook-says-no"
+    )
 
 
 async def test_start_success(record: Path, tmp_path: Path) -> None:
@@ -145,7 +176,7 @@ tasks:
     with pytest.raises(FailedTasksError) as caught:
         await _start(tasks_file)
 
-    assert str(caught.value) == FAILED_TASKS_MESSAGE
+    assert str(caught.value) == f"refused: failed-tasks: {FAILED_TASKS_MESSAGE}"
     printed = capsys.readouterr().out
     assert printed.startswith("Some tasks failed previous runs:\n")
     assert "Second task" in printed, "the task table follows the notice"
@@ -170,8 +201,181 @@ async def test_start_reset_failed_runs_the_failed_task_without_a_word(
 
 
 async def test_start_reset_failed_still_wraps_a_bad_file(tmp_path: Path) -> None:
-    with pytest.raises(TaskFileError, match="failed to start loop runner"):
+    with pytest.raises(RefusedError, match="failed to start loop runner"):
         await _start(str(tmp_path / "missing.yaml"), reset_failed=True)
+
+
+async def test_an_invalid_task_file_is_refused(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", "tasks: not-a-list\n")
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file)
+
+    assert caught.value.reason == "invalid-task-file"
+    assert str(caught.value).count("failed to parse tasks yaml") == 1
+    assert str(caught.value).count("failed to start loop runner") == 1
+    assert not (tmp_path / "logs").exists(), "a refusal writes no run log"
+
+
+FAILED_TASK_YAML = ONE_TASK_YAML.replace("p1}", "p1, state: failed, error: boom}")
+
+
+async def test_reset_failed_waits_for_the_other_refusals(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASK_YAML)
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, commit=CommitMode.RUN, reset_failed=True)
+
+    path = Path(tasks_file)
+    assert caught.value.reason == "dirty-tree"
+    assert saved_tasks(path).tasks[0].state == "failed", "a refused run changes nothing"
+    assert path.read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert not (path.parent / "logs").exists(), "a refusal writes no run log"
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_leaves_the_file_alone_when_the_log_cannot_open(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    # A file where the log folder belongs fails for every user, root included.
+    (tmp_path / "logs").write_text("a file, not a folder", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, reset_failed=True)
+
+    assert caught.value.reason == "log-unwritable"
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_that_cannot_save_refuses_and_leaves_no_run_folder(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, reset_failed=True)
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert "failed to save tasks to" in caught.value.message
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert not (tmp_path / "logs").exists(), "the logs/ it made is removed too"
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_that_cannot_save_keeps_a_logs_folder_that_was_there(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    (tmp_path / "logs").mkdir()
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError):
+        await _start(tasks_file, reset_failed=True)
+
+    assert list((tmp_path / "logs").iterdir()) == [], "only the run folder goes"
+
+
+async def test_reset_failed_that_cannot_save_refuses_even_when_the_cleanup_fails(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    block_saving(monkeypatch)
+    monkeypatch.setattr(Path, "rmdir", refuse_removal)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, reset_failed=True)
+
+    assert caught.value.reason == "task-file-unwritable", "the refusal, not the cleanup"
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_reset_failed_with_nothing_failed_leaves_the_file_alone(
+    record: Path, tmp_path: Path
+) -> None:
+    # Odd spacing, so any rewrite would change the bytes; the mtime is set far
+    # back so a rewrite would move it even within the clock's resolution.
+    content = (
+        "shared: {prompt: shared}\n"
+        "tasks:\n"
+        "  - {id: 1,   name: First,  prompt: p1,  state: completed}\n"
+    )
+    tasks_file = write_file(tmp_path / "tasks.yaml", content)
+    os.utime(tasks_file, ns=(1_000_000_000, 1_000_000_000))
+    before = Path(tasks_file).stat()
+
+    await _start(tasks_file, reset_failed=True)
+
+    after = Path(tasks_file).stat()
+    assert Path(tasks_file).read_text(encoding="utf-8") == content
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert _calls(record) == 0, "nothing was pending, so claude must not run"
+
+
+async def test_reset_failed_keeps_a_users_own_tmp_file(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    users = tmp_path / "tasks.yaml.tmp"
+    users.write_bytes(b"precious\n")
+
+    await _start(tasks_file, reset_failed=True)
+
+    assert users.read_bytes() == b"precious\n"
+    assert saved_tasks(Path(tasks_file)).tasks[0].state == "completed"
+
+
+async def test_reset_failed_runs_the_reset_list_and_saves_it(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+
+    await _start(tasks_file, reset_failed=True)
+
+    saved = saved_tasks(Path(tasks_file)).tasks[0]
+    assert (saved.state, saved.error) == ("completed", "")
+    assert _calls(record) == 1
+
+
+async def test_a_failed_task_is_refused_after_the_repository_checks(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASK_YAML)
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, commit=CommitMode.RUN)
+
+    assert caught.value.reason == "dirty-tree"
+
+
+async def test_a_failed_task_is_refused_on_a_clean_tree(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASK_YAML)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, commit=CommitMode.RUN)
+
+    path = Path(tasks_file)
+    assert caught.value.reason == "failed-tasks"
+    assert path.read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert not (path.parent / "logs").exists(), "a refusal writes no run log"
+
+
+async def test_reset_failed_on_a_clean_tree_resets_and_runs(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASK_YAML)
+
+    await _start(tasks_file, commit=CommitMode.RUN, reset_failed=True)
+
+    assert _calls(record) == 1
 
 
 async def test_start_commit_refuses_dirty_tree_before_any_session(
@@ -180,9 +384,10 @@ async def test_start_commit_refuses_dirty_tree_before_any_session(
     (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
     tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
 
-    with pytest.raises(RepoError) as caught:
+    with pytest.raises(RefusedError) as caught:
         await _start(tasks_file, commit=CommitMode.TASK)
 
+    assert caught.value.reason == "dirty-tree"
     assert "--commit needs a clean work tree" in str(caught.value)
     assert _calls(record) == 0, "claude must not run"
     assert Path(tasks_file).read_text(encoding="utf-8") == ONE_TASK_YAML, (
@@ -211,6 +416,23 @@ async def test_start_without_commit_flag_ignores_a_dirty_tree(
 
     await _start(tasks_file)
 
+    assert commit_subjects(git_repo) == ["init"]
+
+
+async def test_start_commit_fails_a_task_that_unignores_the_log_folder(
+    record: Path, git_repo: Path
+) -> None:
+    # run/tasks.yaml stays hidden, so only the folder this run logs into becomes visible.
+    tasks_file = write_file(
+        git_repo / "run" / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo run/tasks.yaml > .gitignore; echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+    )
+
+    with pytest.raises(CommitFailedError) as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value).endswith("commit failed: log folder visible: run/logs")
     assert commit_subjects(git_repo) == ["init"]
 
 
@@ -259,8 +481,7 @@ async def test_start_logs_that_the_run_commits_even_outside_a_repository(
     monkeypatch: pytest.MonkeyPatch,
     mode: CommitMode,
 ) -> None:
-    # Pins the current behavior: plain mode logs whether the mode asks for commits,
-    # while the view logs whether a repository exists, so the two differ here.
+    # The log names the mode that was asked for, repository or not.
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
@@ -269,7 +490,7 @@ async def test_start_logs_that_the_run_commits_even_outside_a_repository(
 
     await _start(tasks_file, commit=mode)
 
-    assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
+    assert _ledger(_run_folder(tasks_file))[0]["commit"] == mode.value
 
 
 async def test_start_logs_the_run_beside_the_task_file(
@@ -296,7 +517,7 @@ async def test_start_logs_the_run_info(record: Path, tmp_path: Path) -> None:
     assert started["tasks_file"] == tasks_file
     assert started["permissions"] == "sandbox"
     assert started["sandbox_settings"] == "/some/sandbox.json"
-    assert started["commit"] is False
+    assert started["commit"] == "none"
 
 
 async def test_start_logs_skip_permissions_without_a_sandbox(
@@ -318,7 +539,7 @@ async def test_start_logs_that_the_run_commits(
 
     await _start(tasks_file, commit=CommitMode.TASK)
 
-    assert _ledger(_run_folder(tasks_file))[0]["commit"] is True
+    assert _ledger(_run_folder(tasks_file))[0]["commit"] == "task"
 
 
 async def test_start_commit_refuses_a_log_folder_git_can_see(
@@ -329,9 +550,10 @@ async def test_start_commit_refuses_a_log_folder_git_can_see(
     exclude.write_text("work/tasks.yaml\n", encoding="utf-8")
     tasks_file = str(write_nested_file(git_repo / "work" / "tasks.yaml", ONE_TASK_YAML))
 
-    with pytest.raises(RepoError, match="log directory"):
+    with pytest.raises(RefusedError, match="log directory") as caught:
         await _start(tasks_file, commit=CommitMode.TASK)
 
+    assert caught.value.reason == "log-folder-visible"
     assert _calls(record) == 0, "claude must not run"
     assert not (git_repo / "work" / "logs").exists()
 
@@ -346,7 +568,7 @@ async def test_start_commit_tells_a_tree_dirty_only_with_its_log_folder_to_ignor
     await _start(tasks_file)
     calls = _calls(record)
 
-    with pytest.raises(RepoError, match="log directory") as caught:
+    with pytest.raises(RefusedError, match="log directory") as caught:
         await _start(tasks_file, commit=CommitMode.TASK)
 
     assert "clean work tree" not in str(caught.value)
@@ -363,7 +585,9 @@ async def test_start_commit_with_another_dirty_file_still_reports_the_dirty_tree
     # The log folder is ignored here, so only the stray file can make the tree dirty.
     exclude.write_text("work/tasks.yaml\nwork/logs/\n", encoding="utf-8")
 
-    with pytest.raises(RepoError, match="--commit needs a clean work tree") as caught:
+    with pytest.raises(
+        RefusedError, match="--commit needs a clean work tree"
+    ) as caught:
         await _start(tasks_file, commit=CommitMode.TASK)
 
     assert "stray.txt" in str(caught.value)
@@ -392,7 +616,7 @@ async def test_start_without_commit_does_not_check_the_log_folder(
 
 
 async def test_start_writes_no_log_when_loading_fails(tmp_path: Path) -> None:
-    with pytest.raises(TaskFileError):
+    with pytest.raises(RefusedError):
         await _start(str(tmp_path / "missing.yaml"))
 
     assert not (tmp_path / "logs").exists()
@@ -403,10 +627,12 @@ async def test_start_log_failure_stops_the_run(record: Path, tmp_path: Path) -> 
     # A file where the logs folder should go, so the log cannot be created.
     (tmp_path / "logs").write_text("in the way\n", encoding="utf-8")
 
-    with pytest.raises(RunLogError):
+    with pytest.raises(RefusedError) as caught:
         await _start(tasks_file)
 
+    assert caught.value.reason == "log-unwritable"
     assert _calls(record) == 0, "claude must not run"
+    assert Path(tasks_file).read_text(encoding="utf-8") == ONE_TASK_YAML
 
 
 async def test_start_twice_in_the_same_second_keeps_two_run_folders(
@@ -498,7 +724,147 @@ async def test_start_log_write_failure_stops_the_run_and_the_child(
         "run_finished",
     ]
     assert ledger[1]["task"] == 1
-    assert ledger[-1]["result"] == "stopped", (
-        "a failed log write must not claim success"
-    )
+    # Not "stopped": no signal asked for it, and alr exits 1 like any other failure.
+    assert ledger[-1]["result"] == "failed", "a failed log write must not claim success"
+    assert ledger[-1]["exit"] == 1
     assert ledger[-1]["error"] == "RunLogError: disk full"
+
+
+COMMITTING_TASK_YAML = (
+    "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
+    "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
+)
+
+
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_a_second_committing_run_is_refused_and_writes_nothing(
+    record: Path, git_repo: Path, mode: CommitMode
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            await _start(tasks_file, commit=mode, reset_failed=True)
+
+    assert caught.value.reason == "locked"
+    assert str(caught.value).startswith("refused: locked: ")
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert not (git_repo / "run" / "logs").exists(), "a refusal writes no run log"
+    assert _calls(record) == 0, "claude must not run"
+
+
+async def test_the_lock_is_refused_before_the_tree_is_found_dirty(
+    record: Path, git_repo: Path
+) -> None:
+    # The first run's own work leaves the tree dirty, so the second run must
+    # be told it is locked out, not that the tree is dirty.
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", ONE_TASK_YAML)
+    (git_repo / "stray.txt").write_text("the first run's work\n", encoding="utf-8")
+    repo = await find_repo(tasks_file)
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert caught.value.reason == "locked"
+
+
+async def test_a_run_without_commits_ignores_a_held_lock(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", ONE_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    with held_lock(repo):
+        await _start(tasks_file)
+
+    assert _calls(record) == 1
+
+
+_LOCK_PROBE = """
+import fcntl, os, pathlib, sys
+
+fd = os.open(sys.argv[1], os.O_RDONLY)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    answer = "free"
+except BlockingIOError:
+    answer = "held"
+
+pathlib.Path(sys.argv[2]).write_text(answer)
+"""
+
+
+async def test_a_committing_run_holds_the_lock_while_a_gate_runs(
+    record: Path, git_repo: Path, tmp_path: Path
+) -> None:
+    probe = write_file(tmp_path / "probe.py", _LOCK_PROBE)
+    answer = tmp_path / "answer"
+    lock = git_repo / ".git" / "alr.lock"
+    tasks_file = write_file(
+        git_repo / "run" / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n"
+        f"    - cmd: {sys.executable} {probe} {lock} {answer}\n"
+        "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
+    )
+
+    await _start(tasks_file, commit=CommitMode.RUN)
+
+    assert answer.read_text(encoding="utf-8") == "held"
+
+
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_a_finished_committing_run_releases_the_lock(
+    record: Path, git_repo: Path, mode: CommitMode
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", COMMITTING_TASK_YAML)
+
+    await _start(tasks_file, commit=mode)
+
+    with held_lock(await find_repo(tasks_file)):
+        pass
+
+
+async def test_a_failed_committing_run_releases_the_lock(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(
+        git_repo / "run" / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: 'false'\n"
+        "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
+    )
+
+    with pytest.raises(RunError):
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    with held_lock(await find_repo(tasks_file)):
+        pass
+
+
+async def test_a_refused_committing_run_releases_the_lock(
+    record: Path, git_repo: Path
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", ONE_TASK_YAML)
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, commit=CommitMode.RUN)
+
+    assert caught.value.reason == "dirty-tree"
+    with held_lock(await find_repo(tasks_file)):
+        pass
+
+
+async def test_a_refused_save_at_start_releases_the_lock(
+    record: Path, git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(git_repo / "run" / "tasks.yaml", FAILED_TASK_YAML)
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(tasks_file, commit=CommitMode.RUN, reset_failed=True)
+
+    assert caught.value.reason == "task-file-unwritable"
+    with held_lock(await find_repo(tasks_file)):
+        pass

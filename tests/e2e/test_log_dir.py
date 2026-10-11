@@ -44,7 +44,10 @@ def test_plain_run_leaves_a_log_in_the_run_folder(
         for line in (folder / "run.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert ledger[0]["event"] == "run_started"
+    assert ledger[0]["commit"] == "none"
     assert ledger[-1]["event"] == "run_finished"
+    assert ledger[-1]["result"] == "completed"
+    assert ledger[-1]["exit"] == 0
     assert (folder / "task-1.log").is_file()
 
 
@@ -80,10 +83,10 @@ def test_commit_run_with_a_log_folder_git_can_see_is_refused(
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert (
-        "error: --commit needs the log directory ignored by git or outside the repository: work/logs\n"
-        in res.err
+        "error: refused: log-folder-visible: --commit needs the log directory "
+        "ignored by git or outside the repository: work/logs\n" in res.err
     )
     assert not record_file.exists(), "claude must not run"
     assert not (work / "logs").exists()

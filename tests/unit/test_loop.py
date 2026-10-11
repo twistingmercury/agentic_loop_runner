@@ -1,12 +1,14 @@
 """The run loop: loading the inputs, one session per pending task, a save after each."""
 
 import asyncio
+import signal
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from helpers import (
     SHARED,
+    block_saving,
     cancel_run,
     fake_claude_records,
     run_loop,
@@ -17,14 +19,26 @@ from helpers import (
 from alr import tasks
 from alr.engine import loop
 from alr.engine.commit import CommitMode
+from alr.engine.stop import Stop
 from alr.errors import (
+    CommitFailedError,
     FailedTasksError,
+    RefusedError,
     RunError,
+    RunLogError,
     TaskFileError,
     quote,
 )
 from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import COMPLETED, FAILED, PENDING, Shared, Task, TaskList
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    RunResult,
+    Shared,
+    Task,
+    TaskList,
+)
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -59,21 +73,21 @@ async def _wait_until(condition: Callable[[], bool], what: str) -> None:
         await asyncio.sleep(0.01)
 
 
-def test_load_tasks_missing_file(tmp_path: Path) -> None:
+def test_read_tasks_missing_file(tmp_path: Path) -> None:
     path = str(tmp_path / "missing.yaml")
 
     with pytest.raises(TaskFileError, match="not accessible"):
-        loop.load_tasks(path)
+        loop.read_tasks(path)
 
 
-def test_load_tasks_invalid_yaml(tmp_path: Path) -> None:
+def test_read_tasks_invalid_yaml(tmp_path: Path) -> None:
     path = write_file(tmp_path / "tasks.yaml", BOGUS_STATE_YAML)
 
     with pytest.raises(TaskFileError, match="failed to parse tasks yaml"):
-        loop.load_tasks(path)
+        loop.read_tasks(path)
 
 
-def test_load_tasks_rejects_a_file_that_is_not_utf8(tmp_path: Path) -> None:
+def test_read_tasks_rejects_a_file_that_is_not_utf8(tmp_path: Path) -> None:
     # A Latin-1 e-acute; reading it leniently would let the next save replace it.
     content = (
         b"shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: Caf\xe9, prompt: p}\n"
@@ -82,32 +96,18 @@ def test_load_tasks_rejects_a_file_that_is_not_utf8(tmp_path: Path) -> None:
     path.write_bytes(content)
 
     with pytest.raises(TaskFileError, match="is not valid UTF-8") as caught:
-        loop.load_tasks(str(path))
+        loop.read_tasks(str(path))
 
     assert quote(str(path)) in str(caught.value)
     assert path.read_bytes() == content
 
 
-def test_load_tasks_success(tmp_path: Path) -> None:
+def test_read_tasks_success(tmp_path: Path) -> None:
     path = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
 
-    got = loop.load_tasks(path)
+    got = loop.read_tasks(path)
 
     assert [task.id for task in got.tasks] == [1, 2]
-
-
-def test_load_tasks_failed_task_returns_list_and_err_failed_tasks(
-    tmp_path: Path,
-) -> None:
-    path = write_file(
-        tmp_path / "tasks.yaml",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n  - {id: 2, name: b, prompt: p, state: failed}\n",
-    )
-
-    with pytest.raises(FailedTasksError) as caught:
-        loop.load_tasks(path)
-
-    assert len(caught.value.task_list.tasks) == 2
 
 
 FAILED_AND_COMPLETED_YAML = (
@@ -163,11 +163,76 @@ def test_reset_failed_with_nothing_failed_leaves_the_file_alone(
     assert Path(path).read_text(encoding="utf-8") == VALID_TASKS_YAML
 
 
-def test_load_tasks_parse_error_is_not_err_failed_tasks(tmp_path: Path) -> None:
+def test_refuse_failed_names_the_list_it_found_a_failed_task_in(
+    tmp_path: Path,
+) -> None:
+    path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
+    task_list = loop.read_tasks(path)
+
+    with pytest.raises(FailedTasksError) as caught:
+        loop.refuse_failed(task_list)
+
+    assert caught.value.task_list is task_list
+    assert caught.value.reason == "failed-tasks"
+
+
+def test_refuse_failed_lets_a_list_without_one_through(tmp_path: Path) -> None:
+    path = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+
+    loop.refuse_failed(loop.read_tasks(path))
+
+
+def test_reset_in_memory_resets_only_failed_tasks_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
+    task_list = loop.read_tasks(path)
+
+    count = loop.reset_in_memory(task_list)
+
+    assert count == 1
+    assert [(task.state, task.error) for task in task_list.tasks] == [
+        (COMPLETED, ""),
+        (PENDING, ""),
+        (PENDING, ""),
+    ]
+    assert Path(path).read_text(encoding="utf-8") == FAILED_AND_COMPLETED_YAML
+
+
+def test_save_for_start_saves_the_list(tmp_path: Path) -> None:
+    path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
+    task_list = loop.read_tasks(path)
+    loop.reset_in_memory(task_list)
+
+    loop.save_for_start(path, task_list)
+
+    assert [task.state for task in saved_tasks(Path(path)).tasks] == [
+        COMPLETED,
+        PENDING,
+        PENDING,
+    ]
+
+
+def test_save_for_start_refuses_when_the_file_cannot_be_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_file(tmp_path / "tasks.yaml", FAILED_AND_COMPLETED_YAML)
+    task_list = loop.read_tasks(path)
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        loop.save_for_start(path, task_list)
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert "failed to save tasks to" in caught.value.message
+    assert Path(path).read_text(encoding="utf-8") == FAILED_AND_COMPLETED_YAML
+
+
+def test_read_tasks_parse_error_is_not_err_failed_tasks(tmp_path: Path) -> None:
     path = write_file(tmp_path / "tasks.yaml", BOGUS_STATE_YAML)
 
     with pytest.raises(TaskFileError) as caught:
-        loop.load_tasks(path)
+        loop.read_tasks(path)
 
     assert not isinstance(caught.value, FailedTasksError)
 
@@ -547,6 +612,7 @@ class _RecordingFrontEnd(PlainFrontEnd):
         super().__init__()
         self.crash = crash
         self.done: list[str | None] = []
+        self.endings: list[tuple[RunResult, int]] = []
 
     def task_started(self, task: Task) -> None:
         if self.crash is not None:
@@ -554,8 +620,11 @@ class _RecordingFrontEnd(PlainFrontEnd):
 
         super().task_started(task)
 
-    def run_done(self, error: str | None, seconds: float) -> None:
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
         self.done.append(error)
+        self.endings.append((result, exit_code))
 
 
 async def test_run_done_names_a_crash_and_the_crash_propagates(
@@ -586,6 +655,43 @@ async def test_run_done_records_a_stop_as_a_stop(
     assert front_end.done == ["stopped"]
 
 
+class _BrokenLogFrontEnd(_RecordingFrontEnd):
+    """A front end whose run log cannot take the closing record."""
+
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
+        raise RunLogError("disk full")
+
+
+async def test_a_run_log_error_does_not_hide_the_error_that_ended_the_run(
+    record: Path, tmp_path: Path
+) -> None:
+    crash = CommitFailedError("commit failed: hook said no")
+    front_end = _BrokenLogFrontEnd(crash=crash)
+
+    with pytest.raises(CommitFailedError) as exc:
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+        )
+
+    assert exc.value is crash
+    assert any("disk full" in note for note in exc.value.__notes__)
+
+
+async def test_a_run_log_error_alone_still_ends_the_run(
+    record: Path, tmp_path: Path
+) -> None:
+    with pytest.raises(RunLogError, match="disk full"):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=_BrokenLogFrontEnd(),
+        )
+
+
 async def test_run_done_reports_a_failed_task_and_a_clean_run(
     record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -604,3 +710,69 @@ async def test_run_done_reports_a_failed_task_and_a_clean_run(
 
     assert len(failed.done) == 1
     assert failed.done[0] is not None
+
+
+async def test_a_clean_run_ends_completed_with_exit_0(
+    record: Path, tmp_path: Path
+) -> None:
+    front_end = _RecordingFrontEnd()
+
+    await run_loop(
+        tasks.parse_tasks(TWO_PENDING_YAML),
+        tmp_path / "tasks.yaml",
+        front_end=front_end,
+    )
+
+    assert front_end.endings == [(RunResult.COMPLETED, 0)]
+
+
+async def test_a_failed_task_ends_failed_with_exit_1(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
+    front_end = _RecordingFrontEnd()
+
+    with pytest.raises(RunError):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+        )
+
+    assert front_end.endings == [(RunResult.FAILED, 1)]
+
+
+async def test_a_crash_that_is_not_an_alr_error_ends_failed_with_exit_1(
+    record: Path, tmp_path: Path
+) -> None:
+    front_end = _RecordingFrontEnd(crash=RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+        )
+
+    assert front_end.endings == [(RunResult.FAILED, 1)]
+
+
+@pytest.mark.parametrize(
+    ("stop", "exit_code"),
+    [(Stop(), 130), (Stop(signal.SIGTERM), 143)],
+    ids=["sigint", "sigterm"],
+)
+async def test_a_stop_ends_stopped_with_the_signals_exit(
+    record: Path, tmp_path: Path, stop: Stop, exit_code: int
+) -> None:
+    front_end = _RecordingFrontEnd(crash=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_loop(
+            tasks.parse_tasks(TWO_PENDING_YAML),
+            tmp_path / "tasks.yaml",
+            front_end=front_end,
+            stop=stop,
+        )
+
+    assert front_end.endings == [(RunResult.STOPPED, exit_code)]

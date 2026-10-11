@@ -6,10 +6,16 @@ import time
 from pathlib import Path
 
 import pytest
-from helpers import git, kill_holder_and_let_pipes_close, run_loop, wait_for_text
+from helpers import (
+    git,
+    kill_holder_and_let_pipes_close,
+    run_loop,
+    spy_on_start,
+    wait_for_text,
+)
 
 from alr.engine import proc
-from alr.engine.commit import open_repo
+from alr.engine.commit import CommitMode, open_repo
 from alr.errors import RunError
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
@@ -24,7 +30,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Gate, Shared, Task, TaskList
+from alr.tasks import COMPLETED, PASSED, Gate, RunResult, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -78,6 +84,34 @@ async def test_each_step_records_its_event(tmp_path: Path) -> None:
     assert finished.error is None
     [done] = [e for e in events if isinstance(e, RunDone)]
     assert done.error is None
+    assert (done.result, done.exit_code) == (RunResult.COMPLETED, 0)
+
+
+async def test_a_run_mode_task_is_passed_until_the_commit_completes_it(
+    git_repo: Path,
+) -> None:
+    tasks_file = git_repo / "run" / "tasks.yaml"
+    events: list[Event] = []
+
+    await run_loop(
+        _task_list(Gate(cmd="echo work > one.txt")),
+        tasks_file,
+        repo=await open_repo(str(tasks_file)),
+        front_end=PlainFrontEnd(events.append),
+        commit_mode=CommitMode.RUN,
+    )
+
+    [finished] = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished.task.state == PASSED
+
+
+async def test_a_task_mode_task_is_completed_when_it_finishes(git_repo: Path) -> None:
+    tasks_file = git_repo / "run" / "tasks.yaml"
+
+    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
+
+    [finished] = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished.task.state == COMPLETED
 
 
 async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(
@@ -287,7 +321,9 @@ async def test_failing_git_command_records_its_output_and_returns_the_exit_text(
     lines = _lines(events)
     assert "hook-refused" in lines[lines.index("→ commit First") + 1 :]
     [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.error == "task 1: First failed: commit failed: exit status 1"
+    assert finished.error == "task 1: First failed: commit failed: hook-refused"
+    [done] = [e for e in events if isinstance(e, RunDone)]
+    assert (done.result, done.exit_code) == (RunResult.COMMIT_FAILED, 4)
 
 
 async def test_cancel_during_git_stops_the_group_gently(tmp_path: Path) -> None:
@@ -439,3 +475,29 @@ async def test_a_git_command_reads_end_of_file_from_stdin(
 
     assert error is None
     assert capfd.readouterr().out == "done\n"
+
+
+async def test_git_starts_in_its_own_session_and_dies_with_alr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = spy_on_start(monkeypatch)
+    task = Task(1, "First", "p1")
+
+    await PlainFrontEnd().run_git(task, ["true"], str(tmp_path))
+
+    [call] = calls
+    assert call["new_session"] is True
+    assert call["die_with_parent"] is True
+
+
+async def test_a_gate_starts_without_the_git_guards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = spy_on_start(monkeypatch)
+    task = Task(1, "First", "p1")
+
+    await PlainFrontEnd().run_gate(task, Gate(cmd="true"))
+
+    [call] = calls
+    assert not call.get("new_session")
+    assert not call.get("die_with_parent")

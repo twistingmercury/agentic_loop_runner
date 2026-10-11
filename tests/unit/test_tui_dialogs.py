@@ -120,7 +120,9 @@ async def test_permissions_dialog_bad_settings_file_keeps_the_user_on_the_step(
         await pilot.pause()
 
         assert host.result == "unset"
-        assert str(host.screen.query_one("#error").render()) != ""
+        shown = str(host.screen.query_one("#error").render())
+        assert shown.startswith("--sandbox-settings: must be a JSON object")
+        assert "refused" not in shown, "the dialog shows the message, not the reason"
 
 
 async def test_permissions_dialog_preselects_nothing_without_a_default() -> None:

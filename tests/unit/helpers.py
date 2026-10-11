@@ -6,6 +6,7 @@ Test modules never import each other.
 """
 
 import asyncio
+import errno
 import json
 import os
 import signal
@@ -19,10 +20,11 @@ from typing import Any
 import pytest
 
 from alr import tasks
-from alr.engine import loop
+from alr.engine import loop, proc
 from alr.engine.commit import CommitMode, Repo
 from alr.engine.frontend import FrontEnd
 from alr.engine.sandbox import bypass_args
+from alr.engine.stop import Stop
 from alr.errors import RunCancelledError
 from alr.plain.frontend import PlainFrontEnd
 from alr.tasks import Shared, TaskList
@@ -42,6 +44,29 @@ def write_nested_file(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def block_saving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every save of a task file fail, for any user, root included.
+
+    A read-only folder would not do: the release build runs the tests as root,
+    which ignores folder permissions. The save still runs for real, writes its
+    temporary file, and fails only at the final replace, so a save that wrote
+    the target directly would not fail and the test using this would notice.
+    """
+
+    def refuse(src: object, dst: object) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(os, "replace", refuse)
+
+
+def refuse_removal(*_: object, **__: object) -> None:
+    """Stand in for Path.unlink or Path.rmdir where the removal must fail.
+
+    A read-only folder would not do: the release build runs the tests as root.
+    """
+    raise PermissionError(errno.EACCES, "Permission denied")
 
 
 def saved_tasks(path: Path) -> TaskList:
@@ -83,6 +108,8 @@ async def run_loop(
     repo: Repo | None = None,
     front_end: FrontEnd | None = None,
     commit_mode: CommitMode = CommitMode.TASK,
+    stop: Stop | None = None,
+    run_dir: str | None = None,
 ) -> None:
     """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(
@@ -91,6 +118,8 @@ async def run_loop(
         session_args=bypass_args() if session_args is None else session_args,
         repo=repo,
         commit_mode=commit_mode,
+        stop=stop or Stop(),
+        run_dir=run_dir,
     )
     await loop.run(
         task_list, options, PlainFrontEnd() if front_end is None else front_end
@@ -197,6 +226,19 @@ async def wait_until_gone(pid: int, timeout: float = 2) -> None:
             pytest.fail(f"process {pid} remained running")
 
         await asyncio.sleep(0.01)
+
+
+def spy_on_start(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Record the keyword arguments of every proc.start call, still starting the child."""
+    calls: list[dict[str, Any]] = []
+    real_start = proc.start
+
+    async def start(argv: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return await real_start(argv, **kwargs)
+
+    monkeypatch.setattr(proc, "start", start)
+    return calls
 
 
 async def kill_holder_and_let_pipes_close(pid_file: Path) -> None:

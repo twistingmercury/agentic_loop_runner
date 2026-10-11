@@ -1,7 +1,7 @@
 ---
-version: 27
-date: 2026-10-08
-notes: "ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+version: 34
+date: 2026-10-11
+notes: "ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons are named (task file visible, log folder visible naming the logs directory, and git's message when git cannot answer), a check-ignore failure during a run is a commit failure, the signing-program claim is narrowed to a program that prompts on /dev/tty, the re-check's log test covers the whole logs directory, a SIGKILL during a post-commit hook is a stated limit, and the Positive line no longer claims no duplicate commit. Earlier: ADR-025 is Accepted: stage 2, commit safety, is built, and its text now says what the code does. The lock is a flock on alr.lock in the git directory (a linked worktree has its own), taken after the task file check and before the log folder and clean tree checks, and a dry run with a commit mode only looks at it; a lock file alr cannot open or lock is git-error; only the git add and git commit alr starts get their own session and, on Linux, the kernel stop; the pre-add re-check runs before every task commit and once before the run commit, and its reasons are task file visible and log folder visible, exit 4. Earlier: ADR-025 after a wording check against the code: the dry run applies its failed-task and log-unwritable checks with or without --commit, and only --commit task or run adds the repository checks, log-folder-visible among them. Earlier: ADR-025 after the stage 1c re-review: a save that fails after a landed commit exits 4 and names the commit in every mode, including after a stop, where it replaces the stop's 130 or 143; task-file-unwritable also covers the save of edited gates when the view starts, not only the --reset-failed save. Earlier: ADR-025 after the stage 1b re-review: a name with a line break or any other control character except tab is rejected; a refusal leaves nothing behind, not even a `logs/` it created, and the two refusals decided as the log opens (`log-unwritable`, `task-file-unwritable`) remove what they made, which ends the contradiction with \"refusals are raised before the run log opens\"; the dry run also refuses an unwritable log folder; the save of the task file uses a uniquely named temporary file. Earlier: ADR-025 after the stage 1 review: adds the refusal reason task-file-unwritable; the dry run exits 3 on a failed task like a real run; a refusal leaves nothing on disk in plain mode and the view; a stop after a commit landed saves the tasks completed; a stop in run mode before the commit leaves tasks.yaml untouched; the view carries the stop signal. Earlier: Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -53,6 +53,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [022](#adr-022-alr-has-evolved-beyond-gralph) | alr has evolved beyond gralph | Accepted | 2026-10-08 |
 | [023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output) | Plain mode records gate, git, and session-stderr output | Accepted | 2026-10-08 |
 | [024](#adr-024-one---commit-flag-with-three-modes-none-task-and-run) | One `--commit` flag with three modes: none, task, and run | Accepted | 2026-10-08 |
+| [025](#adr-025-every-outcome-has-an-exit-code-and-a-reason) | Every outcome has an exit code and a reason | Accepted | 2026-10-08 |
 
 ## Inherited Decisions
 
@@ -1171,5 +1172,174 @@ This amends ADR-014 (the flags and the view's commit setting) and ADR-019 (its c
   marked `completed`, and alr never redoes a `completed` task, so that work must be committed by hand first and never
   stashed or cleaned (the README has the steps); it is then in the user's commit, not in a single `run` commit. A
   failed final `run` commit also leaves the work staged and every task `completed`
+
+### ADR-025: Every outcome has an exit code and a reason
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted
+
+**Context:**
+
+The outer agent drives `alr --plain`, reads the exit code and `logs/<timestamp>/`, reviews a failure, remediates it, and
+restarts the loop with a retry cap. Before this ADR almost every failure exited 1, a commit failure was labeled `stopped`, a refusal
+to start looked like a failed task, the log could not say which commit mode ran, and a failed commit left tasks marked
+`completed` whose work was never committed. Two adversarial reviews found these. The owner's rule: **`completed` means
+complete.** A commit is a step like a gate; if it fails, the task failed, and the failure carries a logged reason.
+
+**Principle: deterministic and idempotent.** The same command on the same inputs (task file, flags, work tree,
+repository state) gives the same outcome, and rerunning after any outcome is safe: it redoes the work from a
+well-defined state or refuses with a reason, and never builds on a half-finished state. Known exceptions: Claude's
+output can differ between runs; on platforms without `PR_SET_PDEATHSIG` a SIGKILL of alr during a commit can still let
+the commit land afterwards; a SIGKILL during a post-commit hook leaves a commit that `tasks.yaml` does not record (see
+Limits); log folder names carry a timestamp and a `-1` suffix, so they never collide but are not
+identical.
+
+**Decision:**
+
+*The contract.*
+
+| Outcome | Exit | Log | Reason |
+|---|---|---|---|
+| Completed | 0 | `run_finished` result `completed` | none |
+| A task or gate failed | 1 | result `failed` | the gate's or session's own text, in `error` |
+| Usage error (a bad flag) | 2 | none | argparse's message |
+| Refused to start | 3 | none | first stderr line: `error: refused: <reason>: <message>` |
+| A commit failed | 4 | result `commit_failed`; the task is `failed` | `error`: `commit failed: <first line of git's or the hook's output>`; from the pre-add re-check, `commit failed: task file visible: <path>` or `commit failed: log folder visible: <logs dir>`; or `commit failed: <git's message>` when git cannot answer the re-check |
+| Stopped | 130 (SIGINT), 143 (SIGTERM) | result `stopped` | none |
+
+Refusal reasons: `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`,
+`invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `git-error`, `locked` (another committing run holds
+the repository's commit lock). Whenever alr can tell for sure why it will not
+start, it names the reason; a refusal never falls back to a bare exit 1. `git-error` covers git failing while alr looks
+at the repository before the run starts (`rev-parse`, `status`, `check-ignore`), or alr failing to open or lock the
+commit lock file (a `check-ignore` that fails during a run is a commit failure instead),
+`invalid-sandbox-settings` an unreadable or invalid sandbox
+settings file, `log-unwritable` a run log folder that cannot be created or opened at startup, and `task-file-unwritable` a
+save of the task file at startup that fails: the `--reset-failed` reset, or, in the view, the edited gates saved at the same point
+(a log write that fails mid-run is a run failure, exit 1, and its text carries the cause). The text after the reason is the existing message. A refusal leaves nothing behind: no run log, no `logs/` folder it had to create, and the task file as it was. Nothing
+ran, and a log for a "log folder visible" refusal would create the dirt it refused over. The two refusals that can only
+be known once the log is being opened, `log-unwritable` and `task-file-unwritable`, remove the run folder and any `logs/`
+folder they made (the latter only while it is empty).
+
+*Log fields.*
+
+- `run_started`: `"commit": "none" | "task" | "run"` (was a boolean). With no repository found, the field still names
+  the requested mode and the existing stdout note says nothing will be committed.
+- `run_finished`: `result` in `completed | failed | commit_failed | stopped`, `error` as today, and `exit`, the code
+  alr is about to return.
+- `task_finished`: in `run` mode a task whose gates passed is `passed` (not yet committed); the successful run's
+  `run_finished` completes them. In `none` and `task` modes it says `completed` or `failed`, and in `task` mode
+  `completed` is written only after the commit succeeds.
+- `committed`: unchanged (task id and hash); in `run` mode it names the last task.
+
+*Task lifecycle.*
+
+- `none`: `completed` when the gates pass (unchanged).
+- `task`: before each commit alr re-checks that the task file and the run's log directory (when the run keeps a log) are
+  still ignored. The log check covers the whole `logs/` directory, so a visible older run's folder counts too. If a path
+  is visible, the task fails with that reason (`task file visible: <path>` or `log folder visible: <logs dir>`) and
+  nothing is staged or committed. If git cannot answer the check, the task fails with git's message. `run` mode does the
+  same once, before its one commit. A task is `completed` only after its commit succeeds. A failed commit (git,
+  a hook, a missing identity, git's own lock, a signing program) marks the task `failed` with the reason, leaves the work
+  staged, and exits 4.
+- `run`: all-or-nothing. In-memory state drives the live view; `tasks.yaml` is written once, at the end. If the single
+  commit succeeds, every task that ran becomes `completed`. If a task or gate fails, that task is `failed` and the
+  others `pending`. If the commit fails, the last task is `failed` with the reason and the others stay `pending`. A
+  failed or stopped `run` leaves nothing marked completed, so the leftover work may be discarded and the run repeated.
+- A stop leaves the interrupted task `pending`, as today. In `run` mode a stop before the commit lands leaves
+  `tasks.yaml` untouched, byte for byte. A stop that arrives after `git commit` has already made the commit (a
+  post-commit hook, the hash lookup) does not undo it: the tasks that commit covers are saved `completed` before the
+  stop is re-raised, so a rerun never redoes committed work. A save of those
+  tasks that fails exits 4 (commit failed) in every mode, in place of a stop's
+  130 or 143 when a stop led to it, and its error names the commit. The
+  full-screen view exits with the same codes: it
+  carries the signal that stopped it (SIGTERM is 143), and a second Stop press exits with the code of the stop under
+  way. `run_finished.error` for a failed `task`-mode commit carries the usual `task N: <name> failed:` prefix, as a
+  gate failure does.
+
+*Implementation.*
+
+- Each error class carries its exit code and `main` maps it: refused (with the reason word), commit failed, stopped
+  (with the signal), run failed. No scattered `return 1`.
+- Every refusal except the two named above is raised before the run log opens. `--reset-failed` is applied only after
+  the refusal checks pass, so a refused run changes nothing on disk. `--dry-run` runs the same refusal checks in the
+  same order as a real run, with or without `--commit`: a failed task (`failed-tasks`: the table is printed, then
+  exit 3), and whether the log folder can be written (`log-unwritable`, decided from the nearest existing folder, since
+  a dry run creates nothing). With `--commit task|run` it first runs the repository checks: the task file (`task-file-visible`), the commit lock
+  (`locked`, which a dry run only looks at), the log folder (`log-folder-visible`), and the clean tree (`dirty-tree`). In plain mode and the view alike, `--reset-failed` is
+  applied in memory first and saved to disk only after every other refusal check has passed and the run
+  log has opened; a
+  `task-file-unwritable` refusal then removes the folder the log made, and the `logs/` folder too when the log created
+  it and it is empty. The save writes a uniquely named temporary file beside the task file and replaces the task file
+  atomically, so a file of the user's own such as `tasks.yaml.tmp` is never touched.
+- The commit failure reason is the first non-empty line of git's combined output, trimmed to 200 characters; the full
+  text is in `task-N.log`.
+- A task `name` containing a line break (anything `str.splitlines` splits on) or any other control character except
+  tab (`\x00` to `\x08`, `\x0a` to `\x1f`, `\x7f` to `\x9f`) is rejected at load, with an error naming the task id:
+  a name becomes a commit subject in git's argv, where a NUL crashes the call, and a one-line log field. The bundled
+  skill documents the rule.
+- Commit safety: a committing run holds an exclusive `flock` on `alr.lock` in the repository's absolute git directory
+  (`.git/alr.lock`; a linked worktree has its own git directory, so its own lock) for the whole run, however it ends,
+  and a second committing run is refused as `locked`. The kernel's lock, not the file's existence, is the guard, so it
+  is gone when alr dies by any signal and the file a finished run leaves is no lock. It is taken after the task file
+  check and before the log folder and clean tree checks, since a run that holds it leaves the tree dirty. A dry run
+  with a commit mode only looks, with a shared lock and without making the file. The `git add` and `git commit` alr
+  starts run in their own session, so they have no controlling terminal: a program that prompts on `/dev/tty` (a
+  signing program, say) fails instead of waiting on a person. A program that opens a terminal by path (`GPG_TTY`) or a
+  GUI pinentry through gpg-agent is not stopped by this and can still wait; a stop still gets it out. On Linux they also
+  get SIGTERM from the kernel when alr dies (`PR_SET_PDEATHSIG`), so git removes its index lock and no `git add` or
+  `git commit` alr started lands afterwards; elsewhere that is a documented limit. Right before every `git add`, the
+  task file and the `logs/` directory are checked against git's ignore rules again, because a task's own commands can
+  edit `.gitignore`.
+
+*Limits.* The guards above do not cover these cases:
+
+- PDEATHSIG reaches only the `git add` and `git commit` alr starts. The hooks git runs, the gates, and the Claude
+  sessions do not get it. After a SIGKILL of alr they can keep running, and a gate or session still running can write
+  into a later run's commits once the lock is free.
+- A SIGKILL while a post-commit hook runs leaves the commit landed while `tasks.yaml` still says `pending`; the next run
+  redoes that task. No `git add` or `git commit` that alr started lands after alr is gone, but a commit that landed
+  before a post-commit hook finished is not recorded.
+- The lock stops only another alr run that commits. A `--commit none` run in the same work tree is not stopped, and
+  what it writes can be committed by the other run.
+- The re-check covers the task file and the `logs/` directory only. Another ignored file that a task un-ignores (`.env`,
+  build output) is staged by `git add -A` and committed. A pre-commit hook that edits `.gitignore` and runs `git add`
+  after the check is not caught.
+- The minimum git is 2.13 (`git rev-parse --absolute-git-dir`); an older git refuses every committing run with
+  `git-error`.
+- The dry run's lock check takes a brief shared lock, so a real run starting at that instant can be refused `locked`
+  and should be rerun.
+- The view's redundant mount-time work-tree lookup is dropped.
+
+*Staging.* Stage 1 is the contract and lifecycle (exit codes, refusals, log fields, the `run` and `task` lifecycles,
+name validation). Stage 2 is commit safety (the lock, git's own session, `PR_SET_PDEATHSIG`, the pre-add ignore
+re-check); both stages are built.
+
+*Testing.* A unit test per exit code, refusal reason, log field and `run_finished` result; the `run` states (failed task,
+failed commit, stopped, success); a failed `task` commit keeps the work staged and the task `failed`; one e2e test per
+exit code. Each new test is proven by breaking the code it covers, and a final adversarial review runs before the PR.
+
+This amends ADR-024 (the lifecycle and log of each commit mode) and ADR-019 (the run log fields).
+
+**Consequences:**
+
+*Positive:*
+
+- One unambiguous answer per outcome for a driving program
+- No task is complete unless it is
+- A failed or stopped `run` is safe to discard and repeat; the README's lost-work warning goes away
+- On Linux, a SIGKILL of alr cannot land a commit that alr started after alr is gone; the one window that remains, a
+  SIGKILL during a post-commit hook, is under Limits
+
+*Negative:*
+
+- Breaking changes to exit codes (a stop and a refusal were 1), to the `commit` field's type, and to the saved state of
+  `run` mode; all pre-1.0 and allowed by ADR-022
+- A long `run` that fails late is repeated from the start
+- `completed` in `task` mode now also means committed
+- One more word, `passed`, in the log
+- On platforms without `PR_SET_PDEATHSIG` a SIGKILL during a commit can still land the commit
+- The lock stops only another alr run; a person's own git commands in the work tree are not blocked by it
 
 **Next:** [System Architecture](03_system_architecture.md)

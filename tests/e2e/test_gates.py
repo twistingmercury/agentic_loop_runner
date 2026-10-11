@@ -104,7 +104,7 @@ def test_gates_failing_gate_fails_the_task_and_blocks_the_next_run(
     # again, and the next run must refuse to start.
     again = run_alr(*args, env=env)
 
-    assert again.code != 0, again
+    assert again.code == 3, again
     assert "Some tasks failed previous runs:" in again.out
     assert len(fake_claude_records(record_file)) == 1
 
@@ -282,7 +282,7 @@ def test_gates_bad_gate_timeout_flag_is_reported_before_anything_else(arg: str) 
     """With --dir also missing, only a check that runs first reports the bad value."""
     res = run_alr(arg)
 
-    assert res.code == 1, res
+    assert res.code == 2, res
     assert f"error: {BAD_DURATION}\n" in res.err
     assert "required flag" not in res.err
 
@@ -312,7 +312,7 @@ def test_gates_task_level_gates_are_rejected(tmp_path: Path, fake_claude: Path) 
 
     res, _ = run_dry_run(tmp_path, tasks_yaml)
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert (
         "tasks[0] (id 1): gates: gates are set once for the whole file, as shared.gates; see the HOWTO"
         in res.err

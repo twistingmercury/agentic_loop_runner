@@ -131,9 +131,13 @@ def read_task_log(tasks_path: Path, task_id: int) -> str:
 
 
 def assert_no_tmp_file(tasks_path: Path) -> None:
-    """A save either finished or never started: its temporary file is gone."""
-    tmp = tasks_path.with_name(tasks_path.name + ".tmp")
-    assert not tmp.exists(), f"leftover temp file {tmp}"
+    """A save either finished or never started: its temporary file is gone.
+
+    A save names its temporary file <name>.<random>.tmp; the user's own
+    <name>.tmp is not one of them.
+    """
+    left = sorted(tasks_path.parent.glob(f"{tasks_path.name}.*.tmp"))
+    assert not left, f"leftover temp files {left}"
 
 
 def run_dry_run(tmp_path: Path, tasks_yaml: str, *flags: str) -> tuple[Result, Path]:

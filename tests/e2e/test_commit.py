@@ -4,6 +4,7 @@ The fake claude changes no files, so a gate does the "work" a commit picks up.
 """
 
 import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,12 +21,19 @@ from e2e_helpers import (
     run_args,
     task_errors,
     shared_block,
+    start_alr,
     task_states,
+    wait_for_file,
     write_tasks_yaml,
 )
+from test_outcomes import assert_run_finished
+from test_signal import stopped_at_exit
 
-DIRTY_TREE_ERROR = "error: --commit needs a clean work tree; commit, stash, or remove:"
-BROKEN_REPO_ERROR = "error: --commit: git rev-parse:"
+DIRTY_TREE_ERROR = (
+    "error: refused: dirty-tree: --commit needs a clean work tree; "
+    "commit, stash, or remove:"
+)
+BROKEN_REPO_ERROR = "error: refused: git-error: --commit: git rev-parse:"
 
 # The gates are shared by both tasks, so the one gate picks its file by what
 # the first task left behind: each commit then holds exactly one new file.
@@ -135,7 +143,7 @@ def test_commit_dirty_tree_refuses_to_start(repo: CommitRepo) -> None:
 
     res = repo.run("--commit", "task")
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
     assert repo.calls() == 0, "claude must not run"
     assert repo.tasks_path.read_text(encoding="utf-8") == TWO_WORK_TASKS
@@ -151,10 +159,10 @@ def test_commit_task_file_git_can_see_is_refused(repo: CommitRepo) -> None:
         env={"FAKECLAUDE_RECORD_FILE": str(repo.record_file)},
     )
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert (
-        "error: --commit needs the task file ignored by git or outside the repository: tasks.yaml\n"
-        in res.err
+        "error: refused: task-file-visible: --commit needs the task file ignored by git "
+        "or outside the repository: tasks.yaml\n" in res.err
     )
     assert repo.calls() == 0, "claude must not run"
     assert repo.subjects() == ["init"]
@@ -165,7 +173,7 @@ def test_commit_broken_repository_is_an_error_run(repo: CommitRepo) -> None:
 
     res = repo.run("--commit", "task")
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert BROKEN_REPO_ERROR in res.err
     assert repo.calls() == 0, "claude must not run"
 
@@ -175,7 +183,7 @@ def test_commit_broken_repository_is_an_error_dry_run(repo: CommitRepo) -> None:
 
     res = repo.dry_run()
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert BROKEN_REPO_ERROR in res.err
     assert "is valid" not in res.out
 
@@ -205,7 +213,7 @@ def test_commit_failed_gate_leaves_no_commit_and_blocks_the_rerun(
     repo.tasks_path.write_text(tasks_yaml, encoding="utf-8")
     again = repo.run("--commit", "task")
 
-    assert again.code == 1, again
+    assert again.code == 3, again
     assert f"{DIRTY_TREE_ERROR}\n?? one.txt\n" in again.err
     assert repo.calls() == 1, "the refused run must not start claude"
 
@@ -218,13 +226,12 @@ def test_commit_rejected_commit_fails_the_task(repo: CommitRepo) -> None:
 
     res = repo.run("--commit", "task")
 
-    assert res.code != 0, res
-    assert "hook-says-no" in res.err
-    assert "task 1: First task failed: commit failed: exit status 1" in res.err
+    assert res.code == 4, res
+    assert "task 1: First task failed: commit failed: hook-says-no" in res.err
     assert repo.subjects() == ["init"]
 
     after = read_tasks_yaml(repo.tasks_path)
-    assert task_errors(after)[1] == "commit failed: exit status 1"
+    assert task_errors(after)[1] == "commit failed: hook-says-no"
     assert task_states(after)[2] == "pending"
     assert repo.calls() == 1, "the run must stop before the second task"
 
@@ -294,6 +301,32 @@ def test_commit_dry_run_dirty(repo: CommitRepo) -> None:
 
     res = repo.dry_run()
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert f"{DIRTY_TREE_ERROR}\n?? stray.txt\n" in res.err
     assert "is valid" not in res.out
+
+
+def test_commit_sigterm_after_the_commit_landed_keeps_the_task_completed(
+    repo: CommitRepo,
+) -> None:
+    hook = repo.dir / ".git" / "hooks" / "post-commit"
+    hook.parent.mkdir(exist_ok=True)
+    ready = repo.tasks_path.parent / "ready"
+    # Git has made the commit by the time a post-commit hook runs, and it waits
+    # for the hook, so the stop arrives with the commit already in the history.
+    hook.write_text(f"#!/bin/sh\necho $$ > {ready}\nsleep 60\n", encoding="utf-8")
+    hook.chmod(0o700)
+    process = start_alr(*run_args(repo.tasks_path), "--commit", "task")
+
+    with stopped_at_exit(process, ready):
+        wait_for_file(ready, 10)
+        process.send_signal(signal.SIGTERM)
+        out, err = process.communicate(timeout=15)
+
+    assert process.returncode == 143, (out, err)
+    assert repo.subjects() == ["First task", "init"]
+    assert task_states(read_tasks_yaml(repo.tasks_path)) == {
+        1: "completed",
+        2: "pending",
+    }
+    assert_run_finished(repo.tasks_path.parent, "stopped", 143)

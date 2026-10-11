@@ -1,5 +1,6 @@
 """The run log: a ledger line per event and a detail file per task."""
 
+import errno
 import json
 import os
 import stat
@@ -9,8 +10,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from helpers import refuse_removal
 
-from alr.errors import RunLogError
+from alr.errors import RefusedError, RunLogError
+from alr.record import runlog
 from alr.record.events import (
     Activity,
     CommitStarted,
@@ -24,7 +27,7 @@ from alr.record.events import (
     TaskStarted,
 )
 from alr.record.runlog import Info, RunLog, run_dir
-from alr.tasks import COMPLETED, FAILED, Gate, Task
+from alr.tasks import COMPLETED, FAILED, Gate, RunResult, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'
 
@@ -37,7 +40,7 @@ INFO = Info(
     tasks_file="run/tasks.yaml",
     permissions="sandbox",
     sandbox_settings="run/sandbox.json",
-    commit=True,
+    commit="task",
 )
 
 
@@ -85,7 +88,7 @@ def test_open_creates_private_folder_and_run_started(
     want = (
         "{" + STAMP + ',"event":"run_started","version":"v0.10.0",'
         '"tasks_file":"run/tasks.yaml","permissions":"sandbox",'
-        '"sandbox_settings":"run/sandbox.json","commit":true}'
+        '"sandbox_settings":"run/sandbox.json","commit":"task"}'
     )
     lines = ledger_lines(path)
     assert lines == [want]
@@ -105,9 +108,42 @@ def test_open_leaves_out_what_was_not_passed(tmp_path: Path) -> None:
     want = (
         "{" + STAMP + ',"event":"run_started","version":"dev",'
         '"tasks_file":"t.yaml","permissions":"skip","gate_timeout":"90s",'
-        '"commit":false}'
+        '"commit":"none"}'
     )
     assert ledger_lines(path) == [want]
+
+
+@pytest.mark.parametrize("mode", ["none", "task", "run"])
+def test_open_writes_the_commit_mode_as_a_string(tmp_path: Path, mode: str) -> None:
+    path = tmp_path / "run"
+
+    RunLog.open(path, replace(INFO, commit=mode), now=fixed_now).close()
+
+    assert json.loads(ledger_lines(path)[0])["commit"] == mode
+
+
+@pytest.mark.parametrize(
+    ("result", "exit_code"),
+    [
+        (RunResult.COMPLETED, 0),
+        (RunResult.FAILED, 1),
+        (RunResult.COMMIT_FAILED, 4),
+        (RunResult.STOPPED, 143),
+    ],
+)
+def test_run_finished_records_the_result_and_the_exit(
+    opened: tuple[RunLog, Path], result: RunResult, exit_code: int
+) -> None:
+    log, path = opened
+    error = None if result is RunResult.COMPLETED else "why"
+
+    log.record(RunDone(error, 1.0, result, exit_code))
+
+    line = json.loads(ledger_lines(path)[-1])
+    assert line["event"] == "run_finished"
+    assert line["result"] == result.value
+    assert line["exit"] == exit_code
+    assert line.get("error") == error
 
 
 def test_time_with_a_zero_offset_is_written_as_z(tmp_path: Path) -> None:
@@ -144,6 +180,16 @@ def test_open_existing_run_folder_gets_a_suffixed_folder(
     ]
 
 
+def test_path_is_the_folder_the_log_opened_in(opened: tuple[RunLog, Path]) -> None:
+    log, path = opened
+
+    second = RunLog.open(path, INFO, now=fixed_now)
+    second.close()
+
+    assert log.path == path
+    assert second.path == path.with_name(path.name + "-1"), "not the name asked for"
+
+
 def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None:
     # A file where a folder should be fails the same way for every user, root
     # included, which a read-only folder does not.
@@ -151,10 +197,12 @@ def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None
     blocker.write_text("a file, not a folder", encoding="utf-8")
     path = blocker / "nested" / "20261001T140211"
 
-    with pytest.raises(RunLogError) as raised:
+    with pytest.raises(RefusedError) as raised:
         RunLog.open(path, INFO, now=fixed_now)
 
+    assert raised.value.reason == "log-unwritable"
     assert str(raised.value) == (
+        "refused: log-unwritable: "
         f"cannot create the run log folder {path}: Not a directory"
     )
 
@@ -163,8 +211,10 @@ def test_open_log_dir_under_a_file_is_an_error(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_bytes(b"")
 
-    with pytest.raises(RunLogError):
+    with pytest.raises(RefusedError) as raised:
         RunLog.open(file / "logs" / "run", INFO, now=fixed_now)
+
+    assert raised.value.reason == "log-unwritable"
 
 
 def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
@@ -195,7 +245,7 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         "{" + STAMP + ',"event":"task_finished","task":1,'
         '"state":"completed","duration":"2m12s"}',
         "{" + STAMP + ',"event":"run_finished","result":"completed",'
-        '"duration":"2m13s"}',
+        '"exit":0,"duration":"2m13s"}',
     ]
     assert ledger_lines(path)[1:] == want
 
@@ -271,7 +321,7 @@ def test_record_failed_task_ends_the_run_as_failed(
         log,
         TaskStarted(task),
         TaskFinished(failed, run_error, 1.0),
-        RunDone(run_error, 1.0),
+        RunDone(run_error, 1.0, RunResult.FAILED, 1),
     )
 
     lines = ledger_lines(path)
@@ -282,14 +332,14 @@ def test_record_failed_task_ends_the_run_as_failed(
     assert lines[3] == (
         "{" + STAMP + ',"event":"run_finished","result":"failed",'
         '"error":"task 2: Second failed: gate \\"exit 3\\" failed: exit status 3",'
-        '"duration":"1s"}'
+        '"exit":1,"duration":"1s"}'
     )
 
 
 def _stopped(error: str, seconds: str) -> str:
     return (
         "{" + STAMP + ',"event":"run_finished","result":"stopped",'
-        f'"error":"{error}","duration":"{seconds}"}}'
+        f'"error":"{error}","exit":130,"duration":"{seconds}"}}'
     )
 
 
@@ -304,7 +354,9 @@ STOPPED_CASES = [
         [
             TaskStarted(FIRST),
             Activity(FIRST, "working"),
-            RunDone("task 1: First failed: signal: killed", 2.0),
+            RunDone(
+                "task 1: First failed: signal: killed", 2.0, RunResult.STOPPED, 130
+            ),
         ],
         _stopped("task 1: First failed: signal: killed", "2s"),
         3,
@@ -317,7 +369,7 @@ STOPPED_CASES = [
             TaskStarted(FIRST),
             TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
             TaskStarted(SECOND),
-            RunDone("stopped", 0.0),
+            RunDone("stopped", 0.0, RunResult.STOPPED, 130),
         ],
         _stopped("stopped", "0s"),
         5,
@@ -488,3 +540,267 @@ def test_close_twice_is_safe(opened: tuple[RunLog, Path]) -> None:
     log.close()
 
     log.close()
+
+
+def test_open_that_cannot_start_the_ledger_removes_the_folder_it_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path) -> None:
+        raise runlog._io_error(path, OSError(errno.EACCES, "Permission denied"))
+
+    monkeypatch.setattr(runlog, "_open_append", refuse)
+    path = tmp_path / "logs" / "20261001T140211"
+
+    with pytest.raises(RefusedError) as raised:
+        RunLog.open(path, INFO, now=fixed_now)
+
+    assert raised.value.reason == "log-unwritable"
+    assert "Permission denied" in raised.value.message
+    assert not path.exists(), "a refused run leaves no run folder"
+
+
+def test_discard_removes_the_run_folder_and_close_stays_safe(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+
+    log.discard()
+    log.close()
+
+    assert not path.exists()
+
+
+def test_discard_leaves_a_folder_that_holds_something_else(
+    opened: tuple[RunLog, Path],
+) -> None:
+    log, path = opened
+    stranger = path / "notes.txt"
+    stranger.write_text("not ours\n", encoding="utf-8")
+
+    log.discard()
+
+    assert stranger.read_text(encoding="utf-8") == "not ours\n"
+    assert not (path / "run.jsonl").exists(), "its own ledger still goes"
+
+
+def test_discard_removes_the_log_folder_it_created(tmp_path: Path) -> None:
+    log = RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    log.discard()
+
+    assert list(tmp_path.iterdir()) == [], "a discarded log leaves no logs/"
+
+
+def test_discard_keeps_a_log_folder_that_was_already_there(tmp_path: Path) -> None:
+    (tmp_path / "logs").mkdir()
+    log = RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    log.discard()
+
+    assert list((tmp_path / "logs").iterdir()) == []
+
+
+def test_discard_keeps_a_created_log_folder_that_holds_something_else(
+    tmp_path: Path,
+) -> None:
+    log = RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+    stranger = tmp_path / "logs" / "notes.txt"
+    stranger.write_text("not ours\n", encoding="utf-8")
+
+    log.discard()
+
+    assert stranger.read_text(encoding="utf-8") == "not ours\n"
+    assert not (tmp_path / "logs" / "20261001T140211").exists()
+
+
+def test_discard_removes_every_parent_it_created_and_no_other(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    path = tmp_path / "a" / "b" / "c" / "logs" / "20261001T140211"
+    log = RunLog.open(path, INFO, now=fixed_now)
+
+    log.discard()
+
+    assert list(tmp_path.rglob("*")) == [tmp_path / "a"], "only a, which was there"
+
+
+def test_discard_stops_at_the_first_parent_that_is_not_empty(tmp_path: Path) -> None:
+    path = tmp_path / "a" / "logs" / "20261001T140211"
+    log = RunLog.open(path, INFO, now=fixed_now)
+    stranger = tmp_path / "a" / "notes.txt"
+    stranger.write_text("not ours\n", encoding="utf-8")
+
+    log.discard()
+
+    assert sorted(tmp_path.rglob("*")) == [tmp_path / "a", stranger]
+
+
+@pytest.mark.parametrize("removal", ["unlink", "rmdir"])
+def test_discard_suppresses_an_error_while_removing(
+    opened: tuple[RunLog, Path], monkeypatch: pytest.MonkeyPatch, removal: str
+) -> None:
+    log, path = opened
+    monkeypatch.setattr(Path, removal, refuse_removal)
+
+    log.discard()
+
+    assert path.exists(), "what could not be removed is left, not raised over"
+
+
+def test_discard_suppresses_an_error_while_closing_and_still_removes(
+    opened: tuple[RunLog, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log, path = opened
+
+    def fail(file: object, where: Path) -> None:
+        raise RunLogError(f"{where}: Input/output error")
+
+    monkeypatch.setattr(runlog, "_close", fail)
+
+    log.discard()
+
+    assert not path.exists(), "a record being thrown away needs no clean close"
+
+
+def test_open_that_cannot_start_the_ledger_refuses_even_when_the_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path) -> None:
+        raise runlog._io_error(path, OSError(errno.EIO, "Input/output error"))
+
+    monkeypatch.setattr(runlog, "_open_append", refuse)
+    monkeypatch.setattr(Path, "rmdir", refuse_removal)
+
+    with pytest.raises(RefusedError) as raised:
+        RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    assert raised.value.reason == "log-unwritable"
+    assert "Input/output error" in raised.value.message, "the cause, not the cleanup"
+
+
+def test_open_that_cannot_start_the_ledger_leaves_no_log_folder_it_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(path: Path) -> None:
+        raise runlog._io_error(path, OSError(errno.EACCES, "Permission denied"))
+
+    monkeypatch.setattr(runlog, "_open_append", refuse)
+
+    with pytest.raises(RefusedError):
+        RunLog.open(tmp_path / "logs" / "20261001T140211", INFO, now=fixed_now)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_check_writable_accepts_a_missing_folder_under_a_writable_one(
+    tmp_path: Path,
+) -> None:
+    runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_check_writable_refuses_a_file_where_the_folder_belongs(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "logs").write_text("a file", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+
+
+def test_check_writable_refuses_a_folder_the_user_cannot_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "logs").mkdir()
+    access = os.access
+
+    def deny_logs(path: str | Path, mode: int, **kwargs: bool) -> bool:
+        # chmod 500 would not stop root, so the refusal is made here instead.
+        denied = Path(path).name == "logs" and mode & os.W_OK
+        return not denied and access(path, mode, **kwargs)
+
+    monkeypatch.setattr(os, "access", deny_logs)
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+    assert list(tmp_path.joinpath("logs").iterdir()) == []
+
+
+def test_check_writable_refuses_a_file_where_the_folder_belongs_naming_why(
+    tmp_path: Path,
+) -> None:
+    logs = tmp_path / "logs"
+    logs.write_text("a file", encoding="utf-8")
+    logs.chmod(0o644)
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(logs / "20261009T000000")
+
+    assert "Not a directory" in str(caught.value)
+
+
+def test_check_writable_refuses_a_folder_the_user_cannot_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "logs").mkdir()
+    access = os.access
+
+    def deny_searching_logs(path: str | Path, mode: int, **kwargs: bool) -> bool:
+        # chmod 200 would not stop root, so the refusal is made here instead.
+        denied = Path(path).name == "logs" and mode & os.X_OK
+        return not denied and access(path, mode, **kwargs)
+
+    monkeypatch.setattr(os, "access", deny_searching_logs)
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+
+
+def test_check_writable_refuses_a_dangling_symlink_where_the_folder_belongs(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "logs").symlink_to(tmp_path / "nonexistent" / "x")
+
+    with pytest.raises(RefusedError) as caught:
+        runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert caught.value.reason == "log-unwritable"
+    assert "File exists" in str(caught.value)
+
+
+def test_a_dangling_logs_symlink_is_refused_by_the_real_open_too(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "logs").symlink_to(tmp_path / "nonexistent" / "x")
+
+    with pytest.raises(RefusedError) as caught:
+        RunLog.open(tmp_path / "logs" / "20261009T000000", INFO, now=fixed_now)
+
+    assert caught.value.reason == "log-unwritable"
+    assert "File exists" in str(caught.value)
+
+
+def test_check_writable_accepts_a_symlink_to_an_existing_folder(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "logs").symlink_to(tmp_path / "real")
+
+    runlog.check_writable(tmp_path / "logs" / "20261009T000000")
+
+    assert list((tmp_path / "real").iterdir()) == []
+
+
+def test_open_accepts_a_symlink_to_an_existing_folder(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "logs").symlink_to(tmp_path / "real")
+
+    RunLog.open(tmp_path / "logs" / "20261009T000000", INFO, now=fixed_now).close()
+
+    assert (tmp_path / "real" / "20261009T000000").is_dir()

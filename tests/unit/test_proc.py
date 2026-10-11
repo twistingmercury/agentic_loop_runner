@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import kill_holder_and_let_pipes_close, wait_for_text, wait_until_gone
+from helpers import (
+    kill_holder_and_let_pipes_close,
+    wait_for_file,
+    wait_for_text,
+    wait_process_gone,
+    wait_until_gone,
+)
 
 from alr.engine import proc
 
@@ -28,6 +34,115 @@ async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> No
         await waiter
 
     assert process.returncode == 7
+
+
+async def test_a_new_session_child_leads_its_own_session() -> None:
+    process = await proc.start(
+        ["sleep", "5"], stdout=asyncio.subprocess.DEVNULL, new_session=True
+    )
+    try:
+        assert os.getsid(process.pid) == process.pid
+        assert os.getsid(process.pid) != os.getsid(0)
+        assert os.getpgid(process.pid) == process.pid
+    finally:
+        process.kill()
+        await process.wait()
+
+
+async def test_cancel_kills_the_whole_group_of_a_new_session_child(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    process = await proc.start(
+        ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"], new_session=True
+    )
+    waiter = asyncio.ensure_future(proc.finish(process))
+    await wait_for_text(pid_file)
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    assert process.returncode == -signal.SIGKILL
+    await wait_until_gone(int(pid_file.read_text()))
+
+
+# Starts a child tied to this process and says where it is, then idles until killed.
+_PARENT = """
+import asyncio, pathlib
+from alr.engine import proc
+
+
+async def main():
+    process = await proc.start(["sleep", "60"], new_session=True, die_with_parent=True)
+    pathlib.Path("{pid_file}").write_text(str(process.pid))
+    await asyncio.sleep(60)
+
+
+asyncio.run(main())
+"""
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="PR_SET_PDEATHSIG is Linux-only")
+def test_a_child_that_dies_with_its_parent_stops_when_the_parent_is_killed(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    parent = subprocess.Popen([sys.executable, "-c", _PARENT.format(pid_file=pid_file)])
+    try:
+        child_pid = int(wait_for_file(pid_file))
+    finally:
+        # SIGKILL: the parent gets no chance to clean up after itself.
+        parent.kill()
+        parent.wait()
+
+    wait_process_gone(child_pid, 5)
+
+
+# Starts a child that traps SIGTERM and reports it, tied to this process.
+_TERM_PARENT = """
+import asyncio, pathlib
+from alr.engine import proc
+
+SCRIPT = "trap 'echo term > {term_file}; exit 0' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done"
+
+
+async def main():
+    await proc.start(["sh", "-c", SCRIPT], new_session=True, die_with_parent=True)
+    await asyncio.sleep(60)
+
+
+asyncio.run(main())
+"""
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="PR_SET_PDEATHSIG is Linux-only")
+def test_a_child_that_dies_with_its_parent_gets_sigterm_not_sigkill(
+    tmp_path: Path,
+) -> None:
+    pid_file, term_file = tmp_path / "child.pid", tmp_path / "term"
+    script = _TERM_PARENT.format(pid_file=pid_file, term_file=term_file)
+    parent = subprocess.Popen([sys.executable, "-c", script])
+    try:
+        # The child writes its pid only after the kernel was asked to signal it.
+        wait_for_file(pid_file)
+    finally:
+        parent.kill()
+        parent.wait()
+
+    # Only SIGTERM lets the trap run; SIGKILL would leave no file.
+    assert wait_for_file(term_file).strip() == "term"
+
+
+async def test_a_child_whose_parent_is_already_gone_exits_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The fork copies the patch into the child, which then sees a parent that is
+    # not the one alr had when it started the child.
+    monkeypatch.setattr(proc.os, "getppid", lambda: -1)
+    process = await proc.start(["sleep", "60"], die_with_parent=True)
+
+    assert await asyncio.wait_for(process.wait(), 5) == 1
 
 
 async def test_cancel_kills_the_whole_group(tmp_path: Path) -> None:

@@ -17,7 +17,8 @@ from helpers import gone_within, start_alr, wait_for_file
 from alr import cli
 from alr.engine import proc
 from alr.engine.commit import CommitMode
-from alr.errors import AlrError, SandboxError, UsageError
+from alr.engine.stop import Stop
+from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
 from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
@@ -64,7 +65,7 @@ def test_session_args_sandbox_file(
             "missing.json",
             False,
             True,
-            SandboxError,
+            RefusedError,
             "--sandbox-settings: file",
             id="dry run, bad file",
         ),
@@ -145,11 +146,20 @@ def test_version_line_shows_os_and_arch(
 def test_missing_required_flags_are_each_named(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert cli.main([]) == 1
+    assert cli.main([]) == 2
 
     err = capsys.readouterr().err
     assert err.startswith("error: required flag --dir not set\n")
     assert err.count("required flag") == 1
+
+
+def test_a_bad_flag_value_exits_2(folder: Path) -> None:
+    assert cli.main(["--plain", "--gate-timeout", "soon", "-d", str(folder)]) == 2
+
+
+def test_a_missing_dir_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["--plain"]) == 2
+    assert capsys.readouterr().err.startswith("error: required flag --dir not set\n")
 
 
 @pytest.mark.parametrize("flag", ["-p", "--prompt"])
@@ -222,14 +232,14 @@ def test_both_permission_flags_are_refused(
         ]
     )
 
-    assert code == 1
+    assert code == 2
     assert capsys.readouterr().err == f"error: {BOTH_PERMISSIONS}\n"
 
 
 def test_a_real_run_needs_a_permission_flag(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(folder)]) == 1
+    assert cli.main(["-d", str(folder)]) == 2
     assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
 
 
@@ -246,7 +256,7 @@ def test_log_dir_flag_is_an_unknown_argument(
 def test_empty_gate_timeout_is_bad(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", ""]) == 1
+    assert cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", ""]) == 2
     assert f"error: {BAD_DURATION}" in capsys.readouterr().err
 
 
@@ -254,10 +264,10 @@ def test_empty_gate_timeout_is_bad(
 def test_startup_checks_run_in_gralphs_order(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(tmp_path), "--gate-timeout", "30"]) == 1
+    assert cli.main(["-d", str(tmp_path), "--gate-timeout", "30"]) == 2
     assert capsys.readouterr().err == f"error: --dir: no tasks.yaml in {tmp_path}\n"
 
-    assert cli.main(["--gate-timeout", "30"]) == 1
+    assert cli.main(["--gate-timeout", "30"]) == 2
     assert capsys.readouterr().err == f"error: {BAD_DURATION}\n"
 
 
@@ -267,10 +277,10 @@ def test_a_run_error_is_one_error_line(
     # A task file that cannot be read: a folder where tasks.yaml should be.
     (tmp_path / "tasks.yaml").mkdir()
 
-    assert cli.main(["-d", str(tmp_path), "--dry-run"]) == 1
+    assert cli.main(["-d", str(tmp_path), "--dry-run"]) == 3
 
     err = capsys.readouterr().err
-    assert err.startswith("error: ")
+    assert err.startswith("error: refused: invalid-task-file: ")
     assert err.count("\n") == 1
 
 
@@ -285,8 +295,43 @@ def test_a_stop_with_no_task_running_is_one_error_line(
     async def stopped() -> None:
         raise asyncio.CancelledError
 
-    assert cli._run(stopped()) == 1
+    assert cli._run(stopped(), Stop()) == 130
     assert capsys.readouterr().err == "error: interrupted\n"
+
+
+@pytest.mark.parametrize(("sig", "code"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)])
+def test_a_signal_sets_the_exit_code(sig: signal.Signals, code: int) -> None:
+    async def stopped_by() -> None:
+        os.kill(os.getpid(), sig)
+        await asyncio.sleep(60)
+
+    assert cli._run(stopped_by(), Stop()) == code
+
+
+def test_only_the_first_signal_sets_the_exit_code() -> None:
+    async def stopped_twice() -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signal.SIGINT)
+        await asyncio.sleep(60)
+
+    stop = Stop()
+
+    assert cli._run(stopped_twice(), stop) == 143
+    assert stop.signum == signal.SIGTERM
+
+
+def test_a_stop_inside_a_task_exits_with_the_signals_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def stopped_in_a_task() -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise RunCancelledError("task 1: a: stopped") from None
+
+    assert cli._run(stopped_in_a_task(), Stop()) == 143
+    assert capsys.readouterr().err == "error: task 1: a: stopped\n"
 
 
 def test_sigint_during_the_startup_checks_is_one_error_line(
@@ -297,7 +342,7 @@ def test_sigint_during_the_startup_checks_is_one_error_line(
 
     monkeypatch.setattr(cli, "resolve_dir", interrupted)
 
-    assert cli.main(["-d", "x", "--dry-run"]) == 1
+    assert cli.main(["-d", "x", "--dry-run"]) == 130
     assert capsys.readouterr().err == "error: interrupted\n"
 
 
@@ -320,7 +365,7 @@ def test_a_signal_leaves_no_traceback_and_no_change(
     finally:
         process.kill()
 
-    assert process.returncode == 1
+    assert process.returncode == 128 + stop
     assert err == "error: loop error: task 1: a: stopped\n"
     assert tasks_file.read_text(encoding="utf-8") == ONE_TASK_YAML
     with pytest.raises(ProcessLookupError):
@@ -362,7 +407,7 @@ def test_a_second_signal_does_not_leave_git_running(
                 os.kill(hook_pid, signal.SIGKILL)
 
     assert not hook_still_runs, "alr exited while the commit hook was still running"
-    assert process.returncode == 1
+    assert process.returncode == 130
     assert err == "error: loop error: task 1: a: stopped during commit\n"
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
 
@@ -381,6 +426,7 @@ def _capture_start(
         commit: CommitMode,
         reset_failed: bool,
         sandbox_settings: str = "",
+        stop: Stop | None = None,
     ) -> None:
         sessions.append(session)
         modes.append(commit)
@@ -441,9 +487,11 @@ def test_a_bad_folder_file_fails_and_never_runs_unsandboxed(
 ) -> None:
     _add_sandbox(folder, content)
 
-    assert cli.main(["-d", str(folder)]) == 1
+    assert cli.main(["-d", str(folder)]) == 3
     assert sessions == []
-    assert "error: --sandbox-settings: must be a JSON object" in capsys.readouterr().err
+    first_line = capsys.readouterr().err.splitlines()[0]
+    assert first_line.startswith("error: refused: invalid-sandbox-settings: ")
+    assert "--sandbox-settings: must be a JSON object" in first_line
 
 
 def test_an_unreadable_folder_file_fails(
@@ -464,9 +512,11 @@ def test_an_unreadable_folder_file_fails(
 
     monkeypatch.setattr(Path, "read_text", refuse)
 
-    assert cli.main(["-d", str(folder)]) == 1
+    assert cli.main(["-d", str(folder)]) == 3
     assert sessions == []
-    assert "is not accessible" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert err.startswith("error: refused: invalid-sandbox-settings: ")
+    assert "is not accessible" in err
 
 
 def test_no_folder_file_keeps_the_neither_flag_error(
@@ -474,7 +524,7 @@ def test_no_folder_file_keeps_the_neither_flag_error(
 ) -> None:
     (folder / "sandbox.json").mkdir()
 
-    assert cli.main(["-d", str(folder)]) == 1
+    assert cli.main(["-d", str(folder)]) == 2
     assert sessions == []
     assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
 
@@ -548,6 +598,35 @@ def test_dry_run_with_commit_task_reports_the_commit_checks(
 
     assert cli.main(["-d", str(outside), "--dry-run", "--commit", "task"]) == 0
     assert f"commit: {git_repo}" in capsys.readouterr().out
+
+
+def test_dry_run_commit_run_with_an_invalid_task_file_is_refused_once(
+    git_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = git_repo / "run"
+    (folder / "tasks.yaml").write_text("tasks: not-a-list\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--commit", "run"]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith("error: refused: invalid-task-file: ")
+    assert err.count("failed to parse tasks yaml") == 1
+    assert err.count("\n") == 1
+
+
+def test_dry_run_commit_run_on_a_dirty_tree_is_refused(
+    git_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = git_repo / "run"
+    (folder / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--commit", "run"]) == 3
+
+    err = capsys.readouterr().err
+    assert err.startswith(
+        "error: refused: dirty-tree: --commit needs a clean work tree"
+    )
 
 
 def test_dry_run_without_commit_does_not_consult_git(
@@ -649,7 +728,7 @@ def test_the_view_still_refuses_both_permission_flags(
 
     code = cli.main(["-d", str(folder), "--sandbox-settings", settings, "--yolo"])
 
-    assert code == 1
+    assert code == 2
     assert BOTH_PERMISSIONS in capsys.readouterr().err
     assert seen == []
 
@@ -666,8 +745,10 @@ def test_the_view_still_checks_a_given_settings_file(
 
     code = cli.main(["-d", str(folder), "--sandbox-settings", str(bad)])
 
-    assert code == 1
-    assert capsys.readouterr().err.startswith("error: ")
+    assert code == 3
+    assert capsys.readouterr().err.startswith(
+        "error: refused: invalid-sandbox-settings: "
+    )
     assert seen == []
 
 
@@ -702,7 +783,7 @@ def test_reset_failed_with_dry_run_is_a_usage_error(
 ) -> None:
     code = cli.main(["-d", str(folder), "--dry-run", "--reset-failed", *extra])
 
-    assert code == 1
+    assert code == 2
     assert capsys.readouterr().err == (
         "error: --reset-failed cannot be used with --dry-run (a dry run writes nothing)\n"
     )
@@ -735,7 +816,7 @@ def test_a_plain_run_without_reset_failed_still_refuses_a_failed_task(
 
     code = cli.main(["-d", str(folder), "--yolo"])
 
-    assert code == 1
+    assert code == 3
     assert "Some tasks failed previous runs:" in capsys.readouterr().out
 
 

@@ -12,7 +12,8 @@ from typing import Any
 
 from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
-from alr.errors import AlrError, UsageError
+from alr.engine.stop import Stop
+from alr.errors import AlrError, RunCancelledError, UsageError
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
 from alr.skillinstall import install
@@ -32,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         # Ctrl-C during the startup checks, before the run handles signals itself.
         print(_INTERRUPTED, file=sys.stderr)
-        return 1
+        return Stop().exit_code()
 
 
 def _version_line() -> str:
@@ -64,15 +65,16 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         missing = _missing_flags(tasks_file)
         if missing:
             _report_missing(parser, missing)
-            return 1
+            return UsageError.exit_code
 
         commit_mode = CommitMode(args.commit)
         session = session_args(sandbox_settings, args.yolo, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return exc.exit_code
 
     gate_timeout = args.gate_timeout or ""
+    stop = Stop()
     if args.dry_run:
         return _run(
             dry_run(
@@ -81,7 +83,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
                 gate_timeout,
                 sandbox_settings,
                 commit_mode is not CommitMode.NONE,
-            )
+            ),
+            stop,
         )
 
     return _run(
@@ -92,7 +95,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             commit_mode,
             args.reset_failed,
             sandbox_settings=sandbox_settings,
-        )
+            stop=stop,
+        ),
+        stop,
     )
 
 
@@ -102,7 +107,7 @@ def _install_skill() -> int:
         print(install())
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return exc.exit_code
 
     return 0
 
@@ -289,36 +294,45 @@ def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None
     parser.print_usage(sys.stderr)
 
 
-def _run(coro: Coroutine[Any, Any, None]) -> int:
-    """Run coro to the end; SIGINT or SIGTERM cancels it, which stops the run."""
+def _run(coro: Coroutine[Any, Any, None], stop: Stop) -> int:
+    """Run coro to the end; SIGINT or SIGTERM cancels it, which stops the run.
+
+    A stop exits with the code of the first signal, which _with_signals records in stop.
+    """
     try:
-        asyncio.run(_with_signals(coro))
+        asyncio.run(_with_signals(coro, stop))
     except asyncio.CancelledError:
         # The stop landed while no task was running, so there is no task to name.
         print(_INTERRUPTED, file=sys.stderr)
-        return 1
+        return stop.exit_code()
+    except RunCancelledError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return stop.exit_code()
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return exc.exit_code
 
     return 0
 
 
-async def _with_signals(coro: Coroutine[Any, Any, None]) -> None:
+async def _with_signals(coro: Coroutine[Any, Any, None], stop: Stop) -> None:
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     if task is None:
         raise RuntimeError("no running task")
 
-    stop = _stop_once(task)
+    handler = _stop_once(task, stop)
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop)
+        loop.add_signal_handler(sig, handler, sig)
 
     await coro
 
 
-def _stop_once(task: asyncio.Task[None]) -> Callable[[], None]:
+def _stop_once(task: asyncio.Task[None], stop: Stop) -> Callable[[int], None]:
     """Return a signal handler that cancels task the first time and does nothing after.
+
+    The first signal is also the one recorded in stop, so a later one cannot
+    change the exit code.
 
     A commit is stopped gently: git gets SIGTERM and a grace period before
     SIGKILL. A second cancel would interrupt that wait and let alr exit with
@@ -327,12 +341,13 @@ def _stop_once(task: asyncio.Task[None]) -> Callable[[], None]:
     """
     stopped = False
 
-    def stop() -> None:
+    def handle(sig: int) -> None:
         nonlocal stopped
         if stopped:
             return
 
         stopped = True
+        stop.signum = sig
         task.cancel()
 
-    return stop
+    return handle

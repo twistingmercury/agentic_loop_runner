@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from alr.tasks import Gate, Task
+from alr.tasks import Gate, RunResult, Task
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,8 @@ class TaskFinished:
 class RunDone:
     error: str | None
     seconds: float
+    result: RunResult = RunResult.COMPLETED
+    exit_code: int = 0
 
 
 Event = (

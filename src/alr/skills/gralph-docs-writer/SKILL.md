@@ -29,14 +29,17 @@ no `abandoned` state. Gralph decides the outcome from the JSON result line the
 shared prompt asks for at the end of the session's output. A missing or invalid
 result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
-task's `prompt`) and resets its `state` to `pending` by hand.
+task's `prompt`) and resets its `state` to `pending` by hand, or runs with
+`--reset-failed`, which sets every failed task back to `pending` at startup.
 
-With `--commit task`, Gralph also commits each task itself: once a task is
-`completed`, it commits what a plain `git add -A` would stage, with the task's
-`name` as the commit message. With `--commit run`, it makes one commit after the
-last task, titled `alr: <n> tasks completed` (`alr: 1 task completed` for one task),
-with the task names listed in the
-body. A failed task is not committed; its changes stay
+With `--commit task`, Gralph also commits each task itself: once a task's
+gates pass, it commits what a plain `git add -A` would stage, with the task's
+`name` as the commit message, and marks the task `completed` only after that
+commit succeeds. If the commit fails, the task is `failed`. With `--commit run`,
+it makes one commit after the last task, titled `alr: <n> tasks completed`
+(`alr: 1 task completed` for one task), with the task names listed in the
+body, and marks the tasks `completed` only after that commit succeeds. A failed
+task is not committed; its changes stay
 in the work tree for a person to sort out. For a committing run the task file
 must be ignored by Git or kept outside the repository; Gralph refuses to start
 otherwise. A sandbox settings file should also be ignored or kept outside, so it does
@@ -79,7 +82,9 @@ authorized.
    are rejected too. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
    IDs are unique and independent of order; Gralph runs tasks in file order.
-   Names are unique ignoring case and surrounding whitespace. `state` is
+   Names are unique ignoring case and surrounding whitespace, and each name is
+   a single line: a line break, or any other control character except a tab, in
+   a name is an error. `state` is
    `pending`, `completed`, or `failed`; leave it empty for new work, which
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
    write it; preserve it if present when updating an existing file. Write no

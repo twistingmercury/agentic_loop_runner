@@ -3,7 +3,9 @@
 import contextlib
 import os
 import re
+import tempfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -14,6 +16,19 @@ from alr.errors import TaskFileError, quote
 PENDING = "pending"
 FAILED = "failed"
 COMPLETED = "completed"
+# Only ever logged, never saved: in `run` mode a task whose gates passed is not
+# complete until the one commit lands.
+PASSED = "passed"
+
+
+class RunResult(StrEnum):
+    """How a run ended, as the run log and the exit code tell it."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    COMMIT_FAILED = "commit_failed"
+    STOPPED = "stopped"
+
 
 _STATES = (PENDING, COMPLETED, FAILED)
 _DURATION_HINT = "must be a duration string such as 90s or 10m"
@@ -39,6 +54,10 @@ _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 # YAML reads these as line breaks and folds them in every style but a
 # double-quoted one, which escapes them.
 _UNICODE_BREAKS = frozenset("\x85\u2028\u2029")
+
+# A name becomes a commit subject in git's argv, where a NUL crashes the call and
+# other control characters garble the log; a tab is ordinary spacing.
+_CONTROL = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f]")
 
 
 @dataclass
@@ -228,6 +247,15 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     task_id = _task_id(i, fields)
     where = _where(i, task_id)
     name = _text(where, fields, "name", required=True)
+
+    # The name becomes a commit subject and a one-line log field; splitlines
+    # knows every Unicode line break, and drops a trailing one, hence the compare.
+    if name.splitlines() != [name]:
+        raise TaskFileError(f"{where}: name: must be a single line")
+
+    if _CONTROL.search(name):
+        raise TaskFileError(f"{where}: name: must not contain control characters")
+
     prompt = _text(where, fields, "prompt", required=True)
     state = _text(where, fields, "state")
     if state != "" and state not in _STATES:
@@ -447,18 +475,36 @@ def save_tasks(path: str, task_list: TaskList) -> None:
         width=float("inf"),
     )
     target = Path(path)
-    tmp = target.with_name(target.name + ".tmp")
     try:
-        _write_file(tmp, text)
-        tmp.replace(target)
+        _replace_with(target, text)
     except OSError as exc:
-        # Only the temporary file is alr's to remove.
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-
         raise TaskFileError(
             f"failed to save tasks to {quote(str(target))}: {exc.strerror}"
         ) from exc
+
+
+def _replace_with(target: Path, text: str) -> None:
+    """Write text beside target and rename it over target.
+
+    The name is unique, so a file of the user's own is never touched. Whatever
+    goes wrong, only that temporary file is removed.
+    """
+    # The task file can hold prompts and commands, so only its owner may read
+    # it; mkstemp makes the file 0o600.
+    fd, name = tempfile.mkstemp(
+        dir=target.parent, prefix=f"{target.name}.", suffix=".tmp"
+    )
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+
+        tmp.replace(target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+        raise
 
 
 class _TaskDumper(yaml.SafeDumper):
@@ -524,10 +570,3 @@ def _task_entry(task: Task) -> dict[str, int | str]:
         entry["error"] = task.error
 
     return entry
-
-
-def _write_file(path: Path, text: str) -> None:
-    # The task file can hold prompts and commands, so only its owner may read it.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        file.write(text)

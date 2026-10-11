@@ -14,15 +14,18 @@ from textual.widgets import Button, Header, Select, Static
 from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
+from alr.engine import proc
 from alr.engine.commit import CommitMode, work_tree_root
-from alr.engine.loop import read_tasks, reset_failed, run
+from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
-from alr.record.events import RunDone, TaskStarted
+from alr.engine.stop import Stop
+from alr.record.events import RunDone, RunResult, TaskStarted
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
     ErrorDialog,
+    error_text,
     FileViewer,
     FolderDialog,
     GatesDialog,
@@ -38,6 +41,8 @@ from alr.tui.settings import Permissions, RunSettings
 
 
 _STOPPED = "stopped"
+# How often a second Stop looks to see whether the first one has finished.
+_STOP_POLL = 0.02
 _NO_RESULT = "the run ended without a result"
 
 
@@ -107,7 +112,12 @@ class AlrApp(App[None]):
         self.settings = settings
         self.state = AppState.SETUP
         self.outcome = ""
+        self.exit_code = 0
+        """What `run_app` returns: the final run's code, 0 when no run ever ended."""
         self._stopping = False
+        self._quitting = False
+        self._stop = Stop()
+        """The one signal object: the SIGTERM handler fills it, the engine and the exit code read it."""
         self._worker: Worker[None] | None = None
         self._started = 0.0
         self._task_list: TaskList | None = None
@@ -171,8 +181,7 @@ class AlrApp(App[None]):
         self.call_after_refresh(self._show_tasks)
         self._refresh()
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, self.action_stop)
-        self._look_for_work_tree()
+        loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
         self.run_worker(self.launch_sequence(), exit_on_error=False)
 
     def _look_for_work_tree(self) -> None:
@@ -217,11 +226,16 @@ class AlrApp(App[None]):
             return
 
     def _open_file(self, tasks_file: str) -> TaskList:
-        """Read a task file, first resetting its failed tasks when --reset-failed asked."""
-        if self.settings.reset_failed:
-            reset_failed(tasks_file)
+        """Read a task file; --reset-failed resets the failed tasks in this copy only.
 
-        return read_tasks(tasks_file)
+        Start saves the reset once its checks pass, so quitting before Start
+        leaves the file as the user wrote it.
+        """
+        task_list = read_tasks(tasks_file)
+        if self.settings.reset_failed:
+            reset_in_memory(task_list)
+
+        return task_list
 
     def _show_tasks(self) -> None:
         """Show the tasks before Start."""
@@ -274,7 +288,7 @@ class AlrApp(App[None]):
                 else check.task_list
             )
         except AlrError as exc:
-            self.push_screen(ErrorDialog(str(exc)))
+            self.push_screen(ErrorDialog(error_text(exc)))
             return
 
         if check.sandbox_file and self.settings.permissions is Permissions.UNSET:
@@ -309,7 +323,7 @@ class AlrApp(App[None]):
             reset_failed(self.settings.tasks_file)
             self._task_list = read_tasks(self.settings.tasks_file)
         except AlrError as exc:
-            self.push_screen(ErrorDialog(str(exc)))
+            self.push_screen(ErrorDialog(error_text(exc)))
             return
 
         self.query_one(TasksPane).load(self._task_list)
@@ -461,9 +475,23 @@ class AlrApp(App[None]):
         self._refresh()
         self._worker = self.run_worker(self._run(), name="run", exit_on_error=False)
 
+    def _on_sigterm(self) -> None:
+        self._stop.signum = signal.SIGTERM
+        # A finished run keeps its own code; with no run going SIGTERM is the whole outcome.
+        if self.state in (AppState.SETUP, AppState.READY):
+            self.exit_code = self._stop.exit_code()
+
+        self.action_stop()
+
     def action_stop(self) -> None:
         # A second Stop quits whatever the run is doing, so nobody is ever trapped.
-        if self.state is not AppState.RUNNING or self._stopping:
+        if self.state is AppState.RUNNING and self._stopping:
+            # The run never reported, and a stopped run must not look like a success.
+            self.exit_code = self._stop.exit_code()
+            self._quit_after_stop()
+            return
+
+        if self.state is not AppState.RUNNING:
             self.exit()
             return
 
@@ -471,13 +499,36 @@ class AlrApp(App[None]):
         if self._worker is not None:
             self._worker.cancel()
 
+    def _quit_after_stop(self) -> None:
+        """Quit once the stop under way is done, so a hook that traps TERM does not outlive alr."""
+        if self._quitting:
+            return
+
+        self._quitting = True
+        self.run_worker(self._exit_when_stopped(), exit_on_error=False)
+
+    async def _exit_when_stopped(self) -> None:
+        """Wait for the run worker to end, for as long as a stop may take, then exit.
+
+        Polled, not awaited with a timeout: cancelling the wait on the worker's
+        task would cancel the task, and with it the stop it is carrying out.
+        """
+        deadline = time.monotonic() + proc.stop_deadline()
+        while self._worker is not None and not self._worker.is_finished:
+            if time.monotonic() > deadline:
+                break
+
+            await asyncio.sleep(_STOP_POLL)
+
+        self.exit()
+
     def action_quit_if_idle(self) -> None:
         if self.state is not AppState.RUNNING:
             self.exit()
 
     async def _run(self) -> None:
         try:
-            prepared = await prepare(self.settings)
+            prepared = await prepare(self.settings, self._stop)
         except asyncio.CancelledError:
             # Stop before the engine started: it never posts a RunDone, so this does.
             self._finish_or_fail(_STOPPED)
@@ -523,6 +574,10 @@ class AlrApp(App[None]):
 
     def _back_to_ready(self, exc: Exception) -> None:
         """A check failed before the run began; show why and let the user try again."""
+        # A stop that landed on this refusal is spent; left set, the next run's first Stop
+        # would count as the second and quit without the graceful cancel.
+        self._stopping = False
+        self._stop.signum = signal.SIGINT
         # READY lets the refresh recompute the state from the settings.
         self.state = AppState.READY
         self._refresh()
@@ -552,7 +607,14 @@ class AlrApp(App[None]):
         if self.state is not AppState.RUNNING:
             return
 
-        self._finish(RunDone(error, time.monotonic() - self._started))
+        # Only the user's Stop is a stop; anything else here is a run that died without a result.
+        if self._stopping:
+            result, exit_code = RunResult.STOPPED, self._stop.exit_code()
+        else:
+            result, exit_code = RunResult.FAILED, 1
+
+        seconds = time.monotonic() - self._started
+        self._finish(RunDone(error, seconds, result, exit_code))
 
     def on_run_event(self, message: RunEvent) -> None:
         # Textual delivers the events queued before an exit after it has taken
@@ -580,6 +642,7 @@ class AlrApp(App[None]):
 
     def _finish(self, event: RunDone) -> None:
         self.state = AppState.FINISHED
+        self.exit_code = event.exit_code
         self.outcome = _outcome(event, self._stopping)
         self._stop_ticking()
         self.query_one("#progress", Static).update("")
@@ -608,7 +671,7 @@ def _permissions_label(permissions: Permissions) -> str:
 def _error_text(exc: BaseException) -> str:
     """Say what went wrong; only a domain error's own text is enough without its type."""
     if isinstance(exc, AlrError):
-        return str(exc)
+        return error_text(exc)
 
     name = type(exc).__name__
     return f"{name}: {exc}" if str(exc) else name
@@ -628,8 +691,8 @@ def _outcome(event: RunDone, stopping: bool) -> str:
 
 
 def run_app(settings: RunSettings) -> int:
-    """Run the view to the end; 0 only when the run finished clean."""
+    """Run the view to the end; it exits with the final run's code, from the table plain mode uses."""
     app = AlrApp(settings)
     # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
     app.run(mouse=False)
-    return 0 if app.outcome == "done" else 1
+    return app.exit_code

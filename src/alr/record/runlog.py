@@ -3,16 +3,18 @@
 It only listens to the run's events; the loop knows nothing about it.
 """
 
+import contextlib
+import errno
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
 from alr.durations import format_duration
-from alr.errors import RunLogError
+from alr.errors import LOG_UNWRITABLE, RefusedError, RunLogError
 from alr.record.events import (
     Activity,
     Committed,
@@ -23,7 +25,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import FAILED, Task
+from alr.tasks import Task
 
 # The record holds Claude's text and whatever a gate or git printed, so it is
 # private to the user.
@@ -41,7 +43,7 @@ class Info:
     permissions: str  # "sandbox" or "skip"
     sandbox_settings: str = ""  # the settings file's path, "" when not passed
     gate_timeout: str = ""  # the --gate-timeout value, "" when not passed
-    commit: bool = False
+    commit: str = "none"  # the requested commit mode: "none", "task", or "run"
 
 
 def run_dir(log_dir: Path, start: datetime) -> Path:
@@ -70,9 +72,26 @@ def _io_error(path: Path, exc: OSError) -> RunLogError:
     return RunLogError(f"{path}: {exc.strerror}")
 
 
-def _create_run_dir(path: Path) -> Path:
+def _missing_parents(path: Path) -> list[Path]:
+    """The folders above path that do not exist yet, nearest first."""
+    missing: list[Path] = []
+    for parent in path.parents:
+        if parent.exists():
+            break
+
+        missing.append(parent)
+
+    return missing
+
+
+def _create_run_dir(path: Path) -> tuple[Path, list[Path]]:
     """Make the run's folder, taking the first free suffixed name when path
-    exists: an existing run folder holds another run's record."""
+    exists: an existing run folder holds another run's record.
+
+    Returns the folder and the parents this call had to create, nearest first,
+    so a discarded log can take them away again.
+    """
+    made = _missing_parents(path)
     try:
         path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
     except OSError as exc:
@@ -90,7 +109,36 @@ def _create_run_dir(path: Path) -> Path:
         except OSError as exc:
             raise _create_error(candidate, exc) from exc
 
-        return candidate
+        return candidate, made
+
+
+def check_writable(path: Path) -> None:
+    """Refuse, as opening the log would, a path whose run folder cannot be made,
+    creating nothing: the dry run must not write, yet must agree with a real run."""
+    ancestor = path.parent
+    while not _present(ancestor) and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+
+    # A symlink that leads nowhere is there, so mkdir cannot make it a folder.
+    if ancestor.is_symlink() and not ancestor.exists():
+        raise _refused_unwritable(path, errno.EEXIST)
+
+    if not ancestor.is_dir():
+        raise _refused_unwritable(path, errno.ENOTDIR)
+
+    if not os.access(ancestor, os.W_OK | os.X_OK):
+        raise _refused_unwritable(path, errno.EACCES)
+
+
+def _present(path: Path) -> bool:
+    """Report whether anything is at path, a symlink that leads nowhere included."""
+    return path.is_symlink() or path.exists()
+
+
+def _refused_unwritable(path: Path, code: int) -> RefusedError:
+    return RefusedError(
+        LOG_UNWRITABLE, str(_create_error(path, OSError(code, os.strerror(code))))
+    )
 
 
 def _create_error(path: Path, exc: OSError) -> RunLogError:
@@ -128,16 +176,24 @@ def _rfc3339(stamp: datetime) -> str:
 
 
 class RunLog:
-    def __init__(self, path: Path, now: Callable[[], datetime]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        now: Callable[[], datetime],
+        made_parents: Sequence[Path] = (),
+    ) -> None:
         self._path = path
+        self._made_parents = tuple(made_parents)
         self._ledger_path = path / _LEDGER_NAME
         self._now = now
         self._ledger: TextIO | None = None
         self._detail: TextIO | None = None
         self._detail_path: Path | None = None
-        # Says the last finished task failed, which is what tells a failed run
-        # from one stopped for any other reason.
-        self._failed = False
+
+    @property
+    def path(self) -> Path:
+        """The run's folder: the name asked for, or its suffixed one when that was taken."""
+        return self._path
 
     @classmethod
     def open(
@@ -148,14 +204,17 @@ class RunLog:
     ) -> "RunLog":
         """Create path, or path-1, path-2 and so on when it exists, and start the
         ledger with the run_started line."""
-        path = _create_run_dir(path)
+        try:
+            path, made_parents = _create_run_dir(path)
+        except RunLogError as exc:
+            raise RefusedError(LOG_UNWRITABLE, str(exc)) from exc
 
-        log = cls(path, now)
+        log = cls(path, now, made_parents)
         try:
             log._start(info)
-        except RunLogError:
-            log.close()
-            raise
+        except RunLogError as exc:
+            log.discard()
+            raise RefusedError(LOG_UNWRITABLE, str(exc)) from exc
 
         return log
 
@@ -206,6 +265,26 @@ class RunLog:
         finally:
             _close(ledger, self._ledger_path)
 
+    def discard(self) -> None:
+        """Close the record and remove the run folder this log made, and the
+        parent folders it had to create for it.
+
+        For a run that was refused after the log opened. Only this log's own
+        ledger is deleted, and each folder only if nothing else is in it.
+        """
+        # The record is being thrown away, so a failing close has nothing to lose.
+        with contextlib.suppress(RunLogError):
+            self.close()
+
+        # rmdir refuses a folder that holds anything, so it cannot delete more
+        # than this log made. Cleanup is best effort: the caller is already
+        # raising the real error, and a leftover must not replace it.
+        with contextlib.suppress(OSError):
+            self._ledger_path.unlink(missing_ok=True)
+            self._path.rmdir()
+            for parent in self._made_parents:
+                parent.rmdir()
+
     def _write_ledger(self, event: str, fields: dict[str, Any]) -> None:
         line = {"time": _rfc3339(self._now()), "event": event, **fields}
         text = json.dumps(line, separators=(",", ":"), ensure_ascii=False) + "\n"
@@ -219,7 +298,6 @@ class RunLog:
         detail_path = self._path / f"task-{event.task.id}.log"
         self._detail = _open_append(detail_path)
         self._detail_path = detail_path
-        self._failed = False
         self._write_ledger(
             "task_started", {"task": event.task.id, "name": event.task.name}
         )
@@ -269,16 +347,16 @@ class RunLog:
         )
 
     def _task_finished(self, event: TaskFinished) -> None:
-        self._failed = event.task.state == FAILED
         self._step_finished("task_finished", event.task, event.seconds)
         detail, self._detail = self._detail, None
         _close(detail, self._detail_path or self._path)
 
     def _run_done(self, event: RunDone) -> None:
-        fields: dict[str, Any] = {"result": _run_result(event.error, self._failed)}
+        fields: dict[str, Any] = {"result": event.result.value}
         if event.error:
             fields["error"] = event.error
 
+        fields["exit"] = event.exit_code
         fields["duration"] = format_duration(event.seconds)
         self._write_ledger("run_finished", fields)
 
@@ -291,10 +369,3 @@ def _gate_result(event: GateFinished) -> str:
         return "failed"
 
     return "passed"
-
-
-def _run_result(error: str | None, failed: bool) -> str:
-    if error is None:
-        return "completed"
-
-    return "failed" if failed else "stopped"

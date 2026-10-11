@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from alr.engine.sandbox import folder_sandbox, sandbox_args
-from alr.errors import SandboxError
+from alr.errors import RefusedError
 
 FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
 
@@ -98,9 +98,10 @@ def test_sandbox_args_forces_sandbox_keys(
 def test_sandbox_args_rejects_bad_files(
     tmp_path: Path, content: str, want_error: str
 ) -> None:
-    with pytest.raises(SandboxError) as excinfo:
+    with pytest.raises(RefusedError) as excinfo:
         sandbox_args(str(_write_settings(tmp_path, content)))
 
+    assert excinfo.value.reason == "invalid-sandbox-settings"
     assert want_error in str(excinfo.value)
 
 
@@ -108,9 +109,10 @@ def test_sandbox_args_rejects_bad_files(
 def test_sandbox_args_unreadable_path(tmp_path: Path, name: str) -> None:
     path = str(tmp_path / name)
 
-    with pytest.raises(SandboxError) as excinfo:
+    with pytest.raises(RefusedError) as excinfo:
         sandbox_args(path)
 
+    assert excinfo.value.reason == "invalid-sandbox-settings"
     assert "--sandbox-settings" in str(excinfo.value)
     assert path in str(excinfo.value)
 

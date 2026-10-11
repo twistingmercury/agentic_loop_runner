@@ -59,7 +59,7 @@ def test_loop_signal_kills_process_tree(
         process.send_signal(sig)
         out, err = process.communicate(timeout=10)
 
-        assert process.returncode == 1, (out, err)
+        assert process.returncode == 128 + sig, (out, err)
         assert "error: loop error: task 1: First task: stopped\n" in err
         assert "Traceback" not in err
         assert tasks_path.read_text(encoding="utf-8") == TASKS_YAML
@@ -106,7 +106,7 @@ def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
         # Well before the sleeper exits, so a hang fails here.
         out, err = process.communicate(timeout=3)
 
-        assert process.returncode == 1, (out, err)
+        assert process.returncode == 130, (out, err)
         assert "error: loop error: task 1: First task: stopped\n" in err
         assert "Traceback" not in err
         assert tasks_path.read_text(encoding="utf-8") == TASKS_YAML

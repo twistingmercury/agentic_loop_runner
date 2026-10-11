@@ -90,15 +90,15 @@ def test_loop_failed_task_refuses_to_run(tmp_path: Path, fake_claude: Path) -> N
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
-    assert res.code == 1, res
+    assert res.code == 3, res
     assert "Some tasks failed previous runs:\n" in res.out
     assert "   1  PENDING    First task\n" in res.out
     assert (
         "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n"
         in res.out
     )
-    assert (
-        "fix the failed tasks and set their state to pending before running" in res.err
+    assert res.err.startswith(
+        "error: refused: failed-tasks: fix the failed tasks and set their state to pending before running\n"
     )
     assert fake_claude_records(record_file) == []
     assert tasks_path.read_text(encoding="utf-8") == tasks_yaml
@@ -210,8 +210,8 @@ def assert_startup_failure(tmp_path: Path, tasks: str, want: str) -> None:
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
-    assert res.code != 0, res
-    assert "failed to start loop runner" in res.err
+    assert res.code == 3, res
+    assert "error: refused: invalid-task-file: failed to start loop runner" in res.err
     assert want in res.err
     assert fake_claude_records(record_file) == []
 

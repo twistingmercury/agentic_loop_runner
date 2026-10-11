@@ -61,7 +61,7 @@ def test_dir_missing_tasks_file(tmp_path: Path, fake_claude: Path) -> None:
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
 
-    assert res.code == 1, res
+    assert res.code == 2, res
     assert res.err == f"error: --dir: no tasks.yaml in {folder}\n"
     assert fake_claude_records(record_file) == []
 
