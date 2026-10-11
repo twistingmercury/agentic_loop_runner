@@ -1338,6 +1338,63 @@ async def test_a_second_stop_while_checking_head_still_saves_the_landed_commit(
     assert _saved_states(tasks_file) == [(COMPLETED, "")]
 
 
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_stop_while_reading_head_after_the_commit_still_saves_the_task(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _gated_task(_work_gate("one.txt"))
+    _save_first(task_list, tasks_file)
+    real_head = loop.head
+    reading = asyncio.Event()
+    lookups: list[None] = []
+
+    async def hold_the_read_after_the_commit(repo: Repo) -> str | None:
+        # The first call is the one before the commit, the second the read after
+        # it, held open so the stop arrives once the commit has landed.
+        lookups.append(None)
+        if len(lookups) == 2:
+            reading.set()
+            await asyncio.sleep(3600)
+
+        return await real_head(repo)
+
+    monkeypatch.setattr(loop, "head", hold_the_read_after_the_commit)
+    run = asyncio.ensure_future(
+        run_loop(task_list, tasks_file, repo=await _open(tasks_file))
+    )
+    await asyncio.wait_for(reading.wait(), 10)
+
+    run.cancel()
+    with pytest.raises(RunCancelledError, match="stopped during commit"):
+        await asyncio.wait_for(run, 10)
+
+    assert _saved_states(tasks_file) == [(COMPLETED, "")]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_task_that_changed_nothing_and_cannot_be_saved_names_no_commit(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _gated_task()
+    _save_first(task_list, tasks_file)
+
+    def refuse_to_save(path: str, task_list: TaskList) -> None:
+        raise TaskFileError(f"failed to save tasks to {path}: disk full")
+
+    monkeypatch.setattr(loop, "save_tasks", refuse_to_save)
+
+    with pytest.raises(RunError) as caught:
+        await run_loop(task_list, tasks_file, repo=await _open(tasks_file))
+
+    # No commit was made, so HEAD is not a commit this run landed.
+    assert not isinstance(caught.value, CommitFailedError)
+    assert caught.value.exit_code == 1
+    assert "tasks.yaml was not updated" not in str(caught.value)
+    assert "failed to save task state" in str(caught.value)
+
+
 class _EndingFrontEnd(PlainFrontEnd):
     """Notes how the run ended: its result and the exit code alr will return."""
 
