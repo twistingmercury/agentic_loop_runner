@@ -8,8 +8,9 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from helpers import (
@@ -327,6 +328,31 @@ async def test_a_broken_repository_is_refused_with_git_error(git_repo: Path) -> 
 
     assert caught.value.reason == "git-error"
     assert str(caught.value).startswith("refused: git-error: --commit: git rev-parse: ")
+
+
+async def test_a_git_dir_git_cannot_name_is_refused_with_git_error(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_capture = proc.capture
+
+    async def failing_for_the_git_dir(
+        argv: Sequence[str], **kwargs: Any
+    ) -> tuple[int, str, str]:
+        if "--absolute-git-dir" in argv:
+            return 128, "", "fatal: no git dir for you\n"
+
+        return await real_capture(argv, **kwargs)
+
+    monkeypatch.setattr(proc, "capture", failing_for_the_git_dir)
+
+    with pytest.raises(RefusedError) as caught:
+        await find_repo(str(_task_file(git_repo)))
+
+    assert caught.value.reason == "git-error"
+    assert str(caught.value) == (
+        "refused: git-error: --commit: git rev-parse: no git dir for you"
+    )
+    assert list(git_repo.rglob("alr.lock")) == []
 
 
 async def test_ignored_refuses_with_git_error_when_check_ignore_fails(
