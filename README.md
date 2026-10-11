@@ -122,7 +122,7 @@ The reason is one of:
 | `invalid-task-file`        | The task file cannot be read or is not valid                                          |
 | `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                                    |
 | `log-unwritable`           | The run log folder cannot be created or opened                                        |
-| `task-file-unwritable`     | `--reset-failed` could not save the task file                                         |
+| `task-file-unwritable`     | A save at startup failed: the `--reset-failed` reset, or edited gates in the view     |
 | `git-error`                | git failed while alr looked at the repository                                         |
 
 A failed commit's reason is the first line of git's (or the hook's) output, in the task's
