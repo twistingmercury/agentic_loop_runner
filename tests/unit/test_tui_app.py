@@ -130,7 +130,7 @@ async def test_a_clean_run_finishes_done_with_a_summary(git_repo: Path) -> None:
             "Second",
             "First",
         ]
-        assert app.screen.query("#close")
+        await until(lambda: app.screen.query("#close"))
 
 
 @pytest.mark.usefixtures("fake_claude")
