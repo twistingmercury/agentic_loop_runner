@@ -2,6 +2,7 @@
 
 import sys
 from collections.abc import Sequence
+from contextlib import ExitStack
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -44,11 +45,37 @@ async def start(
     repository checks have passed. The reset reaches the disk only after the
     run log has opened, so a refused run changes nothing on disk.
     Every run is logged in a new folder under logs/ beside the task file.
+    A run that commits holds the repository's commit lock until it is over,
+    however it ends, and another such run is refused while it does.
     """
+    with ExitStack() as locks:
+        await _start_locked(
+            tasks_file,
+            gate_timeout,
+            session_args,
+            commit,
+            reset,
+            sandbox_settings,
+            stop or Stop(),
+            locks,
+        )
+
+
+async def _start_locked(
+    tasks_file: str,
+    gate_timeout: str,
+    session_args: Sequence[str],
+    commit: CommitMode,
+    reset: bool,
+    sandbox_settings: str,
+    stop: Stop,
+    locks: ExitStack,
+) -> None:
+    """Run start's steps; the commit lock, once taken, goes on locks."""
     task_list = _read_for_start(tasks_file)
     commits = commit is not CommitMode.NONE
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
-    repo = await repo_for(sys.stdout, tasks_file, commits, str(path))
+    repo = await repo_for(sys.stdout, tasks_file, commits, str(path), locks)
     reset_count = reset_in_memory(task_list) if reset else 0
     refuse_failed_report(sys.stdout, task_list)
     info = _info(tasks_file, gate_timeout, sandbox_settings, commit)
@@ -65,7 +92,7 @@ async def start(
             repo,
             commit,
             log,
-            stop or Stop(),
+            stop,
         )
     finally:
         log.close()

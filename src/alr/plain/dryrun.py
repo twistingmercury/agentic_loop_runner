@@ -21,7 +21,7 @@ async def dry_run(
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
     # Held back so its note lands after the gate lines, where it always was.
     repo_notes = io.StringIO()
-    repo = await repo_for(repo_notes, tasks_file, commit, str(path))
+    repo = await repo_for(repo_notes, tasks_file, commit, str(path), None)
     refuse_failed_report(out, task_list)
     check_writable(path)
     print_tasks(out, task_list)

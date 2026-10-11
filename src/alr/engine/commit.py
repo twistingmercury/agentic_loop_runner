@@ -1,7 +1,9 @@
 """--commit: check the repository before a run, and commit each completed task's work."""
 
+import fcntl
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -12,6 +14,7 @@ from alr.engine.gates import first_line
 from alr.errors import (
     DIRTY_TREE,
     GIT_ERROR,
+    LOCKED,
     LOG_FOLDER_VISIBLE,
     TASK_FILE_VISIBLE,
     RefusedError,
@@ -21,6 +24,9 @@ from alr.tasks import Task
 # What git says when the working directory has no work tree: no repository at
 # all, or a bare repository or .git directory.
 _NOT_A_REPO = ("not a git repository", "must be run in a work tree")
+
+_LOCK_NAME = "alr.lock"
+_LOCKED_MESSAGE = "another alr run is committing in this repository"
 
 
 class CommitMode(StrEnum):
@@ -37,6 +43,9 @@ class Repo:
 
     root: str
     """The work tree's top-level directory."""
+
+    git_dir: str
+    """The absolute git directory; a linked worktree has its own, and so its own commit lock."""
 
 
 async def open_repo(tasks_file: str) -> Repo | None:
@@ -65,9 +74,45 @@ async def find_repo(tasks_file: str) -> Repo | None:
     if not root:
         return None
 
-    repo = Repo(root=root)
+    repo = Repo(root=root, git_dir=await _find_git_dir(root))
     await _check_task_file(repo, tasks_file)
     return repo
+
+
+@contextmanager
+def held_lock(repo: Repo | None) -> Iterator[None]:
+    """Hold the repository's commit lock for the whole run, or refuse when another run has it.
+
+    flock, not a file that exists or not: the kernel drops the lock when alr
+    dies, however it dies, so a killed run never leaves a stuck lock behind,
+    and the file a finished run leaves is no lock at all. The descriptor is
+    not inherited, so git and the sessions never keep the lock alive.
+    """
+    if repo is None:
+        yield
+        return
+
+    fd = _lock(_lock_path(repo), os.O_CREAT, fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        os.close(fd)
+
+
+def check_unlocked(repo: Repo | None) -> None:
+    """Refuse like held_lock when another run holds the lock, without keeping it.
+
+    Read-only, as a dry run writes nothing: no lock file is made, and the
+    lock taken is shared, so two dry runs never refuse each other.
+    """
+    if repo is None:
+        return
+
+    path = _lock_path(repo)
+    if not path.exists():
+        return
+
+    os.close(_lock(path, 0, fcntl.LOCK_SH))
 
 
 async def check_log_dir(repo: Repo | None, run_dir: str) -> None:
@@ -184,6 +229,51 @@ async def _find_root() -> str | None:
     raise RefusedError(
         GIT_ERROR, f"--commit: git rev-parse: {_git_message(returncode, stderr)}"
     )
+
+
+async def _find_git_dir(root: str) -> str:
+    """Return the absolute git directory of the work tree at root."""
+    returncode, stdout, stderr = await proc.capture(
+        ["git", "rev-parse", "--absolute-git-dir"], cwd=root, gentle=True
+    )
+    if returncode != 0:
+        raise RefusedError(
+            GIT_ERROR, f"--commit: git rev-parse: {_git_message(returncode, stderr)}"
+        )
+
+    return stdout.strip()
+
+
+def _lock_path(repo: Repo) -> Path:
+    return Path(repo.git_dir) / _LOCK_NAME
+
+
+def _lock(path: Path, flags: int, operation: int) -> int:
+    """Open the lock file and flock it without waiting; return the descriptor, which holds the lock.
+
+    Opened read-only: flock does not need write access, so a second user of a
+    shared repository can lock the file the first one made.
+    """
+    try:
+        fd = os.open(path, flags | os.O_RDONLY, 0o666)
+    except OSError as exc:
+        raise _unusable(path, exc) from exc
+
+    try:
+        fcntl.flock(fd, operation | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise RefusedError(LOCKED, _LOCKED_MESSAGE) from None
+    except OSError as exc:
+        os.close(fd)
+        raise _unusable(path, exc) from exc
+
+    return fd
+
+
+def _unusable(path: Path, exc: OSError) -> RefusedError:
+    """Say that alr cannot use the lock file, which it cannot tell from a git failure."""
+    return RefusedError(GIT_ERROR, f"--commit: cannot lock {path}: {exc.strerror}")
 
 
 def _git_message(returncode: int, stderr: str) -> str:

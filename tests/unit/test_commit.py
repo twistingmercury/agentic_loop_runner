@@ -1,8 +1,11 @@
 """--commit: the repository checks before a run and the commit after each completed task."""
 
 import asyncio
+import fcntl
 import os
 import signal
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +17,7 @@ from helpers import (
     git,
     run_loop,
     until,
+    wait_for_file,
     wait_for_text,
     write_nested_file,
 )
@@ -26,7 +30,10 @@ from alr.engine.commit import (
     CommitMode,
     Repo,
     check_log_dir,
+    check_unlocked,
+    find_repo,
     head,
+    held_lock,
     open_repo,
     work_tree_root,
 )
@@ -67,6 +74,11 @@ def _ignore_and_commit(repo: Path, *patterns: str) -> None:
 def _task_file(repo: Path) -> Path:
     """Where tests keep the task file: inside the ignored run/."""
     return repo / "run" / "tasks.yaml"
+
+
+def _repo_of(path: Path) -> Repo:
+    """The Repo a run finds in path, whose git directory is its own .git."""
+    return Repo(root=str(path), git_dir=str(path / ".git"))
 
 
 def _break_config(repo: Path) -> None:
@@ -265,7 +277,7 @@ def _unseen_relative(repo: Path, outside: Path) -> str:
 async def test_open_repo_task_file_ignored_or_outside_is_accepted(
     git_repo: Path, outside: Path, setup: Callable[[Path, Path], str]
 ) -> None:
-    assert await open_repo(setup(git_repo, outside)) == Repo(root=str(git_repo))
+    assert await open_repo(setup(git_repo, outside)) == _repo_of(git_repo)
 
 
 async def test_open_repo_task_file_reached_through_a_symlinked_directory(
@@ -302,7 +314,7 @@ async def test_open_repo_from_subdirectory_checks_the_task_file_from_the_root(
     sub.mkdir()
     monkeypatch.chdir(sub)
 
-    assert await open_repo(str(_task_file(git_repo))) == Repo(root=str(git_repo))
+    assert await open_repo(str(_task_file(git_repo))) == _repo_of(git_repo)
 
 
 async def test_a_broken_repository_is_refused_with_git_error(git_repo: Path) -> None:
@@ -1608,7 +1620,7 @@ async def test_a_stop_in_the_commit_step_with_head_unreadable_saves_nothing(
 
 
 async def test_head_names_the_commit_head_points_at(git_repo: Path) -> None:
-    repo = Repo(root=str(git_repo))
+    repo = _repo_of(git_repo)
 
     assert await head(repo) == git(git_repo, "rev-parse", "HEAD").strip()
 
@@ -1618,13 +1630,13 @@ async def test_head_is_none_in_a_repository_with_no_commits(
 ) -> None:
     git(outside, "init", "--quiet", "--initial-branch=main")
 
-    assert await head(Repo(root=str(outside))) is None
+    assert await head(_repo_of(outside)) is None
 
 
 async def test_head_is_none_when_git_fails(git_repo: Path) -> None:
     _break_config(git_repo)
 
-    assert await head(Repo(root=str(git_repo))) is None
+    assert await head(_repo_of(git_repo)) is None
 
 
 async def test_head_is_none_when_git_is_not_installed(
@@ -1632,7 +1644,7 @@ async def test_head_is_none_when_git_is_not_installed(
 ) -> None:
     monkeypatch.setenv("PATH", "")
 
-    assert await head(Repo(root=str(git_repo))) is None
+    assert await head(_repo_of(git_repo)) is None
 
 
 async def test_work_tree_root_names_the_repository(git_repo: Path) -> None:
@@ -1646,3 +1658,185 @@ async def test_work_tree_root_outside_a_repository_is_none(
     monkeypatch.chdir(outside)
 
     assert await work_tree_root() is None
+
+
+async def test_find_repo_names_the_absolute_git_directory(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    assert repo == _repo_of(git_repo)
+
+
+async def test_a_second_lock_is_refused(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            with held_lock(repo):
+                pass
+
+    assert caught.value.reason == "locked"
+    assert str(caught.value) == (
+        "refused: locked: another alr run is committing in this repository"
+    )
+
+
+async def test_the_lock_is_released_on_exit(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    with held_lock(repo):
+        pass
+
+    with held_lock(repo):
+        pass
+
+
+async def test_the_lock_is_released_when_the_run_raises(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    with pytest.raises(RunError):
+        with held_lock(repo):
+            raise RunError("the run failed")
+
+    with held_lock(repo):
+        pass
+
+
+async def test_no_repository_needs_no_lock() -> None:
+    with held_lock(None):
+        with held_lock(None):
+            pass
+
+
+async def test_a_stale_lock_file_does_not_block(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+    Path(repo.git_dir, "alr.lock").write_text("left by a killed alr", encoding="utf-8")
+
+    with held_lock(repo):
+        pass
+
+
+_LOCK_HOLDER = """
+import asyncio, pathlib, sys
+from alr.engine.commit import find_repo, held_lock
+
+async def main():
+    repo = await find_repo(sys.argv[1])
+    with held_lock(repo):
+        pathlib.Path(sys.argv[2]).write_text("held")
+        await asyncio.sleep(60)
+
+asyncio.run(main())
+"""
+
+
+async def test_a_killed_run_leaves_no_stuck_lock(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    tasks_file = str(_task_file(git_repo))
+    ready = tmp_path / "ready"
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER, tasks_file, str(ready)]
+    )
+    try:
+        wait_for_file(ready)
+        repo = await find_repo(tasks_file)
+        with pytest.raises(RefusedError) as caught:
+            check_unlocked(repo)
+
+        assert caught.value.reason == "locked", "the other process holds it"
+    finally:
+        holder.kill()
+        holder.wait()
+
+    with held_lock(repo):
+        pass
+
+
+async def test_a_linked_worktree_finds_its_own_lock_location(
+    git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmp_path.resolve() / "wt"
+    git(git_repo, "worktree", "add", "-q", str(worktree))
+    (worktree / "run").mkdir()
+    monkeypatch.chdir(worktree)
+    repo = await find_repo(str(worktree / "run" / "tasks.yaml"))
+    assert repo is not None
+
+    with held_lock(repo):
+        pass
+
+    assert (worktree / ".git").is_file(), "a linked worktree's .git is a file"
+    assert Path(repo.git_dir) == git_repo / ".git" / "worktrees" / "wt"
+    assert (Path(repo.git_dir) / "alr.lock").exists()
+
+
+async def test_a_lock_that_cannot_be_opened_is_refused_with_git_error(
+    git_repo: Path,
+) -> None:
+    repo = Repo(root=str(git_repo), git_dir=str(git_repo / "no" / "such" / "dir"))
+
+    with pytest.raises(RefusedError) as caught:
+        with held_lock(repo):
+            pass
+
+    assert caught.value.reason == "git-error"
+    assert "alr.lock" in caught.value.message
+
+
+async def test_check_unlocked_passes_when_nothing_holds_the_lock(
+    git_repo: Path,
+) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    check_unlocked(repo)
+    check_unlocked(None)
+
+
+async def test_check_unlocked_passes_over_a_stale_lock_file(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+    Path(repo.git_dir, "alr.lock").write_text("left by a killed alr", encoding="utf-8")
+
+    check_unlocked(repo)
+
+
+async def test_check_unlocked_refuses_while_another_run_holds_the_lock(
+    git_repo: Path,
+) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            check_unlocked(repo)
+
+    assert caught.value.reason == "locked"
+
+
+async def test_check_unlocked_does_not_keep_the_lock(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+    # The file must exist, or there is nothing for the check to lock.
+    Path(repo.git_dir, "alr.lock").write_text("", encoding="utf-8")
+
+    check_unlocked(repo)
+
+    with held_lock(repo):
+        pass
+
+
+async def test_check_unlocked_is_not_refused_by_another_check(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+    Path(repo.git_dir, "alr.lock").write_text("", encoding="utf-8")
+    holder = os.open(Path(repo.git_dir, "alr.lock"), os.O_RDONLY)
+    fcntl.flock(holder, fcntl.LOCK_SH)
+
+    try:
+        check_unlocked(repo)
+    finally:
+        os.close(holder)
+
+
+async def test_check_unlocked_writes_nothing(git_repo: Path) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+
+    check_unlocked(repo)
+
+    assert not (Path(repo.git_dir) / "alr.lock").exists()

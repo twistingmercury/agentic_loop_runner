@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from helpers import write_file, write_nested_file
 
+from alr.engine.commit import find_repo, held_lock
 from alr.errors import FailedTasksError, RefusedError
 from alr.plain.dryrun import dry_run
 
@@ -369,3 +370,70 @@ async def test_dry_run_creates_no_log_folder(tmp_path: Path) -> None:
     await _dry_run(tasks_file)
 
     assert not (tmp_path / "logs").exists()
+
+
+async def test_dry_run_commit_refuses_while_another_run_holds_the_lock(
+    git_repo: Path, outside: Path
+) -> None:
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    out = io.StringIO()
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            await dry_run(out, tasks_file, "", "", True)
+
+    assert caught.value.reason == "locked"
+    assert out.getvalue() == ""
+
+
+async def test_dry_run_commit_tells_the_lock_before_a_dirty_tree(
+    git_repo: Path, outside: Path
+) -> None:
+    # A run holding the lock leaves the tree dirty, as the real run's order says.
+    (git_repo / "stray.txt").write_text("the other run's work\n", encoding="utf-8")
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            await _dry_run(tasks_file, commit=True)
+
+    assert caught.value.reason == "locked"
+
+
+async def test_dry_run_without_commit_ignores_a_held_lock(
+    git_repo: Path, outside: Path
+) -> None:
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    with held_lock(repo):
+        assert (await _dry_run(tasks_file)).endswith(f"{tasks_file} is valid\n")
+
+
+async def test_dry_run_commit_leaves_the_lock_free_and_writes_no_lock_file(
+    git_repo: Path, outside: Path
+) -> None:
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    await _dry_run(tasks_file, commit=True)
+
+    assert not (git_repo / ".git" / "alr.lock").exists(), "a dry run writes nothing"
+    with held_lock(repo):
+        pass
+
+
+async def test_dry_run_commit_leaves_the_lock_free_when_it_refuses(
+    git_repo: Path, outside: Path
+) -> None:
+    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+    tasks_file = write_file(outside / "tasks.yaml", ONE_TASK_YAML)
+    repo = await find_repo(tasks_file)
+
+    with pytest.raises(RefusedError):
+        await _dry_run(tasks_file, commit=True)
+
+    with held_lock(repo):
+        pass

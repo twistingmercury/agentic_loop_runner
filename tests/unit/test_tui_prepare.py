@@ -1,12 +1,13 @@
 """prepare: the checks a run starts with, run again on Start, and nothing written before they pass."""
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from helpers import block_saving, write_file, write_nested_file
 
-from alr.engine.commit import CommitMode, Repo, find_repo
+from alr.engine.commit import CommitMode, Repo, find_repo, held_lock
 from alr.engine.stop import Stop
 from alr.errors import FailedTasksError, RefusedError, RunLogError
 from alr.record.runlog import RunLog
@@ -48,6 +49,7 @@ async def test_prepare_returns_the_options_for_a_valid_setup(git_repo: Path) -> 
     assert prepared.options.commit_mode is CommitMode.RUN
     assert prepared.options.repo is not None
     assert prepared.log is None
+    prepared.close()
 
 
 def _outside_settings(
@@ -420,3 +422,126 @@ async def test_prepare_refuses_a_failed_task_after_the_repository_checks(
     assert dirty.value.reason == "dirty-tree"
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
     assert not (git_repo / "run" / "logs").exists()
+
+
+@pytest.mark.parametrize("mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_prepare_refuses_while_another_run_holds_the_lock(
+    git_repo: Path, mode: CommitMode
+) -> None:
+    settings = _settings(
+        git_repo, gates=[Gate(cmd="true")], logging=True, commit_mode=mode
+    )
+    before = Path(settings.tasks_file).read_text(encoding="utf-8")
+    repo = await find_repo(settings.tasks_file)
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            await prepare(settings)
+
+    assert caught.value.reason == "locked"
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == before
+    assert not (git_repo / "run" / "logs").exists(), "a refusal writes no run log"
+
+
+async def test_prepare_tells_the_lock_before_a_dirty_tree(git_repo: Path) -> None:
+    settings = _settings(git_repo, commit_mode=CommitMode.TASK)
+    (git_repo / "stray.txt").write_text("the other run's work", encoding="utf-8")
+    repo = await find_repo(settings.tasks_file)
+
+    with held_lock(repo):
+        with pytest.raises(RefusedError) as caught:
+            await prepare(settings)
+
+    assert caught.value.reason == "locked"
+
+
+async def test_a_run_without_commits_never_takes_the_lock(git_repo: Path) -> None:
+    settings = _settings(git_repo, commit_mode=CommitMode.NONE)
+    repo = await find_repo(settings.tasks_file)
+
+    prepared = await prepare(settings)
+
+    with held_lock(repo):
+        pass
+
+    prepared.close()
+
+
+async def test_prepared_holds_the_lock_until_it_is_closed(git_repo: Path) -> None:
+    settings = _settings(git_repo, logging=True, commit_mode=CommitMode.RUN)
+    repo = await find_repo(settings.tasks_file)
+
+    prepared = await prepare(settings)
+
+    with pytest.raises(RefusedError) as caught:
+        with held_lock(repo):
+            pass
+
+    assert caught.value.reason == "locked"
+    prepared.close()
+    with held_lock(repo):
+        pass
+
+
+async def test_closing_a_prepared_run_twice_is_harmless(git_repo: Path) -> None:
+    settings = _settings(git_repo, logging=True, commit_mode=CommitMode.RUN)
+    repo = await find_repo(settings.tasks_file)
+    prepared = await prepare(settings)
+
+    prepared.close()
+    prepared.close()
+
+    with held_lock(repo):
+        pass
+
+
+async def test_a_refused_prepare_releases_the_lock(git_repo: Path) -> None:
+    settings = _settings(git_repo, commit_mode=CommitMode.TASK)
+    (git_repo / "stray.txt").write_text("x", encoding="utf-8")
+    repo = await find_repo(settings.tasks_file)
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "dirty-tree"
+    with held_lock(repo):
+        pass
+
+
+async def test_a_refused_save_releases_the_lock_and_removes_the_log_folder(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(
+        git_repo, gates=[Gate(cmd="true")], logging=True, commit_mode=CommitMode.RUN
+    )
+    repo = await find_repo(settings.tasks_file)
+    block_saving(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert not (git_repo / "run" / "logs").exists()
+    with held_lock(repo):
+        pass
+
+
+async def test_a_stop_during_prepare_releases_the_lock(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def stopped(repo: Repo) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(prepare_module, "check_clean", stopped)
+    settings = _settings(git_repo, commit_mode=CommitMode.TASK)
+    repo = await find_repo(settings.tasks_file)
+
+    # Kept, because dropping the exception would free the lock's frame, and
+    # with it the lock, whether or not prepare released it.
+    with pytest.raises(asyncio.CancelledError) as stopped_run:
+        await prepare(settings)
+
+    with held_lock(repo):
+        pass
+
+    assert stopped_run.type is asyncio.CancelledError

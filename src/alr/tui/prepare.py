@@ -1,12 +1,20 @@
 """What Start does before a run: the startup checks again, then the saves."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from contextlib import ExitStack
+from dataclasses import dataclass, field
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from alr.engine.commit import CommitMode, Repo, check_clean, check_log_dir, find_repo
+from alr.engine.commit import (
+    CommitMode,
+    Repo,
+    check_clean,
+    check_log_dir,
+    find_repo,
+    held_lock,
+)
 from alr.engine.loop import (
     RunOptions,
     read_tasks,
@@ -29,6 +37,8 @@ class Prepared:
     task_list: TaskList
     options: RunOptions
     log: RunLog | None = None
+    locks: ExitStack = field(default_factory=ExitStack)
+    """What the run holds until close: the repository's commit lock, for a run that commits."""
 
     @property
     def record(self) -> Callable[[Event], None] | None:
@@ -37,6 +47,8 @@ class Prepared:
     def close(self) -> None:
         if self.log is not None:
             self.log.close()
+
+        self.locks.close()
 
     def discard(self) -> None:
         """Close the log and remove its folder, for a run refused after the log opened."""
@@ -51,10 +63,23 @@ async def prepare(settings: RunSettings, stop: Stop | None = None) -> Prepared:
     and the repository can change meanwhile, so the checks run again here on
     the values the run will use. The run's `RunOptions` carry `stop`, the
     app's own object, so the engine reports the signal the app was given; the
-    default is for callers that handle no signals.
+    default is for callers that handle no signals. A run that commits holds the
+    repository's commit lock from here until `Prepared.close`; a refusal, or
+    any other way out of this function, releases it.
     """
+    locks = ExitStack()
+    try:
+        return await _prepare(settings, stop, locks)
+    except BaseException:
+        locks.close()
+        raise
+
+
+async def _prepare(
+    settings: RunSettings, stop: Stop | None, locks: ExitStack
+) -> Prepared:
     task_list = read_tasks(settings.tasks_file)
-    repo = await _find_repo(settings)
+    repo = await _find_repo(settings, locks)
     session_args = settings.session_args()
     log_path = await _check_log_folder(settings, repo)
     # After the log folder, so a tree dirty only with it is told to ignore it.
@@ -74,7 +99,7 @@ async def prepare(settings: RunSettings, stop: Stop | None = None) -> Prepared:
         stop=Stop() if stop is None else stop,
     )
     log = None if log_path is None else _open_log(settings, log_path)
-    prepared = Prepared(task_list, options, log)
+    prepared = Prepared(task_list, options, log, locks)
     # After the log opens, so a check or the log failing never leaves the task file rewritten.
     try:
         _save_changes(settings, task_list, reset_count)
@@ -85,12 +110,19 @@ async def prepare(settings: RunSettings, stop: Stop | None = None) -> Prepared:
     return prepared
 
 
-async def _find_repo(settings: RunSettings) -> Repo | None:
-    """Look at the repository only when the run commits; with none git is never touched."""
+async def _find_repo(settings: RunSettings, locks: ExitStack) -> Repo | None:
+    """Look at the repository only when the run commits; with none git is never touched.
+
+    The commit lock is taken before any check that reads the tree: a run that
+    holds it leaves the tree dirty, and the second run is to be told it is
+    locked out.
+    """
     if settings.commit_mode is CommitMode.NONE:
         return None
 
-    return await find_repo(settings.tasks_file)
+    repo = await find_repo(settings.tasks_file)
+    locks.enter_context(held_lock(repo))
+    return repo
 
 
 async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | None:
