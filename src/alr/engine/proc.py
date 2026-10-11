@@ -13,6 +13,8 @@ from subprocess import DEVNULL
 # exited. Tests patch it to stay fast.
 _GENTLE_GRACE = 2.0
 _GENTLE_POLL = 0.01
+# What a stop may take beyond the grace period: the SIGKILL and the wait for the exit.
+_KILL_SLACK = 1.0
 # How often to look at the exit code when waiting on the process does not wake
 # up; see _wait_for_exit.
 _EXIT_POLL = 0.1
@@ -197,6 +199,11 @@ async def _finish_drain(
         await asyncio.wait_for(drain, _GENTLE_GRACE)
     except TimeoutError:
         _close_transport(process)
+
+
+def stop_deadline() -> float:
+    """Return how long a stop of the group may take: the grace period, then the kill."""
+    return _GENTLE_GRACE + _KILL_SLACK
 
 
 def exit_text(returncode: int) -> str | None:

@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from helpers import (
     HandClock,
     fake_claude_records,
     git,
+    process_is_running,
     saved_tasks,
     until,
     wait_for_text,
@@ -31,6 +33,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from alr.engine import proc
 from alr.engine.stop import Stop
 from alr.errors import RefusedError, RunLogError
 from alr.record.runlog import RunLog
@@ -93,6 +96,12 @@ def _visible_settings(repo: Path) -> RunSettings:
         logging=False,
         commit_mode=CommitMode.TASK,
     )
+
+
+@pytest.fixture(autouse=True)
+def _short_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second Stop waits out a stop under way, which for a stuck one takes the grace period."""
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
 
 
 async def _finished(app: AlrApp) -> None:
@@ -720,6 +729,37 @@ async def test_a_second_stop_while_stopping_quits(
         await pilot.press("ctrl+c")
         await pilot.press("ctrl+c")
         await until(lambda: not app.is_running)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_second_stop_waits_for_a_commit_that_traps_sigterm(
+    git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.5)
+    pid_file = tmp_path / "hook.pid"
+    hook = git_repo / ".git" / "hooks" / "pre-commit"
+    # The pid comes after the trap, so a stop that sees it meets a hook that ignores TERM.
+    hook.write_text(
+        f"#!/bin/sh\ntrap '' TERM\necho $$ > {pid_file}\nsleep 30\n", encoding="utf-8"
+    )
+    hook.chmod(0o755)
+    app = AlrApp(_settings(git_repo, WORKING_TASKS, commit_mode=CommitMode.TASK))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        hook_pid = int(await wait_for_text(pid_file))
+        await pilot.press("ctrl+c")
+        await until(lambda: app._stopping)
+
+        second_stop = time.monotonic()
+        await pilot.press("ctrl+c")
+        await until(lambda: not app.is_running)
+
+        # Quitting must not leave the hook behind; it ignores TERM, so only the kill
+        # after the grace period removes it, and the app waited for that.
+        assert not process_is_running(hook_pid)
+        assert time.monotonic() - second_stop < 3
+
+    assert app.exit_code == 130
 
 
 async def test_a_second_stop_while_stopping_leaves_exit_code_130(

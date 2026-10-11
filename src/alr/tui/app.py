@@ -14,6 +14,7 @@ from textual.widgets import Button, Header, Select, Static
 from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
+from alr.engine import proc
 from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
@@ -40,6 +41,8 @@ from alr.tui.settings import Permissions, RunSettings
 
 
 _STOPPED = "stopped"
+# How often a second Stop looks to see whether the first one has finished.
+_STOP_POLL = 0.02
 _NO_RESULT = "the run ended without a result"
 
 
@@ -112,6 +115,7 @@ class AlrApp(App[None]):
         self.exit_code = 0
         """What `run_app` returns: the final run's code, 0 when no run ever ended."""
         self._stopping = False
+        self._quitting = False
         self._stop = Stop()
         """The one signal object: the SIGTERM handler fills it, the engine and the exit code read it."""
         self._worker: Worker[None] | None = None
@@ -484,7 +488,7 @@ class AlrApp(App[None]):
         if self.state is AppState.RUNNING and self._stopping:
             # The run never reported, and a stopped run must not look like a success.
             self.exit_code = self._stop.exit_code()
-            self.exit()
+            self._quit_after_stop()
             return
 
         if self.state is not AppState.RUNNING:
@@ -494,6 +498,29 @@ class AlrApp(App[None]):
         self._stopping = True
         if self._worker is not None:
             self._worker.cancel()
+
+    def _quit_after_stop(self) -> None:
+        """Quit once the stop under way is done, so a hook that traps TERM does not outlive alr."""
+        if self._quitting:
+            return
+
+        self._quitting = True
+        self.run_worker(self._exit_when_stopped(), exit_on_error=False)
+
+    async def _exit_when_stopped(self) -> None:
+        """Wait for the run worker to end, for as long as a stop may take, then exit.
+
+        Polled, not awaited with a timeout: cancelling the wait on the worker's
+        task would cancel the task, and with it the stop it is carrying out.
+        """
+        deadline = time.monotonic() + proc.stop_deadline()
+        while self._worker is not None and not self._worker.is_finished:
+            if time.monotonic() > deadline:
+                break
+
+            await asyncio.sleep(_STOP_POLL)
+
+        self.exit()
 
     def action_quit_if_idle(self) -> None:
         if self.state is not AppState.RUNNING:
