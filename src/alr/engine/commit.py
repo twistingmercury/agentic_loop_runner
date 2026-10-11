@@ -147,19 +147,22 @@ async def check_log_dir(repo: Repo | None, run_dir: str) -> None:
 async def recheck_ignored(
     repo: Repo, tasks_file: str, run_dir: str | None
 ) -> str | None:
-    """Say which bookkeeping path git can see now, or None when both are still hidden.
+    """Say which bookkeeping path git can see now, or None when all are still hidden.
 
     A task's own commands can edit .gitignore, and `git add -A` takes no
     exclusions: an ignore rule is all that keeps the task file and the log
-    folder out of the commit, so it is checked again right before staging.
+    folders out of the commit, so it is checked again right before staging.
+    Every earlier run's folder in the log directory counts, not only this
+    run's: a rule that unhides one of those is taken by `git add -A` too.
     A git that cannot start, or a `git check-ignore` that fails, is a reason
     too, as it is for the `git add` that would follow: tasks may already be
     committed by now, so it fails this commit and does not refuse the run.
     """
     task_rel = _relative(repo, tasks_file)
     log_rel = None if run_dir is None else _relative(repo, run_dir)
+    logs_rel = _relative(repo, _logs_dir(tasks_file, run_dir))
     try:
-        return await _first_visible(repo, task_rel, log_rel)
+        return await _first_visible(repo, task_rel, log_rel, logs_rel)
     except OSError as exc:
         return proc.start_failed_text("git", exc)
     except RefusedError as exc:
@@ -167,17 +170,41 @@ async def recheck_ignored(
         return exc.message.removeprefix("--commit: ")
 
 
+def _logs_dir(tasks_file: str, run_dir: str | None) -> str:
+    """Return the log directory: the run folder's parent, else the default beside the task file."""
+    if run_dir is None:
+        return str(Path(tasks_file).parent / "logs")
+
+    return str(Path(run_dir).parent)
+
+
 async def _first_visible(
-    repo: Repo, task_rel: str | None, log_rel: str | None
+    repo: Repo, task_rel: str | None, log_rel: str | None, logs_rel: str | None
 ) -> str | None:
-    """Name the first of the task file and the log folder that git does not ignore, or None."""
+    """Name the first of the task file and the log folders that git does not ignore, or None."""
     if task_rel is not None and not await _ignored(repo, task_rel):
         return f"task file visible: {task_rel}"
 
     if log_rel is not None and not await _ignored(repo, log_rel):
         return f"log folder visible: {Path(log_rel).parent}"
 
+    if logs_rel is not None and await _has_visible_files(repo, logs_rel):
+        return f"log folder visible: {logs_rel}"
+
     return None
+
+
+async def _has_visible_files(repo: Repo, rel: str) -> bool:
+    """Report whether rel holds untracked files that no ignore rule hides; a missing rel holds none."""
+    returncode, stdout, stderr = await _git(
+        repo, "ls-files", "--others", "--exclude-standard", "--", rel
+    )
+    if returncode != 0:
+        raise RefusedError(
+            GIT_ERROR, f"--commit: git ls-files: {_git_message(returncode, stderr)}"
+        )
+
+    return bool(stdout.strip())
 
 
 async def commit(

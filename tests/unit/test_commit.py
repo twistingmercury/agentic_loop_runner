@@ -634,6 +634,58 @@ async def test_a_task_that_unignores_the_log_folder_fails_its_commit(
     assert _saved_states(tasks_file) == [(FAILED, want_error)]
 
 
+# `git add -A` takes every log folder git can see, not only the current run's, so
+# a rule that unhides an older run's folder must fail the commit too.
+_OLD_LOG = Path("run") / "logs" / "20200101T000000" / "session.log"
+_OLD_LOGS_VISIBLE = "commit failed: log folder visible: run/logs"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_task_that_unhides_an_old_run_without_a_log_folder_fails_its_commit(
+    git_repo: Path,
+) -> None:
+    write_nested_file(git_repo / _OLD_LOG, "old\n")
+    tasks_file = _task_file(git_repo)
+    # The view with logging off has no run folder to check, only the default logs/.
+    unhide = Gate(cmd="echo /run/tasks.yaml > .gitignore; echo work > one.txt")
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _gated_task(unhide), tasks_file, repo=await _open(tasks_file), run_dir=None
+        )
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value) == f"task 1: First failed: {_OLD_LOGS_VISIBLE}"
+    assert commit_subjects(git_repo) == ["init"], "nothing may be committed"
+    assert _head_staged(git_repo) == [], "nothing may be staged"
+    assert _saved_states(tasks_file) == [(FAILED, _OLD_LOGS_VISIBLE)]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_task_that_unhides_an_old_run_but_not_the_current_one_fails_its_commit(
+    git_repo: Path,
+) -> None:
+    write_nested_file(git_repo / _OLD_LOG, "old\n")
+    tasks_file = _task_file(git_repo)
+    # The current run's folder and the task file stay hidden; only 2020* come back.
+    rules = "'run/*' '!run/logs' 'run/logs/*' '!run/logs/2020*/'"
+    unhide = Gate(cmd=f"printf '%s\\n' {rules} > .gitignore; echo work > one.txt")
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _gated_task(unhide),
+            tasks_file,
+            repo=await _open(tasks_file),
+            run_dir=str(git_repo / "run" / "logs" / RUN_DIR),
+        )
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value) == f"task 1: First failed: {_OLD_LOGS_VISIBLE}"
+    assert commit_subjects(git_repo) == ["init"], "nothing may be committed"
+    assert _head_staged(git_repo) == [], "nothing may be staged"
+    assert _saved_states(tasks_file) == [(FAILED, _OLD_LOGS_VISIBLE)]
+
+
 @pytest.mark.usefixtures("fake_claude")
 async def test_run_mode_unignored_file_fails_the_final_commit(git_repo: Path) -> None:
     tasks_file = _task_file(git_repo)
