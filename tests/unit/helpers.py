@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from alr import tasks
-from alr.engine import loop
+from alr.engine import loop, proc
 from alr.engine.commit import CommitMode, Repo
 from alr.engine.frontend import FrontEnd
 from alr.engine.sandbox import bypass_args
@@ -224,6 +224,19 @@ async def wait_until_gone(pid: int, timeout: float = 2) -> None:
             pytest.fail(f"process {pid} remained running")
 
         await asyncio.sleep(0.01)
+
+
+def spy_on_start(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Record the keyword arguments of every proc.start call, still starting the child."""
+    calls: list[dict[str, Any]] = []
+    real_start = proc.start
+
+    async def start(argv: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return await real_start(argv, **kwargs)
+
+    monkeypatch.setattr(proc, "start", start)
+    return calls
 
 
 async def kill_holder_and_let_pipes_close(pid_file: Path) -> None:

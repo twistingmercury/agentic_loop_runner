@@ -107,8 +107,16 @@ class StreamFrontEnd:
         tap: Callable[[str], None] | None = None,
     ) -> str | None:
         try:
+            # gentle is true only for git, which gets no controlling terminal
+            # and is stopped by the kernel if alr dies.
             process = await proc.start(
-                argv, stdout=PIPE, stderr=PIPE, cwd=cwd, gentle=gentle
+                argv,
+                stdout=PIPE,
+                stderr=PIPE,
+                cwd=cwd,
+                gentle=gentle,
+                new_session=gentle,
+                die_with_parent=gentle,
             )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)

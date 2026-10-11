@@ -6,7 +6,13 @@ import time
 from pathlib import Path
 
 import pytest
-from helpers import git, kill_holder_and_let_pipes_close, run_loop, wait_for_text
+from helpers import (
+    git,
+    kill_holder_and_let_pipes_close,
+    run_loop,
+    spy_on_start,
+    wait_for_text,
+)
 
 from alr.engine import proc
 from alr.engine.commit import CommitMode, open_repo
@@ -469,3 +475,29 @@ async def test_a_git_command_reads_end_of_file_from_stdin(
 
     assert error is None
     assert capfd.readouterr().out == "done\n"
+
+
+async def test_git_starts_in_its_own_session_and_dies_with_alr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = spy_on_start(monkeypatch)
+    task = Task(1, "First", "p1")
+
+    await PlainFrontEnd().run_git(task, ["true"], str(tmp_path))
+
+    [call] = calls
+    assert call["new_session"] is True
+    assert call["die_with_parent"] is True
+
+
+async def test_a_gate_starts_without_the_git_guards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = spy_on_start(monkeypatch)
+    task = Task(1, "First", "p1")
+
+    await PlainFrontEnd().run_gate(task, Gate(cmd="true"))
+
+    [call] = calls
+    assert not call.get("new_session")
+    assert not call.get("die_with_parent")

@@ -1,8 +1,10 @@
 """Child processes: each in its own process group, stopped as a group when the run is cancelled."""
 
 import asyncio
+import ctypes
 import os
 import signal
+import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from subprocess import DEVNULL
 
@@ -15,6 +17,10 @@ _GENTLE_POLL = 0.01
 # up; see _wait_for_exit.
 _EXIT_POLL = 0.1
 _READ_SIZE = 64 * 1024
+_PR_SET_PDEATHSIG = 1
+# Looked up now, not in the child: the child runs between fork and exec, where
+# loading a library could deadlock on a lock another thread held at the fork.
+_prctl = ctypes.CDLL(None).prctl if sys.platform == "linux" else None
 
 
 async def start(
@@ -26,6 +32,8 @@ async def start(
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     gentle: bool = False,
+    new_session: bool = False,
+    die_with_parent: bool = False,
 ) -> asyncio.subprocess.Process:
     """Start argv in its own process group, so a stop reaches everything it spawns.
 
@@ -36,7 +44,19 @@ async def start(
     a cancel of finish: the spawn is let to complete, the whole group is
     stopped (with SIGTERM first when gentle, as for finish), and the
     cancellation carries on. An OSError from the spawn propagates unchanged.
+    new_session starts the child as a session leader instead, which is also a
+    group leader, so a stop still reaches it. With no controlling terminal, a
+    program that would prompt on one (git running a signing program) fails
+    instead of waiting on a person.
+    die_with_parent has the kernel send the child SIGTERM when alr dies, even by
+    SIGKILL, which runs no cleanup of alr's own. SIGTERM, not SIGKILL, so git
+    still removes its index lock. Only Linux has this; elsewhere the flag does
+    nothing. It must be called from the thread that runs alr's event loop,
+    because the kernel ties the signal to the thread that spawned the child.
     """
+    # The two ways of leaving alr's group conflict: a session leader cannot be
+    # moved into another group, so exactly one of them is passed.
+    group = {"start_new_session": True} if new_session else {"process_group": 0}
     spawn = asyncio.ensure_future(
         asyncio.create_subprocess_exec(
             *argv,
@@ -45,7 +65,8 @@ async def start(
             stderr=stderr,
             cwd=cwd,
             env=env,
-            process_group=0,
+            preexec_fn=_die_with_parent_of(os.getpid()) if die_with_parent else None,
+            **group,
         )
     )
     try:
@@ -55,6 +76,21 @@ async def start(
     except asyncio.CancelledError:
         await asyncio.shield(_stop_spawned(spawn, gentle))
         raise
+
+
+def _die_with_parent_of(parent: int) -> Callable[[], None] | None:
+    """Make the child-side hook that has the kernel stop the child when parent dies."""
+    if _prctl is None:
+        return None
+
+    def ask_kernel() -> None:
+        _prctl(_PR_SET_PDEATHSIG, signal.SIGTERM)
+        # alr may have died before the call above, and the signal would never
+        # come. Compared with the pid, not 1: a container's init may not be 1.
+        if os.getppid() != parent:
+            os._exit(1)
+
+    return ask_kernel
 
 
 async def _stop_spawned(

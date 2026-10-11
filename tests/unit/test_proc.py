@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import kill_holder_and_let_pipes_close, wait_for_text, wait_until_gone
+from helpers import (
+    kill_holder_and_let_pipes_close,
+    wait_for_file,
+    wait_for_text,
+    wait_process_gone,
+    wait_until_gone,
+)
 
 from alr.engine import proc
 
@@ -28,6 +34,69 @@ async def test_gentle_cancel_lets_the_child_handle_sigterm(tmp_path: Path) -> No
         await waiter
 
     assert process.returncode == 7
+
+
+async def test_a_new_session_child_leads_its_own_session() -> None:
+    process = await proc.start(
+        ["sleep", "5"], stdout=asyncio.subprocess.DEVNULL, new_session=True
+    )
+    try:
+        assert os.getsid(process.pid) == process.pid
+        assert os.getsid(process.pid) != os.getsid(0)
+        assert os.getpgid(process.pid) == process.pid
+    finally:
+        process.kill()
+        await process.wait()
+
+
+async def test_cancel_kills_the_whole_group_of_a_new_session_child(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    process = await proc.start(
+        ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"], new_session=True
+    )
+    waiter = asyncio.ensure_future(proc.finish(process))
+    await wait_for_text(pid_file)
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    assert process.returncode == -signal.SIGKILL
+    await wait_until_gone(int(pid_file.read_text()))
+
+
+# Starts a child tied to this process and says where it is, then idles until killed.
+_PARENT = """
+import asyncio, pathlib
+from alr.engine import proc
+
+
+async def main():
+    process = await proc.start(["sleep", "60"], new_session=True, die_with_parent=True)
+    pathlib.Path("{pid_file}").write_text(str(process.pid))
+    await asyncio.sleep(60)
+
+
+asyncio.run(main())
+"""
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="PR_SET_PDEATHSIG is Linux-only")
+def test_a_child_that_dies_with_its_parent_stops_when_the_parent_is_killed(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    parent = subprocess.Popen([sys.executable, "-c", _PARENT.format(pid_file=pid_file)])
+    try:
+        child_pid = int(wait_for_file(pid_file))
+    finally:
+        # SIGKILL: the parent gets no chance to clean up after itself.
+        parent.kill()
+        parent.wait()
+
+    wait_process_gone(child_pid, 5)
 
 
 async def test_cancel_kills_the_whole_group(tmp_path: Path) -> None:
