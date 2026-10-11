@@ -29,7 +29,8 @@ no `abandoned` state. Gralph decides the outcome from the JSON result line the
 shared prompt asks for at the end of the session's output. A missing or invalid
 result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
-task's `prompt`) and resets its `state` to `pending` by hand.
+task's `prompt`) and resets its `state` to `pending` by hand, or runs with
+`--reset-failed`, which sets every failed task back to `pending` at startup.
 
 With `--commit task`, Gralph also commits each task itself: once a task's
 gates pass, it commits what a plain `git add -A` would stage, with the task's
