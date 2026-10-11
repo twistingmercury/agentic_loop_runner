@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `task-file-visible`, `log-folder-visible`, `failed-tasks`,
   `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`,
   `task-file-unwritable` (a save at startup that fails: the `--reset-failed`
-  reset or, in the view, the edited gates), or `git-error`. A refusal leaves
+  reset or, in the view, the edited gates), `git-error`, or `locked` (another
+  committing run holds the repository's commit lock). A refusal leaves
   nothing on disk: no run log, and the task file as it was. `--reset-failed` is
   applied in memory first and saved only after every other check and the log
   folder have passed.
@@ -40,6 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Commit safety. A committing run (`--commit task` or `run`) takes an exclusive
+  lock on `alr.lock` in the repository's git directory until it ends; a second
+  committing run, or a dry run with a commit mode, is refused with exit 3 and
+  the reason `locked`. The kernel drops the lock when alr dies, so a killed run
+  leaves none stuck. The `git add` and `git commit` alr starts run in their own
+  session, with no controlling terminal, so a signing program that wants to
+  prompt fails instead of waiting. On Linux the kernel also sends that git
+  SIGTERM if alr dies (`PR_SET_PDEATHSIG`); elsewhere a SIGKILL of alr during a
+  commit can still let the commit land. Right before every `git add`, alr checks
+  again that git ignores the task file and the log folder: if a task's commands
+  made either visible, nothing is staged, the task is `failed` with
+  `commit failed: task file visible: <path>` or `commit failed: log folder
+  visible: <folder>`, and the run exits 4.
 - `run_finished` in the run log has `result` (`completed`, `failed`,
   `commit_failed`, or `stopped`) and `exit`, the code alr returns.
 - In `run` mode a task whose gates passed is logged and shown as `passed` until

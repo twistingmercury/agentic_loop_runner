@@ -105,7 +105,7 @@ they should edit.
 | `1`   | A task or gate failed, or the run hit an error such as a failed save                      |
 | `2`   | Usage error: a bad or missing flag, or a run folder with no `tasks.yaml`                  |
 | `3`   | Refused to start; nothing ran and nothing was left on disk: no run log, and the task file unchanged |
-| `4`   | A commit failed; the task is `failed` and its work stays staged                           |
+| `4`   | A commit failed (or the pre-add re-check found a path visible); the task is `failed` and its work stays staged |
 | `130` | Stopped by SIGINT (Ctrl-C)                                                                |
 | `143` | Stopped by SIGTERM                                                                        |
 
@@ -118,12 +118,13 @@ The reason is one of:
 | `dirty-tree`               | A committing run found uncommitted changes                                            |
 | `task-file-visible`        | A committing run found the task file visible to git                                   |
 | `log-folder-visible`       | A committing run found the log folder visible to git                                  |
+| `locked`                   | Another committing run holds this repository's commit lock                            |
 | `failed-tasks`             | The task file holds a failed task; fix it and set it to pending (or `--reset-failed`) |
 | `invalid-task-file`        | The task file cannot be read or is not valid                                          |
 | `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                                    |
 | `log-unwritable`           | The run log folder cannot be created or opened                                        |
 | `task-file-unwritable`     | A save at startup failed: the `--reset-failed` reset, or edited gates in the view     |
-| `git-error`                | git failed while alr looked at the repository                                         |
+| `git-error`                | git failed while alr looked at the repository, or alr could not open or lock `alr.lock` |
 
 A failed commit's reason is the first line of git's (or the hook's) output, in the task's
 `error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The run log's
@@ -152,6 +153,32 @@ to `.gitignore`:
 Ignoring the whole folder with `<folder>/` works too. Do not run `git clean -fdx`
 in the repository: `-x` also deletes ignored files, which includes the task file
 and the logs.
+
+A committing run is guarded three ways, on top of those checks:
+
+- **One committing run per repository.** The run takes an exclusive lock on
+  `alr.lock` in the repository's git directory (`.git/alr.lock`; a linked worktree
+  has its own git directory, so its own lock) and keeps it until it ends. A second
+  committing run, or a `--dry-run` with `--commit task` or `run`, is refused with
+  exit 3 and the reason `locked`, whether it comes from plain mode or the full-screen
+  view. The check comes after the task file check and before the log folder and
+  clean tree checks, because a run that holds the lock leaves the tree dirty. The
+  kernel drops the lock when alr dies, even by SIGKILL, so a killed run never leaves
+  a stuck lock; the `alr.lock` file a run leaves behind is not a lock, and you can
+  leave it or delete it.
+- **The ignore rules are checked again before every `git add`.** A task's own
+  commands can edit `.gitignore`. If git then sees the task file or the run's log
+  folder, nothing is staged, the task is `failed` with `commit failed: task file
+  visible: <path>` or `commit failed: log folder visible: <folder>`, and the run
+  exits 4. In `--commit run` the check runs once, before the one commit. The log
+  folder is only checked when the run keeps a log.
+- **git runs in its own session and dies with alr.** The `git add` and `git commit`
+  that alr starts have no controlling terminal, so a signing program that wants to
+  prompt (a GPG pinentry) fails instead of waiting on a person. On Linux the kernel
+  also sends that git SIGTERM if alr dies, even by SIGKILL (`PR_SET_PDEATHSIG`), so
+  git removes its index lock and no commit lands after alr is gone. On other
+  platforms there is no such stop: a SIGKILL of alr during a commit can still let
+  the commit land afterwards.
 
 After a failed or stopped run, the work tree holds the leftovers, and the next
 committing run refuses to start until the tree is clean; the error lists the
