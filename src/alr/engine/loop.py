@@ -78,6 +78,9 @@ class RunOptions:
     session_args: Sequence[str]
     """The Claude flags that set what a session may do."""
 
+    log_dir: str
+    """The folder the run folders go in, beside the task file; given to every action, logging or not."""
+
     repo: Repo | None = None
     """Where completed work is committed; None for a run without a repository."""
 
@@ -89,9 +92,6 @@ class RunOptions:
 
     run_dir: str | None = None
     """The run's own log folder, checked again before each commit; None when logging is off."""
-
-    log_dir: str = ""
-    """The folder the run folders go in, beside the task file; given to every action, logging or not."""
 
 
 def read_tasks(path: str) -> TaskList:

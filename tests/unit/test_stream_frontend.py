@@ -179,7 +179,9 @@ async def test_cancel_leaves_the_tasks_file_untouched(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
     events: list[Event] = []
-    options = loop.RunOptions(str(tasks_file), "", bypass_args())
+    options = loop.RunOptions(
+        str(tasks_file), "", bypass_args(), str(tasks_file.parent / "logs")
+    )
 
     run = asyncio.ensure_future(
         loop.run(_task_list(), options, StreamFrontEnd(events.append))
@@ -346,7 +348,9 @@ async def test_cancel_during_a_action_reports_no_action_finished(
     ready = tmp_path / "ready"
     action = Action(command=f"echo ready > '{ready}'; sleep 60")
     events: list[Event] = []
-    options = loop.RunOptions(str(tmp_path / "tasks.yaml"), "", bypass_args())
+    options = loop.RunOptions(
+        str(tmp_path / "tasks.yaml"), "", bypass_args(), str(tmp_path / "logs")
+    )
 
     run = asyncio.ensure_future(
         loop.run(_task_list(action), options, StreamFrontEnd(events.append))

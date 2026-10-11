@@ -61,7 +61,7 @@ TWO_PENDING_YAML = (
 
 
 def test_run_options_default_to_never_committing() -> None:
-    assert loop.RunOptions("tasks.yaml", "", []).commit_mode is CommitMode.NONE
+    assert loop.RunOptions("tasks.yaml", "", [], "logs").commit_mode is CommitMode.NONE
 
 
 async def _wait_until(condition: Callable[[], bool], what: str) -> None:
