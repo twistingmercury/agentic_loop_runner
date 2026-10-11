@@ -6,21 +6,21 @@ from collections.abc import Callable, Sequence
 
 from alr.engine import proc
 from alr.engine.frontend import FirstLine, SessionResult
-from alr.engine.gates import first_line
+from alr.engine.actions import first_line
 from alr.record.events import (
     Activity,
     CommitStarted,
     Committed,
     Event,
-    GateFinished,
-    GateStarted,
+    ActionFinished,
+    ActionStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
     TaskStarted,
 )
 from alr.stream.parser import parse_stream_line
-from alr.tasks import Gate, RunResult, Task
+from alr.tasks import Action, RunResult, Task
 
 
 class StreamFrontEnd:
@@ -58,22 +58,22 @@ class StreamFrontEnd:
     def session_finished(self, task: Task, seconds: float) -> None:
         self._report(SessionFinished(task, seconds))
 
-    async def run_gate(self, task: Task, gate: Gate) -> str | None:
+    async def run_action(self, task: Task, action: Action) -> str | None:
         # Only the first line, so a multi-line command stays one activity line.
-        self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
-        self._report(GateStarted(task, gate))
-        return await self._run_command(task, ["sh", "-c", gate.cmd])
+        self._report(Activity(task, "→ action " + first_line(action.command)))
+        self._report(ActionStarted(task, action))
+        return await self._run_command(task, ["sh", "-c", action.command])
 
-    def gate_finished(
+    def action_finished(
         self,
         task: Task,
-        gate: Gate,
+        action: Action,
         limit: str,
         error: str | None,
         timed_out: bool,
         seconds: float,
     ) -> None:
-        self._report(GateFinished(task, gate, limit, error, timed_out, seconds))
+        self._report(ActionFinished(task, action, limit, error, timed_out, seconds))
 
     def commit_started(self, task: Task) -> None:
         self._report(Activity(task, "→ commit " + first_line(task.name)))
@@ -122,7 +122,7 @@ class StreamFrontEnd:
             return proc.start_failed_text(argv[0], exc)
 
         on_line = self._raw_line(task, tap)
-        # Bounded: a gate's or git's own exit is its result, so a descendant
+        # Bounded: an action's or git's own exit is its result, so a descendant
         # that outlives it and holds the pipes must not hold up the run.
         return await proc.finish(
             process, _drain(process, on_line, on_line), gentle=gentle, bounded=True

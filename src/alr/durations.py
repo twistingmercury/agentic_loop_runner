@@ -1,4 +1,4 @@
-"""Duration strings such as 90s or 1h30m, as the --gate-timeout flag and the task file write them."""
+"""Duration strings such as 90s or 1h30m, as the --action-timeout flag and the task file write them."""
 
 import math
 import re

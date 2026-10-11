@@ -23,7 +23,7 @@ from textual.widgets import (
 
 from alr.durations import format_elapsed
 from alr.errors import AlrError, RefusedError
-from alr.tasks import Gate, Task, parse_timeout
+from alr.tasks import Action, Task, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
 from alr.tui.settings import Permissions
 
@@ -280,25 +280,25 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
         self.dismiss(PermissionChoice(Permissions.SANDBOX, path))
 
 
-class GatesDialog(_Dialog[list[Gate]]):
-    """Add and remove the file's shared gates; Done with none is a decision that there are none."""
+class ActionsDialog(_Dialog[list[Action]]):
+    """Add and remove the file's shared actions; Done with none is a decision that there are none."""
 
     DEFAULT_CSS = """
-    GatesDialog #dialog { width: 80%; max-width: 90; }
-    GatesDialog #list { height: auto; max-height: 6; }
+    ActionsDialog #dialog { width: 80%; max-width: 90; }
+    ActionsDialog #list { height: auto; max-height: 6; }
     """
 
-    # Typing a gate is the first thing to do; the list is reached with Tab.
+    # Typing an action is the first thing to do; the list is reached with Tab.
     AUTO_FOCUS = "#cmd"
 
-    def __init__(self, gates: list[Gate]) -> None:
+    def __init__(self, actions: list[Action]) -> None:
         super().__init__()
-        self._gates = list(gates)
+        self._actions = list(actions)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Label("Gates, run after each task's session")
-            yield ListView(*(self._item(gate) for gate in self._gates), id="list")
+            yield Label("Actions, run after each task's session")
+            yield ListView(*(self._item(action) for action in self._actions), id="list")
             yield Input(placeholder="command", id="cmd")
             yield Input(placeholder="timeout, such as 5m (optional)", id="timeout")
             yield Static("", id="error")
@@ -315,7 +315,7 @@ class GatesDialog(_Dialog[list[Gate]]):
             case "remove":
                 await self._remove()
             case "done":
-                self.dismiss(self._gates)
+                self.dismiss(self._actions)
             case "cancel":
                 self.dismiss(None)
 
@@ -325,14 +325,14 @@ class GatesDialog(_Dialog[list[Gate]]):
     async def _add(self) -> None:
         cmd = self.query_one("#cmd", Input).value.strip()
         timeout = self.query_one("#timeout", Input).value.strip()
-        error = _gate_error(cmd, timeout)
+        error = _action_error(cmd, timeout)
         self.query_one("#error", Static).update(error or "")
         if error:
             return
 
-        gate = Gate(cmd=cmd, timeout=timeout)
-        self._gates.append(gate)
-        await self.query_one("#list", ListView).append(self._item(gate))
+        action = Action(command=cmd, timeout=timeout)
+        self._actions.append(action)
+        await self.query_one("#list", ListView).append(self._item(action))
         self.query_one("#cmd", Input).value = ""
         self.query_one("#timeout", Input).value = ""
 
@@ -341,19 +341,19 @@ class GatesDialog(_Dialog[list[Gate]]):
         if index is None:
             return
 
-        del self._gates[index]
+        del self._actions[index]
         await self.query_one("#list", ListView).pop(index)
 
     @staticmethod
-    def _item(gate: Gate) -> ListItem:
-        suffix = f"  ({gate.timeout})" if gate.timeout else ""
-        return ListItem(Label(gate.cmd + suffix))
+    def _item(action: Action) -> ListItem:
+        suffix = f"  ({action.timeout})" if action.timeout else ""
+        return ListItem(Label(action.command + suffix))
 
 
-def _gate_error(cmd: str, timeout: str) -> str | None:
-    """Why this gate cannot be added, or None when it can."""
+def _action_error(cmd: str, timeout: str) -> str | None:
+    """Why this action cannot be added, or None when it can."""
     if not cmd:
-        return "a gate needs a command"
+        return "an action needs a command"
 
     if not timeout:
         return None

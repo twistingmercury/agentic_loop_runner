@@ -86,12 +86,12 @@ def write_tasks_yaml(folder: Path, content: str) -> Path:
 
 
 def shared_block(
-    prompt: str = SHARED_PROMPT, gates: list[dict[str, str]] | None = None
+    prompt: str = SHARED_PROMPT, after_task: list[dict[str, str]] | None = None
 ) -> str:
     """The shared: block that opens a task file; put the tasks after it."""
     shared: dict[str, Any] = {"prompt": prompt}
-    if gates is not None:
-        shared["gates"] = gates
+    if after_task is not None:
+        shared["after_task"] = after_task
 
     return yaml.safe_dump({"shared": shared}, sort_keys=False)
 

@@ -42,8 +42,15 @@ def _version_line() -> str:
     return f"alr version: {metadata.version('alr')} {system}/{platform.machine()}"
 
 
+_GATE_TIMEOUT_RENAMED = "--gate-timeout: renamed to --action-timeout"
+
+
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     """Apply the startup checks in gralph's order, then start the dry run or the real run."""
+    if args.gate_timeout is not None:
+        print(f"error: {_GATE_TIMEOUT_RENAMED}", file=sys.stderr)
+        return UsageError.exit_code
+
     if args.version:
         print(_version_line())
         return 0
@@ -55,8 +62,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         tasks_file = resolve_dir(args.dir)
         sandbox_settings = resolve_sandbox(args.dir, args.sandbox_settings, args.yolo)
         # An explicitly empty value counts as passed, and is bad.
-        if args.gate_timeout is not None:
-            check_gate_timeout(args.gate_timeout)
+        if args.action_timeout is not None:
+            check_action_timeout(args.action_timeout)
 
         check_reset_flag(args.reset_failed, args.dry_run)
         if wants_tui(args):
@@ -73,14 +80,14 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code
 
-    gate_timeout = args.gate_timeout or ""
+    action_timeout = args.action_timeout or ""
     stop = Stop()
     if args.dry_run:
         return _run(
             dry_run(
                 sys.stdout,
                 tasks_file,
-                gate_timeout,
+                action_timeout,
                 sandbox_settings,
                 commit_mode is not CommitMode.NONE,
             ),
@@ -90,7 +97,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     return _run(
         start(
             tasks_file,
-            gate_timeout,
+            action_timeout,
             session,
             commit_mode,
             args.reset_failed,
@@ -129,7 +136,7 @@ def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> 
         sandbox_file=sandbox_file,
         permissions=_permissions(sandbox_file, args.yolo),
         commit_mode=CommitMode(args.commit),
-        gate_timeout=args.gate_timeout or "",
+        action_timeout=args.action_timeout or "",
         reset_failed=args.reset_failed,
     )
     return run_app(settings)
@@ -177,12 +184,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate the tasks file and report failed tasks without running anything",
     )
+    # Hidden: only here to refuse the old name with a message naming the new one.
+    parser.add_argument(
+        "--gate-timeout", default=None, help=argparse.SUPPRESS, metavar=""
+    )
     # None, not "", so an empty value given on purpose can be told apart.
     parser.add_argument(
-        "--gate-timeout",
+        "--action-timeout",
         metavar="",
         default=None,
-        help="Limit for every gate, such as 90s or 10m; overrides each gate's own timeout (default: the gate's timeout, else 10m)",
+        help="Limit for every action, such as 90s or 10m; overrides each action's own timeout (default: the action's timeout, else 10m)",
     )
     parser.add_argument(
         "--plain",
@@ -210,7 +221,7 @@ def _parser() -> argparse.ArgumentParser:
         metavar="",
         choices=[mode.value for mode in CommitMode],
         default=CommitMode.NONE.value,
-        help="When to commit with git: none (default) never touches git; task commits each completed task after its gates pass, with the task name as the message, and in a repository the work tree must be clean; run makes one commit after the last task, and a failed or stopped run makes no commit",
+        help="When to commit with git: none (default) never touches git; task commits each completed task after its actions pass, with the task name as the message, and in a repository the work tree must be clean; run makes one commit after the last task, and a failed or stopped run makes no commit",
     )
     return parser
 
@@ -242,12 +253,12 @@ def resolve_sandbox(dir: str, sandbox_settings: str, skip: bool) -> str:
     return folder_sandbox(dir) or ""
 
 
-def check_gate_timeout(value: str) -> None:
-    """Apply the same rules to --gate-timeout as to a gate's timeout in the file."""
+def check_action_timeout(value: str) -> None:
+    """Apply the same rules to --action-timeout as to an action's timeout in the file."""
     try:
         parse_timeout(value)
     except ValueError as exc:
-        raise UsageError(f"--gate-timeout: {exc}") from exc
+        raise UsageError(f"--action-timeout: {exc}") from exc
 
 
 def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:

@@ -1,10 +1,19 @@
 import json
+import re
 
 import pytest
 
 from alr import tasks
 from alr.errors import TaskFileError
-from alr.tasks import COMPLETED, PENDING, Gate, Shared, Task, TaskList
+from alr.tasks import (
+    COMPLETED,
+    PENDING,
+    RUN_SCOPE,
+    Action,
+    Shared,
+    Task,
+    TaskList,
+)
 
 _WITH_SHARED = "shared:{}\ntasks:\n  - {{id: 1, name: a, prompt: p}}\n"
 VALID = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n"
@@ -189,7 +198,7 @@ ERROR_CASES = [
     (
         "top-level gates",
         VALID + "gates: []\n",
-        "gates: gates are set under shared now, as shared.gates",
+        "gates: gates are set under shared now, as shared.after_task",
     ),
     (
         "unknown top-level key",
@@ -201,11 +210,11 @@ ERROR_CASES = [
     (
         "unknown shared key",
         _WITH_SHARED.format(" {prompt: p, tone: dry}"),
-        "shared.tone: unknown key; shared has only prompt and gates",
+        "shared.tone: unknown key; shared has only prompt, after_task, and after_run",
     ),
     (
         "missing shared prompt",
-        _WITH_SHARED.format(" {gates: []}"),
+        _WITH_SHARED.format(" {after_task: []}"),
         "shared.prompt: is required",
     ),
     (
@@ -438,12 +447,12 @@ def test_parse_tasks_reads_error_field() -> None:
     assert got.tasks[0].error == "boom"
 
 
-def test_parse_tasks_reads_gates() -> None:
+def test_parse_tasks_reads_actions() -> None:
     text = """shared:
   prompt: shared
-  gates:
-    - cmd: go test ./...
-    - cmd: |
+  after_task:
+    - action: go test ./...
+    - action: |
         test -z "$(gofmt -l .)"
 tasks:
   - id: 1
@@ -457,48 +466,53 @@ tasks:
     got = tasks.parse_tasks(text)
     assert len(got.tasks) == 2
 
-    want = [Gate(cmd="go test ./..."), Gate(cmd='test -z "$(gofmt -l .)"\n')]
-    assert got.gate_list() == want, "cmd text must be stored unaltered, in file order"
+    want = [
+        Action(command="go test ./..."),
+        Action(command='test -z "$(gofmt -l .)"\n'),
+    ]
+    assert got.after_task_list() == want, (
+        "action text must be stored unaltered, in file order"
+    )
 
 
-def test_parse_tasks_reads_gate_timeout() -> None:
+def test_parse_tasks_reads_action_timeout() -> None:
     text = """shared:
   prompt: shared
-  gates:
-    - cmd: go test ./...
+  after_task:
+    - action: go test ./...
       timeout: 10m
-    - cmd: echo hi
-    - cmd: sleep 1
+    - action: echo hi
+    - action: sleep 1
       timeout: 1h30m
 tasks:
   - id: 1
-    name: Gated
+    name: First
     prompt: p
 """
 
     got = tasks.parse_tasks(text)
 
     want = [
-        Gate(cmd="go test ./...", timeout="10m"),
-        Gate(cmd="echo hi"),
-        Gate(cmd="sleep 1", timeout="1h30m"),
+        Action(command="go test ./...", timeout="10m"),
+        Action(command="echo hi"),
+        Action(command="sleep 1", timeout="1h30m"),
     ]
-    assert got.gate_list() == want, "timeout text must be stored as written"
+    assert got.after_task_list() == want, "timeout text must be stored as written"
 
 
-def test_parse_tasks_gates_absent_versus_empty() -> None:
+def test_parse_tasks_actions_absent_versus_empty() -> None:
     absent = tasks.parse_tasks(
         "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
     )
-    assert absent.shared.gates is None, "no gates key means not decided"
-    assert absent.gate_list() == []
+    assert absent.shared.after_task is None, "no actions key means not decided"
+    assert absent.after_task_list() == []
 
     empty = tasks.parse_tasks(
-        "shared:\n  prompt: shared\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
+        "shared:\n  prompt: shared\n  after_task: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n"
     )
-    assert empty.shared.gates is not None, "gates: [] means decided: none"
-    assert empty.shared.gates == []
-    assert empty.gate_list() == []
+    assert empty.shared.after_task is not None, "after_task: [] means decided: none"
+    assert empty.shared.after_task == []
+    assert empty.after_task_list() == []
 
 
 @pytest.mark.parametrize(
@@ -522,55 +536,58 @@ def test_parse_tasks_task_level_gates_are_an_error(text: str) -> None:
         tasks.parse_tasks(text)
 
     assert "tasks[0] (id 3): gates" in str(exc.value)
-    assert "shared.gates" in str(exc.value)
+    assert "shared.after_task" in str(exc.value)
 
 
-GATE_ERROR_CASES = [
-    ("null gates", "gates:", "shared.gates:"),
-    ("string element", "gates: [go test ./...]", "shared.gates[0]:"),
-    ("missing cmd", "gates: [{}]", "shared.gates[0]: cmd"),
+ACTION_ERROR_CASES = [
+    ("null after_task", "after_task:", "shared.after_task:"),
+    ("string element", "after_task: [go test ./...]", "shared.after_task[0]:"),
+    ("missing action", "after_task: [{}]", "shared.after_task[0]: action"),
     (
         "misspelled key",
-        "gates: [{command: a}]",
-        "shared.gates[0]: command",
+        "after_task: [{command: a}]",
+        "shared.after_task[0]: command",
     ),
-    ("null cmd", "gates: [{cmd: }]", "shared.gates[0]: cmd"),
+    ("null action", "after_task: [{action: }]", "shared.after_task[0]: action"),
     (
-        "blank cmd",
-        'gates: [{cmd: "  "}]',
-        "shared.gates[0]: cmd",
+        "blank action",
+        'after_task: [{action: "  "}]',
+        "shared.after_task[0]: action",
     ),
     (
         "integer timeout",
-        "gates: [{cmd: a, timeout: 30}]",
-        "shared.gates[0]: timeout",
+        "after_task: [{action: a, timeout: 30}]",
+        "shared.after_task[0]: timeout",
     ),
     (
         "unparseable timeout",
-        "gates: [{cmd: a, timeout: soon}]",
-        "shared.gates[0]: timeout",
+        "after_task: [{action: a, timeout: soon}]",
+        "shared.after_task[0]: timeout",
     ),
     (
         "zero timeout",
-        "gates: [{cmd: a, timeout: 0s}]",
-        "shared.gates[0]: timeout",
+        "after_task: [{action: a, timeout: 0s}]",
+        "shared.after_task[0]: timeout",
     ),
     (
-        "second gate invalid",
-        "gates: [{cmd: a}, {cmd: ''}]",
-        "shared.gates[1]: cmd",
+        "second action invalid",
+        "after_task: [{action: a}, {action: ''}]",
+        "shared.after_task[1]: action",
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("gates", "want"),
-    [pytest.param(gates, want, id=name) for name, gates, want in GATE_ERROR_CASES],
+    ("snippet", "want"),
+    [
+        pytest.param(snippet, want, id=name)
+        for name, snippet, want in ACTION_ERROR_CASES
+    ],
 )
-def test_parse_tasks_gate_errors(gates: str, want: str) -> None:
+def test_parse_tasks_action_errors(snippet: str, want: str) -> None:
     # `want` is the location and field the user must fix, not the hint after it.
     text = (
-        f"shared:\n  prompt: shared\n  {gates}\n"
+        f"shared:\n  prompt: shared\n  {snippet}\n"
         "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
     )
     with pytest.raises(TaskFileError) as exc:
@@ -624,9 +641,9 @@ def test_parse_tasks_reads_ids_as_pyyaml_does(text: str, want: int) -> None:
             id="prompt",
         ),
         pytest.param(
-            'shared: {prompt: s, gates: [{cmd: "echo \\ud800"}]}\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
-            "shared.gates[0]: cmd",
-            id="gate cmd",
+            'shared: {prompt: s, after_task: [{action: "echo \\ud800"}]}\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
+            "shared.after_task[0]: action",
+            id="action cmd",
         ),
         pytest.param(
             'shared: {prompt: "\\ud800"}\ntasks:\n  - {id: 1, name: a, prompt: p}\n',
@@ -729,3 +746,72 @@ def test_a_task_name_with_a_trailing_line_break_is_rejected(brk: str) -> None:
 
     with pytest.raises(TaskFileError, match="name: must be a single line"):
         tasks.parse_tasks(text)
+
+
+def _file(shared_extra: str) -> str:
+    return (
+        "shared:\n  prompt: shared\n"
+        + shared_extra
+        + "tasks:\n  - id: 1\n    name: First\n    prompt: p\n"
+    )
+
+
+def test_after_task_and_after_run_parse() -> None:
+    task_list = tasks.parse_tasks(
+        _file(
+            """  after_task:
+    - action: ./build.sh
+      timeout: 5m
+  after_run:
+    - action: git push --dry-run
+"""
+        )
+    )
+
+    assert task_list.shared.after_task == [Action("./build.sh", "5m")]
+    assert task_list.shared.after_run == [Action("git push --dry-run")]
+    assert task_list.after_task_list() == [Action("./build.sh", "5m")]
+    assert task_list.after_run_list() == [Action("git push --dry-run")]
+
+
+def test_absent_action_lists_are_none_and_read_as_empty() -> None:
+    task_list = tasks.parse_tasks(_file(""))
+
+    assert task_list.shared.after_task is None
+    assert task_list.shared.after_run is None
+    assert task_list.after_task_list() == []
+    assert task_list.after_run_list() == []
+
+
+@pytest.mark.parametrize(
+    ("snippet", "message"),
+    [
+        (
+            "  gates:\n    - cmd: x\n",
+            "shared.gates: renamed to shared.after_task",
+        ),
+        (
+            "  after_task:\n    - cmd: x\n",
+            "shared.after_task[0]: cmd: renamed to action",
+        ),
+        (
+            "  after_task:\n    - action: x\n      retry: 3\n",
+            "shared.after_task[0]: retry: unknown key; an action has only action and timeout",
+        ),
+        (
+            "  after_run:\n    - action: x\n      timeout: 30\n",
+            "shared.after_run[0]: timeout: must be a duration string such as 90s or 10m",
+        ),
+        (
+            "  gates: []\n  after_task: []\n",
+            "shared.gates: renamed to shared.after_task",
+        ),
+    ],
+)
+def test_old_and_bad_action_keys_are_refused(snippet: str, message: str) -> None:
+    with pytest.raises(TaskFileError, match=re.escape(message)):
+        tasks.parse_tasks(_file(snippet))
+
+
+def test_run_scope_is_a_task_with_id_zero() -> None:
+    assert RUN_SCOPE == Task(id=0, name="after the run", prompt="")

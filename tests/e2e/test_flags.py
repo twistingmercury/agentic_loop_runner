@@ -27,7 +27,7 @@ def test_help_flag() -> None:
         "--dir",
         "--sandbox-settings",
         "--yolo",
-        "--gate-timeout",
+        "--action-timeout",
         "--commit",
         "--dry-run",
         "--plain",

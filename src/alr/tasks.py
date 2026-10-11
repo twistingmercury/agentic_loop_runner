@@ -16,7 +16,7 @@ from alr.errors import TaskFileError, quote
 PENDING = "pending"
 FAILED = "failed"
 COMPLETED = "completed"
-# Only ever logged, never saved: in `run` mode a task whose gates passed is not
+# Only ever logged, never saved: in `run` mode a task whose actions passed is not
 # complete until the one commit lands.
 PASSED = "passed"
 
@@ -61,13 +61,13 @@ _CONTROL = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f]")
 
 
 @dataclass
-class Gate:
-    """One command alr runs itself after each task's session reports completed.
+class Action:
+    """One command alr runs itself, never sent to the session.
 
-    It is never sent to the session.
+    Which list it sits in (`after_task` or `after_run`) says when it runs.
     """
 
-    cmd: str
+    command: str
     timeout: str = ""
 
 
@@ -86,15 +86,22 @@ class Task:
 
 @dataclass
 class Shared:
-    """What every task in the file shares: the prompt and the gates.
+    """What every task in the file shares: the prompt and the two action lists.
 
-    `gates` is None when the file has no gates key (not decided yet) and a
+    `after_task` is None when the file has no such key (not decided yet) and a
     list, possibly empty, when it has one (decided), so a save can keep the
-    difference.
+    difference. `after_run` has no undecided state: None and [] both mean none,
+    and a save still keeps the key as it was written.
     """
 
     prompt: str
-    gates: list[Gate] | None = None
+    after_task: list[Action] | None = None
+    after_run: list[Action] | None = None
+
+
+# The stand-in task that output from the `after_run` actions is reported under.
+# Task ids are positive integers, so id 0 can never be a real task.
+RUN_SCOPE = Task(id=0, name="after the run", prompt="")
 
 
 @dataclass
@@ -104,12 +111,19 @@ class TaskList:
     shared: Shared
     tasks: list[Task]
 
-    def gate_list(self) -> list[Gate]:
-        """The file's gates, empty when the key is absent."""
-        if self.shared.gates is None:
+    def after_task_list(self) -> list[Action]:
+        """The file's actions, empty when the key is absent."""
+        if self.shared.after_task is None:
             return []
 
-        return self.shared.gates
+        return self.shared.after_task
+
+    def after_run_list(self) -> list[Action]:
+        """The file's after-run actions, empty when the key is absent."""
+        if self.shared.after_run is None:
+            return []
+
+        return self.shared.after_run
 
 
 def parse_tasks(text: str) -> TaskList:
@@ -202,7 +216,7 @@ def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.Node, yaml.SequenceNode]:
 def _check_root_key(key: str, seen: dict[str, yaml.Node]) -> None:
     if key == "gates":
         raise TaskFileError(
-            "gates: gates are set under shared now, as shared.gates; see the HOWTO"
+            "gates: gates are set under shared now, as shared.after_task; see the HOWTO"
         )
 
     if key not in ("shared", "tasks"):
@@ -220,18 +234,40 @@ def _check_shared(node: yaml.Node) -> Shared:
         raise TaskFileError("shared: must be a mapping")
 
     fields = _fields("shared", node)
-    for key in fields:
-        if key not in ("prompt", "gates"):
-            raise TaskFileError(
-                f"shared.{key}: unknown key; shared has only prompt and gates"
-            )
-
+    _check_shared_keys(fields)
     prompt = _text_node("shared.prompt", fields.get("prompt"), required=True)
 
-    # `gates: []` stays an empty list, not None, so a save writes the key back.
-    gates_node = fields.get("gates")
-    gates = None if gates_node is None else _check_gates(gates_node)
-    return Shared(prompt=prompt.strip(), gates=gates)
+    # `after_task: []` stays an empty list, not None, so a save writes the key back.
+    return Shared(
+        prompt=prompt.strip(),
+        after_task=_optional_actions("after_task", fields),
+        after_run=_optional_actions("after_run", fields),
+    )
+
+
+def _check_shared_keys(fields: dict[str, yaml.Node]) -> None:
+    """Reject a key shared does not have, naming the replacement for `gates`.
+
+    A file with both `gates` and `after_task` is refused too, never half-read.
+    """
+    if "gates" in fields:
+        raise TaskFileError("shared.gates: renamed to shared.after_task; see the HOWTO")
+
+    for key in fields:
+        if key not in ("prompt", "after_task", "after_run"):
+            raise TaskFileError(
+                f"shared.{key}: unknown key; "
+                "shared has only prompt, after_task, and after_run"
+            )
+
+
+def _optional_actions(key: str, fields: dict[str, yaml.Node]) -> list[Action] | None:
+    """The actions under shared.<key>, or None when the key is absent."""
+    node = fields.get(key)
+    if node is None:
+        return None
+
+    return _check_actions(key, node)
 
 
 def _parse_task(i: int, el: yaml.Node) -> Task:
@@ -270,7 +306,7 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     if "gates" in fields:
         raise TaskFileError(
             f"{where}: gates: gates are set once for the whole file, "
-            "as shared.gates; see the HOWTO"
+            "as shared.after_task; see the HOWTO"
         )
 
     return Task(
@@ -357,44 +393,54 @@ def _is_string(node: yaml.Node) -> bool:
     return isinstance(node, yaml.ScalarNode) and node.tag == _STR
 
 
-def _check_gates(node: yaml.Node) -> list[Gate]:
-    """Check the file's gates sequence and build its gates.
+def _check_actions(key: str, node: yaml.Node) -> list[Action]:
+    """Check the sequence under shared.<key> and build its actions.
 
-    A malformed gate must reject the file: reading only what is recognized
+    A malformed action must reject the file: reading only what is recognized
     would drop the rest, and the next save would then erase it.
     """
     if not isinstance(node, yaml.SequenceNode):
-        raise TaskFileError("shared.gates: must be a sequence")
+        raise TaskFileError(f"shared.{key}: must be a sequence")
 
-    return [_check_gate(f"shared.gates[{j}]", el) for j, el in enumerate(node.value)]
+    return [_check_action(f"shared.{key}[{j}]", el) for j, el in enumerate(node.value)]
 
 
-def _check_gate(where: str, el: yaml.Node) -> Gate:
-    """Check one gate, allowing only the cmd and timeout keys.
+def _check_action(where: str, el: yaml.Node) -> Action:
+    """Check one action, allowing only the action and timeout keys.
 
-    A misspelled or invented option is an error instead of a gate that quietly
-    does less than its author meant.
+    A misspelled or invented option is an error instead of an action that
+    quietly does less than its author meant. The old `cmd` key is named, so an
+    old file is told what to change.
     """
     if not isinstance(el, yaml.MappingNode):
         raise TaskFileError(f"{where}: must be a mapping")
 
     fields = _fields(where, el)
     for key in fields:
-        if key not in ("cmd", "timeout"):
-            raise TaskFileError(
-                f"{where}: {key}: unknown key; a gate has only cmd and timeout"
-            )
+        _check_action_key(where, key)
 
-    cmd = _text(where, fields, "cmd", required=True)
-    return Gate(cmd=cmd, timeout=_check_gate_timeout(where, fields.get("timeout")))
+    command = _text(where, fields, "action", required=True)
+    return Action(
+        command=command, timeout=_check_action_timeout(where, fields.get("timeout"))
+    )
 
 
-def _check_gate_timeout(where: str, node: yaml.Node | None) -> str:
-    """Check a gate's timeout and return its text as written.
+def _check_action_key(where: str, key: str) -> None:
+    if key == "cmd":
+        raise TaskFileError(f"{where}: cmd: renamed to action; see the HOWTO")
+
+    if key not in ("action", "timeout"):
+        raise TaskFileError(
+            f"{where}: {key}: unknown key; an action has only action and timeout"
+        )
+
+
+def _check_action_timeout(where: str, node: yaml.Node | None) -> str:
+    """Check an action's timeout and return its text as written.
 
     The tag is checked as well as the text because `timeout: 30` is a YAML
     integer, and a bare number has no unit to read. The run parses the text
-    again when the gate runs.
+    again when the action runs.
     """
     if node is None:
         return ""
@@ -411,9 +457,9 @@ def _check_gate_timeout(where: str, node: yaml.Node | None) -> str:
 
 
 def parse_timeout(text: str) -> float:
-    """Parse a gate timeout into seconds.
+    """Parse an action timeout into seconds.
 
-    The task file and the --gate-timeout flag both use this, so one set of
+    The task file and the --action-timeout flag both use this, so one set of
     rules applies. The error text is the bare problem; callers prefix where
     the value came from.
     """
@@ -542,8 +588,12 @@ _TaskDumper.add_representer(str, _represent_str)
 def _document(task_list: TaskList) -> dict[str, object]:
     """Lay the task list out as it is written: shared above tasks, empty optional keys left out."""
     shared: dict[str, object] = {"prompt": task_list.shared.prompt}
-    if task_list.shared.gates is not None:
-        shared["gates"] = [_gate_entry(gate) for gate in task_list.shared.gates]
+    for key, actions in (
+        ("after_task", task_list.shared.after_task),
+        ("after_run", task_list.shared.after_run),
+    ):
+        if actions is not None:
+            shared[key] = [_action_entry(action) for action in actions]
 
     return {
         "shared": shared,
@@ -551,10 +601,10 @@ def _document(task_list: TaskList) -> dict[str, object]:
     }
 
 
-def _gate_entry(gate: Gate) -> dict[str, str]:
-    entry = {"cmd": gate.cmd}
-    if gate.timeout:
-        entry["timeout"] = gate.timeout
+def _action_entry(action: Action) -> dict[str, str]:
+    entry = {"action": action.command}
+    if action.timeout:
+        entry["timeout"] = action.timeout
 
     return entry
 

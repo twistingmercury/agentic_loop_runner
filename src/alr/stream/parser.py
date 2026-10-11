@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from alr.engine.gates import first_line
+from alr.engine.actions import first_line
 from alr.engine.result import replace_lone_surrogates
 
 _TARGET_FIELDS = {

@@ -130,7 +130,7 @@ async def test_start_commit_failure_keeps_its_exit_code_under_the_loop_prefix(
     hook.chmod(0o700)
     tasks_file = write_file(
         git_repo / "run" / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
+        "shared:\n  prompt: shared\n  after_task:\n    - action: echo work > one.txt\n"
         "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
     )
 
@@ -400,7 +400,7 @@ async def test_start_commit_flag_commits_the_task(
 ) -> None:
     tasks_file = write_file(
         outside / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+        "shared:\n  prompt: shared\n  after_task:\n    - action: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
     await _start(tasks_file, commit=CommitMode.TASK)
@@ -425,7 +425,7 @@ async def test_start_commit_fails_a_task_that_unignores_the_log_folder(
     # run/tasks.yaml stays hidden, so only the folder this run logs into becomes visible.
     tasks_file = write_file(
         git_repo / "run" / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo run/tasks.yaml > .gitignore; echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+        "shared:\n  prompt: shared\n  after_task:\n    - action: echo run/tasks.yaml > .gitignore; echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
     with pytest.raises(CommitFailedError) as caught:
@@ -441,7 +441,7 @@ async def test_start_after_all_mode_makes_one_commit_for_the_run(
 ) -> None:
     tasks_file = write_file(
         outside / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+        "shared:\n  prompt: shared\n  after_task:\n    - action: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
     await _start(tasks_file, commit=CommitMode.RUN)
@@ -461,7 +461,7 @@ async def test_start_after_all_mode_outside_a_repository_runs_and_says_so(
     monkeypatch.chdir(outside)
     tasks_file = write_file(
         outside / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+        "shared:\n  prompt: shared\n  after_task:\n    - action: echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
     )
 
     await _start(tasks_file, commit=CommitMode.RUN)
@@ -731,7 +731,7 @@ async def test_start_log_write_failure_stops_the_run_and_the_child(
 
 
 COMMITTING_TASK_YAML = (
-    "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
+    "shared:\n  prompt: shared\n  after_task:\n    - action: echo work > one.txt\n"
     "tasks:\n  - {id: 1, name: First, prompt: p1}\n"
 )
 
@@ -796,7 +796,7 @@ pathlib.Path(sys.argv[2]).write_text(answer)
 """
 
 
-async def test_a_committing_run_holds_the_lock_while_a_gate_runs(
+async def test_a_committing_run_holds_the_lock_while_a_action_runs(
     record: Path, git_repo: Path, tmp_path: Path
 ) -> None:
     probe = write_file(tmp_path / "probe.py", _LOCK_PROBE)
@@ -804,8 +804,8 @@ async def test_a_committing_run_holds_the_lock_while_a_gate_runs(
     lock = git_repo / ".git" / "alr.lock"
     tasks_file = write_file(
         git_repo / "run" / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n"
-        f"    - cmd: {sys.executable} {probe} {lock} {answer}\n"
+        "shared:\n  prompt: shared\n  after_task:\n"
+        f"    - action: {sys.executable} {probe} {lock} {answer}\n"
         "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
     )
 
@@ -831,7 +831,7 @@ async def test_a_failed_committing_run_releases_the_lock(
 ) -> None:
     tasks_file = write_file(
         git_repo / "run" / "tasks.yaml",
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: 'false'\n"
+        "shared:\n  prompt: shared\n  after_task:\n    - action: 'false'\n"
         "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
     )
 

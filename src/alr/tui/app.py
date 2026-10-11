@@ -28,12 +28,12 @@ from alr.tui.dialogs import (
     error_text,
     FileViewer,
     FolderDialog,
-    GatesDialog,
+    ActionsDialog,
     PermissionsDialog,
     ResetDialog,
     SummaryDialog,
 )
-from alr.tui.panes import ActivityPane, GatesPane, TasksPane
+from alr.tui.panes import ActivityPane, ActionsPane, TasksPane
 from alr.tui.prepare import Prepared, prepare
 from alr.tui.progress import Progress
 from alr.tasks import FAILED, PENDING, Task, TaskList
@@ -88,7 +88,7 @@ class AlrApp(App[None]):
     #top > *, #activity { border: round $primary; }
     #top > * { height: 1fr; }
     #tasks { width: 3fr; min-width: 28; }
-    #gates { width: 2fr; }
+    #actions { width: 2fr; }
     #activity { width: 100%; height: 3fr; }
     #progress { height: 1; padding: 0 1; }
     """
@@ -99,7 +99,7 @@ class AlrApp(App[None]):
         Binding("q", "quit_if_idle", "Quit"),
         Binding("f", "menu('folder')", "Folder"),
         Binding("p", "menu('permissions')", "Permissions"),
-        Binding("g", "menu('gates')", "Gates"),
+        Binding("a", "menu('actions')", "Actions"),
         Binding("r", "menu('reset')", "Reset"),
         Binding("t", "menu('tasks')", "Tasks file"),
         Binding("x", "menu('sandbox')", "Sandbox file"),
@@ -163,7 +163,7 @@ class AlrApp(App[None]):
         with Horizontal(id="menu"):
             yield Button("(f)older", id="menu-folder")
             yield Button("(p)ermissions", id="menu-permissions")
-            yield Button("(g)ates", id="menu-gates")
+            yield Button("(a)ctions", id="menu-actions")
             yield Button("(r)eset", id="menu-reset")
             yield Button("(t)asks", id="menu-tasks")
             yield Button("sandbo(x)", id="menu-sandbox")
@@ -171,7 +171,7 @@ class AlrApp(App[None]):
         with Vertical(id="panes"):
             with Horizontal(id="top"):
                 yield TasksPane(id="tasks", clock=self._clock)
-                yield GatesPane(id="gates")
+                yield ActionsPane(id="actions")
             yield Static("", id="progress")
             yield _activity_pane()
         yield Static("", id="status")
@@ -255,7 +255,7 @@ class AlrApp(App[None]):
 
     async def launch_sequence(self) -> None:
         """Ask, in order, only for what the flags and the task file leave open."""
-        # Read here, not after the first refresh: needs_gates must see the file.
+        # Read here, not after the first refresh: needs_actions must see the file.
         self._read_tasks()
         if not self.settings.tasks_file:
             await self.ask_folder()
@@ -266,8 +266,8 @@ class AlrApp(App[None]):
         if self.settings.permissions is Permissions.UNSET:
             await self.ask_permissions()
 
-        if self.needs_gates():
-            await self.ask_gates()
+        if self.needs_actions():
+            await self.ask_actions()
 
     async def ask_folder(self) -> None:
         """Show the folder dialog and apply an accepted answer to the settings."""
@@ -275,9 +275,9 @@ class AlrApp(App[None]):
         if check is None:
             return
 
-        # Gates edited for another folder must never be saved into this one's file.
+        # Actions edited for another folder must never be saved into this one's file.
         if check.tasks_file != self.settings.tasks_file:
-            self.settings.gates = None
+            self.settings.after_task = None
 
         self.settings.tasks_file = check.tasks_file
         try:
@@ -344,22 +344,22 @@ class AlrApp(App[None]):
 
         return self.settings.missing()
 
-    def needs_gates(self) -> bool:
-        """True when the loaded file leaves the gates undecided and the user has not decided."""
-        if self._task_list is None or self.settings.gates is not None:
+    def needs_actions(self) -> bool:
+        """True when the loaded file leaves the actions undecided and the user has not decided."""
+        if self._task_list is None or self.settings.after_task is not None:
             return False
 
-        return self._task_list.shared.gates is None
+        return self._task_list.shared.after_task is None
 
-    async def ask_gates(self) -> None:
-        """Show the gates dialog; nothing is saved until Start passes its checks."""
-        current = self.settings.gates
+    async def ask_actions(self) -> None:
+        """Show the actions dialog; nothing is saved until Start passes its checks."""
+        current = self.settings.after_task
         if current is None and self._task_list is not None:
-            current = self._task_list.gate_list()
+            current = self._task_list.after_task_list()
 
-        gates = await self.push_screen_wait(GatesDialog(current or []))
-        if gates is not None:
-            self.settings.gates = gates
+        actions = await self.push_screen_wait(ActionsDialog(current or []))
+        if actions is not None:
+            self.settings.after_task = actions
 
     def on_unmount(self) -> None:
         # The status line goes with the screen, so no tick may come after it.
@@ -389,7 +389,7 @@ class AlrApp(App[None]):
         self.query_one("#reason", Static).update(reason or "")
 
     def _grey_out_menu(self) -> None:
-        """Grey out what a run makes inert; Gates, Tasks and Sandbox are left as they are."""
+        """Grey out what a run makes inert; Actions, Tasks and Sandbox are left as they are."""
         running = self.state is AppState.RUNNING
         spent = self.state is AppState.FINISHED
         # The setup dialogs stay shut once a run has started; Quit only waits for the run.
@@ -451,7 +451,7 @@ class AlrApp(App[None]):
         action = {
             "folder": self.ask_folder,
             "permissions": self.ask_permissions,
-            "gates": self.ask_gates,
+            "actions": self.ask_actions,
             "reset": self.ask_reset,
         }
         self.run_worker(action[item](), exit_on_error=False)
@@ -551,8 +551,8 @@ class AlrApp(App[None]):
     def _start_ticking(self, prepared: Prepared) -> None:
         """Follow the run on the status line, which counts up every second."""
         pending = sum(task.state == PENDING for task in prepared.task_list.tasks)
-        gates = len(prepared.task_list.gate_list())
-        self._progress = Progress(pending, gates, clock=self._clock)
+        actions = len(prepared.task_list.after_task_list())
+        self._progress = Progress(pending, actions, clock=self._clock)
         self._ticker = self.set_interval(1, self._tick)
 
     def _tick(self) -> None:
@@ -633,7 +633,7 @@ class AlrApp(App[None]):
             self.query_one(ActivityPane).show(event.task.id, event.task.name)
 
         self.query_one(ActivityPane).apply(event)
-        self.query_one(GatesPane).apply(event)
+        self.query_one(ActionsPane).apply(event)
         if isinstance(event, RunDone):
             self._finish(event)
 

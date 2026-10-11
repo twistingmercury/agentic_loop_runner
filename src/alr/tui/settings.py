@@ -6,7 +6,7 @@ from pathlib import Path
 
 from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args, sandbox_args
-from alr.tasks import Gate
+from alr.tasks import Action
 
 
 class Permissions(StrEnum):
@@ -30,9 +30,9 @@ class RunSettings:
     reset_failed: bool = False
     """--reset-failed: failed tasks go back to pending when the file is first read."""
 
-    gate_timeout: str = ""
-    gates: list[Gate] | None = None
-    """Gates edited in the view; None when they were not touched."""
+    action_timeout: str = ""
+    after_task: list[Action] | None = None
+    """Actions edited in the view; None when they were not touched."""
 
     def missing(self) -> str | None:
         """Say what stops a run from starting, or None when nothing does."""

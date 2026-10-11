@@ -1,6 +1,6 @@
 """--commit run: alr makes one commit for the whole run, after the last task completes.
 
-The fake claude changes no files, so a gate does the "work" a commit picks up.
+The fake claude changes no files, so an action does the "work" a commit picks up.
 """
 
 import signal
@@ -24,14 +24,14 @@ from e2e_helpers import (
 from test_outcomes import assert_run_finished
 from test_signal import stopped_at_exit
 
-# The one gate picks its file by what the first task left behind, so the two
+# The one action picks its file by what the first task left behind, so the two
 # tasks leave two files for the single commit to pick up.
 TWO_WORK_TASKS = (
     shared_block(
         "Body.",
         [
             {
-                "cmd": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
+                "action": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
             }
         ],
     )

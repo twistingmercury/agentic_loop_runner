@@ -19,7 +19,7 @@ from alr.engine.commit import (
     recheck_ignored,
 )
 from alr.engine.frontend import FrontEnd
-from alr.engine.gates import run_gates
+from alr.engine.actions import run_actions
 from alr.engine.result import last_result_line, outcome
 from alr.engine.stop import Stop
 from alr.errors import (
@@ -72,8 +72,8 @@ class RunOptions:
 
     tasks_file: str
 
-    gate_timeout: str
-    """The --gate-timeout value; empty when the flag was not passed."""
+    action_timeout: str
+    """The --action-timeout value; empty when the flag was not passed."""
 
     session_args: Sequence[str]
     """The Claude flags that set what a session may do."""
@@ -464,7 +464,7 @@ async def _run_task(
     options: RunOptions,
     front_end: FrontEnd,
 ) -> _Outcome:
-    """Run the task's session, the gates, and the commit; return the state and error to save."""
+    """Run the task's session, the actions, and the commit; return the state and error to save."""
     stdin_text = f"{task_list.shared.prompt}\n\n{task.text()}\n"
     argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
     started = time.monotonic()
@@ -481,8 +481,8 @@ async def _run_task(
     if state != COMPLETED:
         return _Outcome(state, error)
 
-    state, error = await run_gates(
-        replace(task), task_list.gate_list(), options.gate_timeout, front_end
+    state, error = await run_actions(
+        replace(task), task_list.after_task_list(), options.action_timeout, front_end
     )
     per_task = options.commit_mode is CommitMode.TASK
     if state != COMPLETED or options.repo is None or not per_task:

@@ -14,7 +14,7 @@ from alr.record.events import (
     Activity,
     Committed,
     Event,
-    GateFinished,
+    ActionFinished,
     RunDone,
     RunResult,
     TaskFinished,
@@ -278,11 +278,11 @@ class ActivityPane(RichLog):
             self.write(event.line, scroll_end=self.is_vertical_scroll_end)
 
 
-class GatesPane(RichLog):
-    """Gate results and commit hashes, kept apart so they never scroll away in the activity."""
+class ActionsPane(RichLog):
+    """Action results and commit hashes, kept apart so they never scroll away in the activity."""
 
     def on_mount(self) -> None:
-        self.border_title = "Gates & commits"
+        self.border_title = "Actions & commits"
 
     def __init__(self, id: str | None = None) -> None:
         # Same settings as the activity pane: raw text, and wrapping at the pane's own edge.
@@ -316,18 +316,18 @@ class GatesPane(RichLog):
         self.write(line)
 
     def apply(self, event: Event) -> None:
-        if isinstance(event, GateFinished):
-            self._add(_gate_line(event))
+        if isinstance(event, ActionFinished):
+            self._add(_action_line(event))
 
         if isinstance(event, Committed):
             self._add(f"{event.task.id}. commit {event.commit_hash[:7]}")
 
 
-def _gate_line(event: GateFinished) -> str:
+def _action_line(event: ActionFinished) -> str:
     symbol = "✔"
     if event.timed_out:
         symbol = "⏱"
     elif event.error is not None:
         symbol = "✖"
 
-    return f"{event.task.id}. {symbol} {event.gate.cmd} {format_elapsed(event.seconds)}"
+    return f"{event.task.id}. {symbol} {event.action.command} {format_elapsed(event.seconds)}"

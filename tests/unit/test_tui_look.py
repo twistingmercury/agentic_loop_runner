@@ -14,22 +14,20 @@ from alr.tui.dialogs import (
     ErrorDialog,
     FileViewer,
     FolderDialog,
-    GatesDialog,
+    ActionsDialog,
     PermissionsDialog,
     ResetDialog,
     SummaryDialog,
 )
 from alr.tui.settings import Permissions, RunSettings
 
-TASKS = (
-    "shared:\n  prompt: p\n  gates: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
-)
+TASKS = "shared:\n  prompt: p\n  after_task: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 SIZES = [(80, 24), (140, 40)]
 
 DIALOGS: dict[str, Callable[[str], Screen[object]]] = {
     "folder": lambda tasks: FolderDialog(str(Path(tasks).parent)),
     "permissions": lambda tasks: PermissionsDialog(""),
-    "gates": lambda tasks: GatesDialog([]),
+    "actions": lambda tasks: ActionsDialog([]),
     "viewer": lambda tasks: FileViewer(tasks),
     "error": lambda tasks: ErrorDialog("something went wrong"),
     "summary": lambda tasks: SummaryDialog("done", 1.0, None),

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from alr.tasks import Gate, RunResult, Task
+from alr.tasks import Action, RunResult, Task
 
 # Long enough to name what went wrong, short enough for one error line; the
 # task's own log keeps the full text.
@@ -67,20 +67,20 @@ class FrontEnd(Protocol):
         """Note the session outcome and duration."""
         ...
 
-    async def run_gate(self, task: Task, gate: Gate) -> str | None:
-        """Run this gate command; return the exit. The engine applies the time limit around the call."""
+    async def run_action(self, task: Task, action: Action) -> str | None:
+        """Run this action command; return the exit. The engine applies the time limit around the call."""
         ...
 
-    def gate_finished(
+    def action_finished(
         self,
         task: Task,
-        gate: Gate,
+        action: Action,
         limit: str,
         error: str | None,
         timed_out: bool,
         seconds: float,
     ) -> None:
-        """Note a gate's result and duration."""
+        """Note an action's result and duration."""
         ...
 
     def commit_started(self, task: Task) -> None:

@@ -26,14 +26,14 @@ from test_signal import stopped_at_exit
 
 ONE_TASK_YAML = shared_block() + ONE_TASK
 
-# The fake claude changes no files, so a gate does the "work" a commit picks up.
-WORK_GATE = [{"cmd": "echo one > one.txt"}]
-ONE_WORK_TASK_YAML = shared_block("Body.", WORK_GATE) + ONE_TASK
+# The fake claude changes no files, so an action does the "work" a commit picks up.
+WORK_ACTION = [{"action": "echo one > one.txt"}]
+ONE_WORK_TASK_YAML = shared_block("Body.", WORK_ACTION) + ONE_TASK
 
-# The gate lets the first task through and fails the second, so a run-mode
+# The action lets the first task through and fails the second, so a run-mode
 # commit has a task that completed and a task that failed.
 SECOND_TASK_FAILS = [
-    {"cmd": "if [ -e one.txt ]; then exit 1; else echo one > one.txt; fi"}
+    {"action": "if [ -e one.txt ]; then exit 1; else echo one > one.txt; fi"}
 ]
 SECOND_TASK_FAILS_YAML = shared_block("Body.", SECOND_TASK_FAILS) + TWO_TASKS
 
@@ -42,7 +42,7 @@ TWO_WORK_TASKS_YAML = (
         "Body.",
         [
             {
-                "cmd": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
+                "action": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
             }
         ],
     )
@@ -98,7 +98,7 @@ def test_failed_task_exits_1(tmp_path: Path, fake_claude: Path) -> None:
 def test_bad_flag_exits_2(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, ONE_TASK_YAML)
 
-    res = run_alr(*run_args(tasks_path), "--gate-timeout", "soon")
+    res = run_alr(*run_args(tasks_path), "--action-timeout", "soon")
 
     assert res.code == 2, res
     assert not (tmp_path / "logs").exists()

@@ -1,6 +1,6 @@
-"""--commit task: alr commits each task itself once the session and every gate pass.
+"""--commit task: alr commits each task itself once the session and every action pass.
 
-The fake claude changes no files, so a gate does the "work" a commit picks up.
+The fake claude changes no files, so an action does the "work" a commit picks up.
 """
 
 import os
@@ -35,14 +35,14 @@ DIRTY_TREE_ERROR = (
 )
 BROKEN_REPO_ERROR = "error: refused: git-error: --commit: git rev-parse:"
 
-# The gates are shared by both tasks, so the one gate picks its file by what
+# The actions are shared by both tasks, so the one action picks its file by what
 # the first task left behind: each commit then holds exactly one new file.
 TWO_WORK_TASKS = (
     shared_block(
         "Body.",
         [
             {
-                "cmd": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
+                "action": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
             }
         ],
     )
@@ -188,11 +188,11 @@ def test_commit_broken_repository_is_an_error_dry_run(repo: CommitRepo) -> None:
     assert "is valid" not in res.out
 
 
-def test_commit_failed_gate_leaves_no_commit_and_blocks_the_rerun(
+def test_commit_failed_action_leaves_no_commit_and_blocks_the_rerun(
     git_repo: Path, fake_claude: Path
 ) -> None:
     tasks_yaml = (
-        shared_block("Body.", [{"cmd": "echo one > one.txt; exit 1"}])
+        shared_block("Body.", [{"action": "echo one > one.txt; exit 1"}])
         + """tasks:
   - id: 1
     name: First task
@@ -240,7 +240,7 @@ def test_commit_hook_output_is_in_the_task_log(
     git_repo: Path, fake_claude: Path
 ) -> None:
     tasks_yaml = (
-        shared_block("Body.", [{"cmd": "echo one > one.txt"}])
+        shared_block("Body.", [{"action": "echo one > one.txt"}])
         + """tasks:
   - id: 1
     name: First task

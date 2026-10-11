@@ -11,14 +11,14 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, ListView, TextArea
 
 from alr.tui.checks import FolderCheck
-from alr.tasks import FAILED, Gate, Task
+from alr.tasks import FAILED, Action, Task
 from alr.tui.dialogs import (
     ErrorDialog,
     ResetDialog,
     SummaryDialog,
     FileViewer,
     FolderDialog,
-    GatesDialog,
+    ActionsDialog,
     PermissionChoice,
     PermissionsDialog,
 )
@@ -138,10 +138,10 @@ async def test_permissions_dialog_preselects_nothing_without_a_default() -> None
         assert str(host.screen.query_one("#error").render()) != ""
 
 
-async def test_gates_dialog_adds_a_gate_and_returns_the_list() -> None:
+async def test_actions_dialog_adds_a_action_and_returns_the_list() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([Gate(cmd="ruff check")]), host.record)
+        host.push_screen(ActionsDialog([Action(command="ruff check")]), host.record)
         await pilot.pause()
         host.screen.query_one("#cmd", Input).value = "pytest"
         host.screen.query_one("#timeout", Input).value = "5m"
@@ -150,13 +150,16 @@ async def test_gates_dialog_adds_a_gate_and_returns_the_list() -> None:
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == [Gate(cmd="ruff check"), Gate(cmd="pytest", timeout="5m")]
+        assert host.result == [
+            Action(command="ruff check"),
+            Action(command="pytest", timeout="5m"),
+        ]
 
 
-async def test_gates_dialog_rejects_a_bad_timeout() -> None:
+async def test_actions_dialog_rejects_a_bad_timeout() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([]), host.record)
+        host.push_screen(ActionsDialog([]), host.record)
         await pilot.pause()
         host.screen.query_one("#cmd", Input).value = "pytest"
         host.screen.query_one("#timeout", Input).value = "soon"
@@ -170,10 +173,10 @@ async def test_gates_dialog_rejects_a_bad_timeout() -> None:
         assert host.result == []
 
 
-async def test_gates_dialog_rejects_an_empty_command() -> None:
+async def test_actions_dialog_rejects_an_empty_command() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([]), host.record)
+        host.push_screen(ActionsDialog([]), host.record)
         await pilot.pause()
 
         await pilot.click("#add")
@@ -185,10 +188,12 @@ async def test_gates_dialog_rejects_an_empty_command() -> None:
         assert host.result == []
 
 
-async def test_gates_dialog_removes_the_highlighted_gate() -> None:
+async def test_actions_dialog_removes_the_highlighted_action() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([Gate(cmd="a"), Gate(cmd="b")]), host.record)
+        host.push_screen(
+            ActionsDialog([Action(command="a"), Action(command="b")]), host.record
+        )
         await pilot.pause()
         host.screen.query_one("#list", ListView).index = 0
 
@@ -196,13 +201,13 @@ async def test_gates_dialog_removes_the_highlighted_gate() -> None:
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == [Gate(cmd="b")]
+        assert host.result == [Action(command="b")]
 
 
-async def test_gates_dialog_done_with_no_gates_returns_an_empty_list() -> None:
+async def test_actions_dialog_done_with_no_actions_returns_an_empty_list() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([]), host.record)
+        host.push_screen(ActionsDialog([]), host.record)
         await pilot.pause()
 
         await pilot.click("#done")
@@ -211,10 +216,10 @@ async def test_gates_dialog_done_with_no_gates_returns_an_empty_list() -> None:
         assert host.result == []
 
 
-async def test_gates_dialog_cancel_returns_none() -> None:
+async def test_actions_dialog_cancel_returns_none() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([Gate(cmd="a")]), host.record)
+        host.push_screen(ActionsDialog([Action(command="a")]), host.record)
         await pilot.pause()
 
         await pilot.click("#cancel")
@@ -262,13 +267,13 @@ async def test_file_viewer_closes(tmp_path: Path) -> None:
     [
         lambda: FolderDialog("."),
         lambda: PermissionsDialog(""),
-        lambda: GatesDialog([]),
+        lambda: ActionsDialog([]),
         lambda: FileViewer(""),
         lambda: ErrorDialog("x"),
         lambda: SummaryDialog("done", 1.0, None),
         lambda: ResetDialog([]),
     ],
-    ids=["folder", "permissions", "gates", "viewer", "error", "summary", "reset"],
+    ids=["folder", "permissions", "actions", "viewer", "error", "summary", "reset"],
 )
 async def test_escape_closes_every_dialog_with_none(
     make: Callable[[], ModalScreen[object]],
@@ -313,10 +318,10 @@ async def test_enter_in_the_sandbox_field_submits(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("field", ["cmd", "timeout"])
-async def test_enter_in_a_gate_field_adds_the_gate(field: str) -> None:
+async def test_enter_in_a_action_field_adds_the_action(field: str) -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([]), host.record)
+        host.push_screen(ActionsDialog([]), host.record)
         await pilot.pause()
         host.screen.query_one("#cmd", Input).value = "pytest"
         host.screen.query_one(f"#{field}", Input).focus()
@@ -327,10 +332,10 @@ async def test_enter_in_a_gate_field_adds_the_gate(field: str) -> None:
         assert len(host.screen.query_one("#list", ListView).children) == 1
 
 
-async def test_the_gates_dialog_starts_in_the_command_field() -> None:
+async def test_the_actions_dialog_starts_in_the_command_field() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(GatesDialog([Gate(cmd="x")]), host.record)
+        host.push_screen(ActionsDialog([Action(command="x")]), host.record)
         await pilot.pause()
 
         assert host.screen.focused is host.screen.query_one("#cmd", Input)

@@ -15,7 +15,7 @@ from e2e_helpers import (
 )
 
 TASKS = (
-    shared_block(gates=[])
+    shared_block(after_task=[])
     + """tasks:
   - id: 1
     name: First task

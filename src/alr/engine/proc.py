@@ -122,7 +122,7 @@ async def finish(
     group is stopped before the error carries on.
     bounded: once the process has exited, a drain still held open by a
     background process is cut off after a grace period, keeping what it had
-    read, and the process's pipes are closed. For a gate, whose own exit is its
+    read, and the process's pipes are closed. For an action, whose own exit is its
     result. Leave it off for a session, whose output must be read to the end.
     gentle is for git, which cleans up its index lock on SIGTERM but not on
     SIGKILL: a stop sends SIGTERM first and waits the grace period before

@@ -19,15 +19,15 @@ from alr.record.events import (
     CommitStarted,
     Committed,
     Event,
-    GateFinished,
-    GateStarted,
+    ActionFinished,
+    ActionStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
     TaskStarted,
 )
 from alr.record.runlog import Info, RunLog, run_dir
-from alr.tasks import COMPLETED, FAILED, Gate, RunResult, Task
+from alr.tasks import COMPLETED, FAILED, Action, RunResult, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'
 
@@ -101,13 +101,13 @@ def test_open_leaves_out_what_was_not_passed(tmp_path: Path) -> None:
         version="dev",
         tasks_file="t.yaml",
         permissions="skip",
-        gate_timeout="90s",
+        action_timeout="90s",
     )
     RunLog.open(path, info, now=fixed_now).close()
 
     want = (
         "{" + STAMP + ',"event":"run_started","version":"dev",'
-        '"tasks_file":"t.yaml","permissions":"skip","gate_timeout":"90s",'
+        '"tasks_file":"t.yaml","permissions":"skip","action_timeout":"90s",'
         '"commit":"none"}'
     )
     assert ledger_lines(path) == [want]
@@ -227,8 +227,8 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         TaskStarted(task),
         Activity(task, "working"),
         SessionFinished(done, 90.0),
-        Activity(task, "→ gate go test ./..."),
-        GateFinished(task, Gate(cmd="go test ./..."), "10m", None, False, 41.2),
+        Activity(task, "→ action go test ./..."),
+        ActionFinished(task, Action(command="go test ./..."), "10m", None, False, 41.2),
         Activity(task, "→ commit First"),
         Committed(task, "3f2a9c1"),
         TaskFinished(done, None, 132.0),
@@ -239,7 +239,7 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         "{" + STAMP + ',"event":"task_started","task":1,"name":"First"}',
         "{" + STAMP + ',"event":"session_finished","task":1,'
         '"state":"completed","duration":"1m30s"}',
-        "{" + STAMP + ',"event":"gate_finished","task":1,"cmd":"go test ./...",'
+        "{" + STAMP + ',"event":"action_finished","task":1,"cmd":"go test ./...",'
         '"result":"passed","timeout":"10m","duration":"41.2s"}',
         "{" + STAMP + ',"event":"committed","task":1,"hash":"3f2a9c1"}',
         "{" + STAMP + ',"event":"task_finished","task":1,'
@@ -253,7 +253,7 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
     assert mode(detail) == 0o600
     assert read_lines(detail) == [
         "14:02:11 working",
-        "14:02:11 → gate go test ./...",
+        "14:02:11 → action go test ./...",
         "14:02:11 → commit First",
     ]
 
@@ -265,7 +265,7 @@ def test_record_start_events_add_nothing_to_the_log(
     task = Task(id=1, name="First", prompt="p1")
     before = ledger_lines(path)
 
-    record(log, GateStarted(task, Gate(cmd="check")), CommitStarted(task))
+    record(log, ActionStarted(task, Action(command="check")), CommitStarted(task))
 
     assert ledger_lines(path) == before
     assert not (path / "task-1.log").exists()
@@ -279,16 +279,18 @@ def test_record_start_events_add_nothing_to_the_log(
         (None, True, "timed_out"),
     ],
 )
-def test_record_gate_results(
+def test_record_action_results(
     opened: tuple[RunLog, Path], error: str | None, timed_out: bool, want: str
 ) -> None:
     log, path = opened
     task = Task(id=7, name="Seventh", prompt="")
 
-    record(log, GateFinished(task, Gate(cmd="check"), "90s", error, timed_out, 0.0))
+    record(
+        log, ActionFinished(task, Action(command="check"), "90s", error, timed_out, 0.0)
+    )
 
     assert ledger_lines(path)[1] == (
-        "{" + STAMP + ',"event":"gate_finished","task":7,"cmd":"check",'
+        "{" + STAMP + ',"event":"action_finished","task":7,"cmd":"check",'
         f'"result":"{want}","timeout":"90s","duration":"0s"}}'
     )
 
@@ -298,9 +300,13 @@ def test_record_gate_results(
 def test_record_keeps_shell_syntax_readable(opened: tuple[RunLog, Path]) -> None:
     log, path = opened
     task = Task(id=1, name='Say "hi" & <go> é', prompt="")
-    gate = Gate(cmd='test -z "$(gofmt -l .)" && echo ok > out.txt\necho second line')
+    action = Action(
+        command='test -z "$(gofmt -l .)" && echo ok > out.txt\necho second line'
+    )
 
-    record(log, TaskStarted(task), GateFinished(task, gate, "10m", None, False, 0.0))
+    record(
+        log, TaskStarted(task), ActionFinished(task, action, "10m", None, False, 0.0)
+    )
 
     lines = ledger_lines(path)
     assert '"name":"Say \\"hi\\" & <go> é"' in lines[1]
@@ -314,8 +320,8 @@ def test_record_failed_task_ends_the_run_as_failed(
 ) -> None:
     log, path = opened
     task = Task(id=2, name="Second", prompt="")
-    failed = replace(task, state=FAILED, error='gate "exit 3" failed: exit status 3')
-    run_error = 'task 2: Second failed: gate "exit 3" failed: exit status 3'
+    failed = replace(task, state=FAILED, error='action "exit 3" failed: exit status 3')
+    run_error = 'task 2: Second failed: action "exit 3" failed: exit status 3'
 
     record(
         log,
@@ -327,11 +333,11 @@ def test_record_failed_task_ends_the_run_as_failed(
     lines = ledger_lines(path)
     assert lines[2] == (
         "{" + STAMP + ',"event":"task_finished","task":2,"state":"failed",'
-        '"error":"gate \\"exit 3\\" failed: exit status 3","duration":"1s"}'
+        '"error":"action \\"exit 3\\" failed: exit status 3","duration":"1s"}'
     )
     assert lines[3] == (
         "{" + STAMP + ',"event":"run_finished","result":"failed",'
-        '"error":"task 2: Second failed: gate \\"exit 3\\" failed: exit status 3",'
+        '"error":"task 2: Second failed: action \\"exit 3\\" failed: exit status 3",'
         '"exit":1,"duration":"1s"}'
     )
 

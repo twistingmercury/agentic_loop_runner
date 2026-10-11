@@ -103,7 +103,7 @@ async def run_loop(
     task_list: TaskList,
     tasks_file: Path,
     *,
-    gate_timeout: str = "",
+    action_timeout: str = "",
     session_args: list[str] | None = None,
     repo: Repo | None = None,
     front_end: FrontEnd | None = None,
@@ -114,7 +114,7 @@ async def run_loop(
     """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(
         tasks_file=str(tasks_file),
-        gate_timeout=gate_timeout,
+        action_timeout=action_timeout,
         session_args=bypass_args() if session_args is None else session_args,
         repo=repo,
         commit_mode=commit_mode,

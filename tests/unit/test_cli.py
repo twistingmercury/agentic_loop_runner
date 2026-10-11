@@ -32,8 +32,8 @@ SANDBOXED = [
 ]
 BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
 NO_PERMISSIONS = "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
-BAD_DURATION = "--gate-timeout: must be a duration string such as 90s or 10m"
-GATE_TIMEOUT_FLAG = "--gate-timeout"
+BAD_DURATION = "--action-timeout: must be a duration string such as 90s or 10m"
+ACTION_TIMEOUT_FLAG = "--action-timeout"
 
 
 @pytest.fixture
@@ -93,13 +93,13 @@ def test_session_args_errors(
 @pytest.mark.parametrize(
     ("value", "want"),
     [
-        pytest.param("0s", GATE_TIMEOUT_FLAG, id="zero"),
-        pytest.param("-5m", GATE_TIMEOUT_FLAG, id="negative"),
+        pytest.param("0s", ACTION_TIMEOUT_FLAG, id="zero"),
+        pytest.param("-5m", ACTION_TIMEOUT_FLAG, id="negative"),
     ],
 )
-def test_check_gate_timeout_errors(value: str, want: str) -> None:
+def test_check_action_timeout_errors(value: str, want: str) -> None:
     with pytest.raises(UsageError) as caught:
-        cli.check_gate_timeout(value)
+        cli.check_action_timeout(value)
 
     assert want in str(caught.value)
 
@@ -154,7 +154,7 @@ def test_missing_required_flags_are_each_named(
 
 
 def test_a_bad_flag_value_exits_2(folder: Path) -> None:
-    assert cli.main(["--plain", "--gate-timeout", "soon", "-d", str(folder)]) == 2
+    assert cli.main(["--plain", "--action-timeout", "soon", "-d", str(folder)]) == 2
 
 
 def test_a_missing_dir_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
@@ -253,21 +253,21 @@ def test_log_dir_flag_is_an_unknown_argument(
     assert "unrecognized arguments: --log-dir" in capsys.readouterr().err
 
 
-def test_empty_gate_timeout_is_bad(
+def test_empty_action_timeout_is_bad(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", ""]) == 2
+    assert cli.main(["-d", str(folder), "--dry-run", "--action-timeout", ""]) == 2
     assert f"error: {BAD_DURATION}" in capsys.readouterr().err
 
 
-# gralph checks --dir, then --gate-timeout, then the required flags.
+# gralph checks --dir, then --action-timeout, then the required flags.
 def test_startup_checks_run_in_gralphs_order(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(tmp_path), "--gate-timeout", "30"]) == 2
+    assert cli.main(["-d", str(tmp_path), "--action-timeout", "30"]) == 2
     assert capsys.readouterr().err == f"error: --dir: no tasks.yaml in {tmp_path}\n"
 
-    assert cli.main(["--gate-timeout", "30"]) == 2
+    assert cli.main(["--action-timeout", "30"]) == 2
     assert capsys.readouterr().err == f"error: {BAD_DURATION}\n"
 
 
@@ -382,7 +382,7 @@ def test_a_second_signal_does_not_leave_git_running(
     ready = tmp_path / "ready"
     tasks_file = git_repo / "run" / "tasks.yaml"
     tasks_yaml = (
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
+        "shared:\n  prompt: shared\n  after_task:\n    - action: echo work > one.txt\n"
         "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
     )
     tasks_file.write_text(tasks_yaml, encoding="utf-8")
@@ -421,7 +421,7 @@ def _capture_start(
 
     async def fake_start(
         tasks_file: str,
-        gate_timeout: str,
+        action_timeout: str,
         session: list[str],
         commit: CommitMode,
         reset_failed: bool,
@@ -686,14 +686,14 @@ def test_the_view_gets_the_resolved_flags(
     seen = _capture_view(monkeypatch)
     _add_sandbox(folder)
 
-    code = cli.main(["-d", str(folder), "--commit", "run", "--gate-timeout", "5m"])
+    code = cli.main(["-d", str(folder), "--commit", "run", "--action-timeout", "5m"])
 
     assert code == 0
     assert seen[0].tasks_file == str(folder / "tasks.yaml")
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == str(folder / "sandbox.json")
     assert seen[0].commit_mode is CommitMode.RUN
-    assert seen[0].gate_timeout == "5m"
+    assert seen[0].action_timeout == "5m"
 
 
 def test_the_view_defaults_to_no_commit_and_takes_skip(
@@ -834,7 +834,7 @@ def test_the_view_gets_the_reset_failed_flag(
     ("placeholder", "usage_token", "help_option"),
     [
         ("DIR", "[-d]", "-d, --dir "),
-        ("GATE_TIMEOUT", "[--gate-timeout]", "--gate-timeout "),
+        ("ACTION_TIMEOUT", "[--action-timeout]", "--action-timeout "),
         ("SANDBOX_SETTINGS", "[--sandbox-settings]", "--sandbox-settings "),
     ],
 )
@@ -850,3 +850,34 @@ def test_value_flags_show_no_placeholder_in_the_help(
     assert placeholder not in help_text
     assert usage_token in usage
     assert help_option in help_text
+
+
+@pytest.mark.parametrize("value", ["5m", ""])
+def test_the_old_gate_timeout_flag_is_refused_naming_its_replacement(
+    folder: Path, capsys: pytest.CaptureFixture[str], value: str
+) -> None:
+    code = cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", value])
+
+    assert code == 2
+    assert (
+        capsys.readouterr().err
+        == "error: --gate-timeout: renamed to --action-timeout\n"
+    )
+
+
+def test_the_old_gate_timeout_flag_is_refused_before_any_other_check(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["--gate-timeout", "5m", "--version"]) == 2
+    assert "renamed to --action-timeout" in capsys.readouterr().err
+
+
+def test_the_old_gate_timeout_flag_is_hidden_from_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    out = capsys.readouterr().out
+    assert "--gate-timeout" not in out
+    assert "--action-timeout" in out

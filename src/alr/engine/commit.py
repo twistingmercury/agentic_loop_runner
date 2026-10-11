@@ -11,7 +11,7 @@ from pathlib import Path
 
 from alr.engine import proc
 from alr.engine.frontend import FrontEnd
-from alr.engine.gates import first_line
+from alr.engine.actions import first_line
 from alr.errors import (
     DIRTY_TREE,
     GIT_ERROR,

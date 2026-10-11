@@ -11,7 +11,7 @@ from alr.engine.commit import CommitMode, Repo, find_repo, held_lock
 from alr.engine.stop import Stop
 from alr.errors import FailedTasksError, RefusedError, RunLogError
 from alr.record.runlog import RunLog
-from alr.tasks import Gate, parse_tasks
+from alr.tasks import Action, parse_tasks
 from alr.tui import prepare as prepare_module
 from alr.tui.prepare import prepare
 from alr.tui.settings import Permissions, RunSettings
@@ -123,11 +123,11 @@ async def test_prepare_in_a_repository_records_the_commit_mode(
     assert '"commit":"task"' in ledger.read_text(encoding="utf-8")
 
 
-async def test_prepare_dirty_tree_is_an_error_and_saves_no_gates(
+async def test_prepare_dirty_tree_is_an_error_and_saves_no_actions(
     git_repo: Path,
 ) -> None:
     settings = _settings(
-        git_repo, gates=[Gate(cmd="true")], commit_mode=CommitMode.TASK
+        git_repo, after_task=[Action(command="true")], commit_mode=CommitMode.TASK
     )
     before = Path(settings.tasks_file).read_text(encoding="utf-8")
     (git_repo / "stray.txt").write_text("x", encoding="utf-8")
@@ -184,27 +184,27 @@ async def test_prepare_with_none_never_opens_the_repository(git_repo: Path) -> N
     assert prepared.options.commit_mode is CommitMode.NONE
 
 
-async def test_prepare_saves_edited_gates_once_every_check_passes(
+async def test_prepare_saves_edited_actions_once_every_check_passes(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true", timeout="5s")])
+    settings = _settings(git_repo, after_task=[Action(command="true", timeout="5s")])
 
     prepared = await prepare(settings)
 
     saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
-    assert saved.gate_list() == [Gate(cmd="true", timeout="5s")]
-    assert prepared.task_list.gate_list() == saved.gate_list()
+    assert saved.after_task_list() == [Action(command="true", timeout="5s")]
+    assert prepared.task_list.after_task_list() == saved.after_task_list()
 
 
 async def test_prepare_save_keeps_a_users_own_tmp_file(git_repo: Path) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    settings = _settings(git_repo, after_task=[Action(command="true")])
     users = Path(f"{settings.tasks_file}.tmp")
     users.write_text("precious", encoding="utf-8")
 
     await prepare(settings)
 
     saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
-    assert saved.gate_list() == [Gate(cmd="true")]
+    assert saved.after_task_list() == [Action(command="true")]
     assert users.read_bytes() == b"precious"
 
 
@@ -296,7 +296,7 @@ async def test_prepare_leaves_the_task_file_alone_when_the_log_cannot_open(
         raise RunLogError("no room")
 
     monkeypatch.setattr(RunLog, "open", refuse)
-    settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+    settings = _settings(git_repo, logging=True, after_task=[Action(command="true")])
     before = Path(settings.tasks_file).read_bytes()
 
     with pytest.raises(RunLogError):
@@ -305,10 +305,10 @@ async def test_prepare_leaves_the_task_file_alone_when_the_log_cannot_open(
     assert Path(settings.tasks_file).read_bytes() == before
 
 
-async def test_prepare_refuses_and_removes_the_run_folder_when_saving_the_gates_fails(
+async def test_prepare_refuses_and_removes_the_run_folder_when_saving_the_actions_fails(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+    settings = _settings(git_repo, logging=True, after_task=[Action(command="true")])
     block_saving(monkeypatch)
     before = Path(settings.tasks_file).read_bytes()
 
@@ -321,10 +321,10 @@ async def test_prepare_refuses_and_removes_the_run_folder_when_saving_the_gates_
     assert not (git_repo / "run" / "logs").exists(), "the logs/ it made is removed too"
 
 
-async def test_prepare_keeps_a_logs_folder_that_was_there_when_saving_the_gates_fails(
+async def test_prepare_keeps_a_logs_folder_that_was_there_when_saving_the_actions_fails(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    settings = _settings(git_repo, logging=True, gates=[Gate(cmd="true")])
+    settings = _settings(git_repo, logging=True, after_task=[Action(command="true")])
     (git_repo / "run" / "logs").mkdir()
     block_saving(monkeypatch)
 
@@ -373,16 +373,18 @@ async def test_prepare_reset_failed_resets_the_list_and_saves_the_file(
     assert [(task.state, task.error) for task in saved.tasks] == [("pending", "")]
 
 
-async def test_prepare_reset_failed_and_edited_gates_are_saved_together(
+async def test_prepare_reset_failed_and_edited_actions_are_saved_together(
     git_repo: Path,
 ) -> None:
-    settings = _failed_settings(git_repo, reset_failed=True, gates=[Gate(cmd="true")])
+    settings = _failed_settings(
+        git_repo, reset_failed=True, after_task=[Action(command="true")]
+    )
 
     await prepare(settings)
 
     saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
     assert saved.tasks[0].state == "pending"
-    assert saved.gate_list() == [Gate(cmd="true")]
+    assert saved.after_task_list() == [Action(command="true")]
 
 
 async def test_prepare_reset_failed_leaves_the_file_alone_when_the_log_cannot_open(
@@ -461,7 +463,7 @@ async def test_prepare_refuses_while_another_run_holds_the_lock(
     git_repo: Path, mode: CommitMode
 ) -> None:
     settings = _settings(
-        git_repo, gates=[Gate(cmd="true")], logging=True, commit_mode=mode
+        git_repo, after_task=[Action(command="true")], logging=True, commit_mode=mode
     )
     before = Path(settings.tasks_file).read_text(encoding="utf-8")
     repo = await find_repo(settings.tasks_file)
@@ -544,7 +546,10 @@ async def test_a_refused_save_releases_the_lock_and_removes_the_log_folder(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(
-        git_repo, gates=[Gate(cmd="true")], logging=True, commit_mode=CommitMode.RUN
+        git_repo,
+        after_task=[Action(command="true")],
+        logging=True,
+        commit_mode=CommitMode.RUN,
     )
     repo = await find_repo(settings.tasks_file)
     block_saving(monkeypatch)

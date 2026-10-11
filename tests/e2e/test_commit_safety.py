@@ -1,6 +1,6 @@
 """The commit-safety guards: one committing run per repository, ignore rules re-checked, git tied to alr's life.
 
-The fake claude changes no files, so a gate does the "work" a commit picks up.
+The fake claude changes no files, so an action does the "work" a commit picks up.
 """
 
 import subprocess
@@ -89,8 +89,8 @@ def test_unignored_task_file_fails_the_commit(
     git_repo: Path, fake_claude: Path, mode: str
 ) -> None:
     # Emptying .gitignore un-ignores run/, and the task file with it.
-    gate = f"echo one > {git_repo}/one.txt; : > {git_repo}/.gitignore"
-    tasks_yaml = shared_block("Body.", [{"cmd": gate}]) + ONE_TASK
+    action = f"echo one > {git_repo}/one.txt; : > {git_repo}/.gitignore"
+    tasks_yaml = shared_block("Body.", [{"action": action}]) + ONE_TASK
     tasks_path = write_tasks_yaml(git_repo / "run", tasks_yaml)
 
     res = run_alr(*run_args(tasks_path), "--commit", mode)

@@ -38,7 +38,7 @@ from alr.engine.stop import Stop
 from alr.errors import RefusedError, RunLogError
 from alr.record.runlog import RunLog
 from alr.engine.commit import CommitMode
-from alr.tasks import Gate, parse_tasks
+from alr.tasks import Action, parse_tasks
 from alr.tui.app import AlrApp, AppState
 from alr.record.events import Activity, CommitStarted, TaskStarted
 from alr.tasks import Task
@@ -49,7 +49,7 @@ from alr.tui import app as app_module
 from alr.tui.dialogs import (
     FileViewer,
     FolderDialog,
-    GatesDialog,
+    ActionsDialog,
     PermissionsDialog,
     ResetDialog,
 )
@@ -57,7 +57,7 @@ from alr.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
   prompt: do it
-  gates: []
+  after_task: []
 tasks:
   - id: 1
     name: First
@@ -68,11 +68,11 @@ tasks:
 """
 
 
-# The fake claude writes nothing, so a gate makes each task leave a file to commit.
+# The fake claude writes nothing, so an action makes each task leave a file to commit.
 WORKING_TASKS = TASKS.replace(
-    "gates: []",
-    "gates:\n"
-    "    - cmd: n=1; while [ -e work-$n.txt ]; do n=$((n+1)); done; echo w > work-$n.txt",
+    "after_task: []",
+    "after_task:\n"
+    "    - action: n=1; while [ -e work-$n.txt ]; do n=$((n+1)); done; echo w > work-$n.txt",
 )
 
 
@@ -310,32 +310,36 @@ async def test_permissions_label_shows_the_choice_and_applies_the_dialog(
 
 
 @pytest.mark.parametrize(
-    ("gates_block", "want"),
-    [("", True), ("  gates: []\n", False), ("  gates:\n    - cmd: 'true'\n", False)],
-    ids=["absent key", "decided none", "has gates"],
+    ("actions_block", "want"),
+    [
+        ("", True),
+        ("  after_task: []\n", False),
+        ("  after_task:\n    - action: 'true'\n", False),
+    ],
+    ids=["absent key", "decided none", "has actions"],
 )
-async def test_needs_gates_only_for_an_absent_key(
-    git_repo: Path, gates_block: str, want: bool
+async def test_needs_actions_only_for_an_absent_key(
+    git_repo: Path, actions_block: str, want: bool
 ) -> None:
-    text = f"shared:\n  prompt: p\n{gates_block}tasks:\n  - id: 1\n    name: A\n    prompt: p\n"
+    text = f"shared:\n  prompt: p\n{actions_block}tasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
         await pilot.pause()
 
-        assert app.needs_gates() is want
+        assert app.needs_actions() is want
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_start_saves_the_edited_gates(git_repo: Path) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+async def test_start_saves_the_edited_actions(git_repo: Path) -> None:
+    settings = _settings(git_repo, after_task=[Action(command="true")])
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
 
     saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
-    assert saved.gate_list() == [Gate(cmd="true")]
+    assert saved.after_task_list() == [Action(command="true")]
 
 
 async def test_launch_opens_the_folder_dialog_when_no_folder_is_known() -> None:
@@ -345,7 +349,7 @@ async def test_launch_opens_the_folder_dialog_when_no_folder_is_known() -> None:
 
 
 async def test_launch_skips_every_step_the_inputs_answer(git_repo: Path) -> None:
-    text = "shared:\n  prompt: p\n  gates: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
+    text = "shared:\n  prompt: p\n  after_task: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
@@ -355,7 +359,9 @@ async def test_launch_skips_every_step_the_inputs_answer(git_repo: Path) -> None
         assert not isinstance(app.screen, ModalScreen)
 
 
-async def test_launch_asks_for_permissions_then_gates_in_order(git_repo: Path) -> None:
+async def test_launch_asks_for_permissions_then_actions_in_order(
+    git_repo: Path,
+) -> None:
     text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file))
@@ -364,7 +370,7 @@ async def test_launch_asks_for_permissions_then_gates_in_order(git_repo: Path) -
 
         await pilot.click("#skip")
         await pilot.click("#ok")
-        await until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, ActionsDialog))
 
         await pilot.click("#done")
         await until(lambda: app.state is AppState.READY)
@@ -375,8 +381,8 @@ async def test_the_menu_reopens_a_dialog_before_start(git_repo: Path) -> None:
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
-        await pilot.click("#menu-gates")
-        await until(lambda: isinstance(app.screen, GatesDialog))
+        await pilot.click("#menu-actions")
+        await until(lambda: isinstance(app.screen, ActionsDialog))
 
         await pilot.click("#cancel")
         await until(lambda: not isinstance(app.screen, ModalScreen))
@@ -409,7 +415,7 @@ async def test_the_viewer_says_when_there_is_no_sandbox_file(git_repo: Path) -> 
 
 
 @pytest.mark.usefixtures("fake_claude")
-@pytest.mark.parametrize("item", ["folder", "permissions", "gates"])
+@pytest.mark.parametrize("item", ["folder", "permissions", "actions"])
 async def test_setup_dialogs_do_not_open_while_running(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch, item: str
 ) -> None:
@@ -1004,14 +1010,14 @@ async def test_a_run_log_that_cannot_write_still_ends_the_run(
         assert app.outcome == "failed"
 
 
-async def test_launch_opens_the_gates_dialog_when_flags_answer_everything_else(
+async def test_launch_opens_the_actions_dialog_when_flags_answer_everything_else(
     git_repo: Path,
 ) -> None:
     text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(git_repo / "run" / "tasks.yaml", text)
     app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
-        await until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, ActionsDialog))
         # Let the table's queued first highlight land; leaving with it queued
         # makes it arrive in a closing app on a busy worker.
         await pilot.pause()
@@ -1025,10 +1031,10 @@ async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
     await until(lambda: not isinstance(app.screen, ModalScreen))
 
 
-async def test_picking_another_folder_drops_the_gates_edited_for_the_first(
+async def test_picking_another_folder_drops_the_actions_edited_for_the_first(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+    settings = _settings(git_repo, after_task=[Action(command="true")])
     other = git_repo / "other"
     other.mkdir()
     write_file(other / "tasks.yaml", TASKS)
@@ -1039,18 +1045,18 @@ async def test_picking_another_folder_drops_the_gates_edited_for_the_first(
         await _pick_folder(app, pilot, other)
 
         assert settings.tasks_file == str(other / "tasks.yaml")
-        assert settings.gates is None
+        assert settings.after_task is None
 
 
-async def test_picking_the_same_folder_keeps_the_gates(git_repo: Path) -> None:
-    settings = _settings(git_repo, gates=[Gate(cmd="true")])
+async def test_picking_the_same_folder_keeps_the_actions(git_repo: Path) -> None:
+    settings = _settings(git_repo, after_task=[Action(command="true")])
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
         await _pick_folder(app, pilot, git_repo / "run")
 
-        assert settings.gates == [Gate(cmd="true")]
+        assert settings.after_task == [Action(command="true")]
 
 
 @pytest.mark.parametrize("size", [(80, 24), (140, 40)], ids=["80x24", "140x40"])
@@ -1203,16 +1209,18 @@ def _ledger(repo: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _gated(cmd: str) -> str:
-    return TASKS.replace("gates: []", f"gates:\n    - cmd: '{cmd}'")
+def _with_actions(action: str) -> str:
+    return TASKS.replace("after_task: []", f"after_task:\n    - action: '{action}'")
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_stop_during_a_gate_kills_the_gate_and_ends_stopped(
+async def test_stop_during_a_action_kills_the_action_and_ends_stopped(
     git_repo: Path, tmp_path: Path, closed_logs: list[RunLog]
 ) -> None:
-    pid_file = tmp_path / "gate.pid"
-    settings = _logged_settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30"))
+    pid_file = tmp_path / "action.pid"
+    settings = _logged_settings(
+        git_repo, _with_actions(f"echo $$ > {pid_file}; sleep 30")
+    )
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
@@ -1478,8 +1486,8 @@ def test_run_app_turns_the_mouse_off(
 
 @pytest.mark.parametrize(
     ("key", "dialog"),
-    [("f", FolderDialog), ("p", PermissionsDialog), ("g", GatesDialog)],
-    ids=["folder", "permissions", "gates"],
+    [("f", FolderDialog), ("p", PermissionsDialog), ("a", ActionsDialog)],
+    ids=["folder", "permissions", "actions"],
 )
 async def test_hotkeys_open_the_setup_dialogs_before_start(
     git_repo: Path, key: str, dialog: type[ModalScreen[object]]
@@ -1505,7 +1513,7 @@ async def test_viewer_hotkeys_open_a_viewer(git_repo: Path, key: str) -> None:
 
 
 @pytest.mark.usefixtures("fake_claude")
-@pytest.mark.parametrize("key", ["f", "p", "g"])
+@pytest.mark.parametrize("key", ["f", "p", "a"])
 async def test_setup_hotkeys_do_nothing_while_running(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch, key: str
 ) -> None:
@@ -1550,18 +1558,18 @@ async def test_hotkeys_do_not_fire_inside_a_dialog(git_repo: Path) -> None:
         await until(lambda: isinstance(app.screen, FolderDialog))
         dialog = app.screen
 
-        await pilot.press("g", "tab")
+        await pilot.press("a", "tab")
         await pilot.pause()
 
         assert app.screen is dialog
 
 
-NO_GATES_TASKS = TASKS.replace("  gates: []\n", "")
+NO_ACTIONS_TASKS = TASKS.replace("  after_task: []\n", "")
 
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_the_whole_setup_runs_from_the_keyboard_alone(git_repo: Path) -> None:
-    write_file(git_repo / "run" / "tasks.yaml", NO_GATES_TASKS)
+    write_file(git_repo / "run" / "tasks.yaml", NO_ACTIONS_TASKS)
     settings = RunSettings(logging=False)
     app = AlrApp(settings)
     async with app.run_test() as pilot:
@@ -1574,12 +1582,12 @@ async def test_the_whole_setup_runs_from_the_keyboard_alone(git_repo: Path) -> N
         await pilot.press("down", "enter", "tab", "tab", "enter")
 
         # The command field has focus; Enter adds, then Tab to Done.
-        await until(lambda: isinstance(app.screen, GatesDialog))
+        await until(lambda: isinstance(app.screen, ActionsDialog))
         await pilot.press(*"true", "enter")
         await pilot.press("tab", "tab", "tab", "tab", "enter")
 
         await until(lambda: app.state is AppState.READY)
-        assert settings.gates == [Gate(cmd="true")]
+        assert settings.after_task == [Action(command="true")]
 
         await pilot.press("s")
         await _finished(app)
@@ -1763,7 +1771,7 @@ async def test_escape_in_the_reset_dialog_changes_nothing(git_repo: Path) -> Non
 async def test_enter_in_the_reset_dialog_resets_and_enables_start(
     git_repo: Path,
 ) -> None:
-    settings = _settings(git_repo, DONE_AND_FAILED, gates=[Gate(cmd="true")])
+    settings = _settings(git_repo, DONE_AND_FAILED, after_task=[Action(command="true")])
     app = AlrApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.query_one(TasksPane).row_count == 2)
@@ -1777,7 +1785,7 @@ async def test_enter_in_the_reset_dialog_resets_and_enables_start(
         assert [task.state for task in saved.tasks] == ["pending", "completed"]
         assert [task.error for task in saved.tasks] == ["", ""]
         # The edit waits for Start; a reset saves the file as it was loaded.
-        assert saved.gate_list() == []
+        assert saved.after_task_list() == []
         assert not app.query_one("#start").disabled
         assert app.query_one(TasksPane).get_row("1")[0] != "✖"
 
@@ -2097,8 +2105,8 @@ async def test_the_commit_note_stays_hidden_inside_a_repository_after_picking_af
         assert not _note_shown(app)
 
 
-MENU = ["folder", "permissions", "gates", "reset", "tasks", "sandbox", "quit"]
-# What each state greys out; gates, tasks and sandbox are never touched.
+MENU = ["folder", "permissions", "actions", "reset", "tasks", "sandbox", "quit"]
+# What each state greys out; actions, tasks and sandbox are never touched.
 GREYED = {
     "ready": {"folder": False, "permissions": False, "reset": False, "quit": False},
     "running": {"folder": True, "permissions": True, "reset": True, "quit": True},
@@ -2166,7 +2174,7 @@ async def test_tab_skips_the_greyed_out_buttons(
             await pilot.press("tab")
             reached.add(getattr(app.focused, "id", None) or "")
 
-        assert {"menu-gates", "menu-tasks", "menu-sandbox"} <= reached
+        assert {"menu-actions", "menu-tasks", "menu-sandbox"} <= reached
         assert not reached & {
             "menu-folder",
             "menu-permissions",
@@ -2208,17 +2216,17 @@ async def test_the_status_line_shows_the_task_and_session(
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_the_status_line_shows_the_running_gate(
+async def test_the_status_line_shows_the_running_action(
     git_repo: Path, tmp_path: Path
 ) -> None:
-    pid_file = tmp_path / "gate.pid"
-    app = AlrApp(_settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30")))
+    pid_file = tmp_path / "action.pid"
+    app = AlrApp(_settings(git_repo, _with_actions(f"echo $$ > {pid_file}; sleep 30")))
     async with app.run_test() as pilot:
         await pilot.press("s")
         pid = int(await wait_for_text(pid_file))
-        await until(lambda: "gate 1 of 1: echo $$" in _status_line(app))
+        await until(lambda: "action 1 of 1: echo $$" in _status_line(app))
 
-        assert _status_line(app).startswith("task 1 of 2 · gate 1 of 1: ")
+        assert _status_line(app).startswith("task 1 of 2 · action 1 of 1: ")
 
         await pilot.press("ctrl+c")
         await _finished(app)
@@ -2370,20 +2378,22 @@ async def test_the_ticker_stops_when_the_app_unmounts(
 
 @pytest.mark.usefixtures("fake_claude")
 @pytest.mark.parametrize("size", [(80, 24), (110, 32)], ids=["80x24", "110x32"])
-async def test_a_long_gate_is_cut_so_the_timers_stay_on_the_line(
+async def test_a_long_action_is_cut_so_the_timers_stay_on_the_line(
     git_repo: Path, tmp_path: Path, size: tuple[int, int]
 ) -> None:
-    pid_file = tmp_path / "gate.pid"
+    pid_file = tmp_path / "action.pid"
     padding = "x" * 120
     clock = HandClock()
     app = AlrApp(
-        _settings(git_repo, _gated(f"echo $$ > {pid_file}; sleep 30 # {padding}")),
+        _settings(
+            git_repo, _with_actions(f"echo $$ > {pid_file}; sleep 30 # {padding}")
+        ),
         clock=clock,
     )
     async with app.run_test(size=size) as pilot:
         await pilot.press("s")
         pid = int(await wait_for_text(pid_file))
-        await until(lambda: "gate 1 of 1: echo $$" in _status_line(app))
+        await until(lambda: "action 1 of 1: echo $$" in _status_line(app))
         clock.now += 65
         await until(lambda: _status_line(app).endswith("1m 5s · run 1m 5s"))
 

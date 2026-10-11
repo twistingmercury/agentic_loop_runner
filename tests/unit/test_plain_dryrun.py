@@ -24,15 +24,15 @@ tasks:
 ONE_TASK_YAML = (
     "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1}\n"
 )
-GATES_YAML = """shared:
+ACTIONS_YAML = """shared:
   prompt: shared
-  gates:
-    - cmd: go test ./...
+  after_task:
+    - action: go test ./...
       timeout: 30s
-    - cmd: |
+    - action: |
         echo one
         echo two
-    - cmd: make lint
+    - action: make lint
 tasks:
   - id: 1
     name: First
@@ -48,12 +48,12 @@ tasks:
 
 async def _dry_run(
     tasks_file: str,
-    gate_timeout: str = "",
+    action_timeout: str = "",
     sandbox_file: str = "",
     commit: bool = False,
 ) -> str:
     out = io.StringIO()
-    await dry_run(out, tasks_file, gate_timeout, sandbox_file, commit)
+    await dry_run(out, tasks_file, action_timeout, sandbox_file, commit)
     return out.getvalue()
 
 
@@ -185,49 +185,71 @@ async def test_dry_run_commit_refuses_a_log_folder_git_can_see(
     assert not (git_repo / "work" / "logs").exists(), "a dry run writes nothing"
 
 
-# Each gate is listed once for the file, not once per task.
+# Each action is listed once for the file, not once per task.
 @pytest.mark.parametrize(
     ("override", "want"),
     [
         pytest.param(
             "",
-            "gate: go test ./...: 30s (gate)\n"
-            "gate: echo one: 10m (default)\n"
-            "gate: make lint: 10m (default)\n",
-            id="gate and default",
+            "after_task: go test ./...: 30s (action)\n"
+            "after_task: echo one: 10m (default)\n"
+            "after_task: make lint: 10m (default)\n",
+            id="action and default",
         ),
         pytest.param(
             "2m",
-            "gate: go test ./...: 2m (flag)\n"
-            "gate: echo one: 2m (flag)\n"
-            "gate: make lint: 2m (flag)\n",
-            id="flag overrides every gate",
+            "after_task: go test ./...: 2m (flag)\n"
+            "after_task: echo one: 2m (flag)\n"
+            "after_task: make lint: 2m (flag)\n",
+            id="flag overrides every action",
         ),
     ],
 )
-async def test_dry_run_lists_effective_gate_timeouts(
+async def test_dry_run_lists_effective_action_timeouts(
     tmp_path: Path, override: str, want: str
 ) -> None:
-    tasks_file = write_file(tmp_path / "tasks.yaml", GATES_YAML)
+    tasks_file = write_file(tmp_path / "tasks.yaml", ACTIONS_YAML)
 
-    got = await _dry_run(tasks_file, gate_timeout=override)
+    got = await _dry_run(tasks_file, action_timeout=override)
 
     assert "NAME\n" in got, "the task table comes first"
     assert got.endswith(f"Third\n{want}{tasks_file} is valid\n"), (
-        "gate lines sit between the table and the valid line"
+        "action lines sit between the table and the valid line"
     )
 
 
-async def test_dry_run_no_gates_prints_no_gate_lines(tmp_path: Path) -> None:
+async def test_dry_run_lists_after_run_actions_after_the_after_task_ones(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(
+        tmp_path / "tasks.yaml",
+        "shared:\n  prompt: shared\n  after_task:\n    - action: make lint\n"
+        "  after_run:\n    - action: git push --dry-run\n      timeout: 1m\n"
+        "    - action: echo done\n"
+        "tasks:\n  - {id: 1, name: First, prompt: p}\n",
+    )
+
+    got = await _dry_run(tasks_file)
+
+    assert got.endswith(
+        "First\nafter_task: make lint: 10m (default)\n"
+        "after_run: git push --dry-run: 1m (action)\n"
+        "after_run: echo done: 10m (default)\n"
+        f"{tasks_file} is valid\n"
+    )
+
+
+async def test_dry_run_no_actions_prints_no_action_lines(tmp_path: Path) -> None:
     tasks_file = write_file(
         tmp_path / "tasks.yaml",
         "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p}\n",
     )
 
-    got = await _dry_run(tasks_file, gate_timeout="2m")
+    got = await _dry_run(tasks_file, action_timeout="2m")
 
     # The prefix, not the bare word: the temporary path holds this test's name.
-    assert "gate: " not in got
+    assert "after_task: " not in got
+    assert "after_run: " not in got
     assert got.endswith(f"First\n{tasks_file} is valid\n")
 
 

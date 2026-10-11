@@ -18,7 +18,7 @@ SIXTY = "Add the after-all commit mode to the engine and then some more words"
 MENU = [
     "folder",
     "permissions",
-    "gates",
+    "actions",
     "reset",
     "tasks",
     "sandbox",
@@ -31,7 +31,7 @@ def _tasks(*names: str) -> str:
         f"  - id: {number}\n    name: {name}\n    prompt: p\n"
         for number, name in enumerate(names, 1)
     )
-    return f"shared:\n  prompt: p\n  gates: []\ntasks:\n{rows}"
+    return f"shared:\n  prompt: p\n  after_task: []\ntasks:\n{rows}"
 
 
 def _app(repo: Path, *names: str) -> AlrApp:
@@ -68,7 +68,7 @@ async def test_the_settings_in_the_strip_are_labelled(
     [
         ("#tasks", "Tasks"),
         ("#activity", "Task: 1 A"),
-        ("#gates", "Gates & commits"),
+        ("#actions", "Actions & commits"),
     ],
 )
 async def test_the_panes_have_titles(git_repo: Path, pane: str, title: str) -> None:
@@ -90,7 +90,7 @@ async def test_a_label_lines_up_with_its_widget(git_repo: Path) -> None:
 
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
-async def test_the_tasks_pane_is_wider_than_the_gates_pane(
+async def test_the_tasks_pane_is_wider_than_the_actions_pane(
     git_repo: Path, size: tuple[int, int]
 ) -> None:
     app = _app(git_repo)
@@ -99,12 +99,13 @@ async def test_the_tasks_pane_is_wider_than_the_gates_pane(
 
         assert app.query_one("#tasks").region.width >= 28
         assert (
-            app.query_one("#tasks").region.width > app.query_one("#gates").region.width
+            app.query_one("#tasks").region.width
+            > app.query_one("#actions").region.width
         )
 
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
-async def test_tasks_and_gates_share_the_top_row_above_the_activity_pane(
+async def test_tasks_and_actions_share_the_top_row_above_the_activity_pane(
     git_repo: Path, size: tuple[int, int]
 ) -> None:
     app = _app(git_repo)
@@ -112,10 +113,10 @@ async def test_tasks_and_gates_share_the_top_row_above_the_activity_pane(
         await pilot.pause()
 
         tasks = app.query_one("#tasks").region
-        gates = app.query_one("#gates").region
+        actions = app.query_one("#actions").region
         activity = app.query_one("#activity").region
-        assert (tasks.y, tasks.height) == (gates.y, gates.height)
-        assert tasks.right <= gates.x
+        assert (tasks.y, tasks.height) == (actions.y, actions.height)
+        assert tasks.right <= actions.x
         assert activity.y >= tasks.bottom
 
 
@@ -131,17 +132,17 @@ async def test_the_activity_pane_spans_the_width_and_the_panes_fit_the_screen(
         activity = app.query_one("#activity").region
         assert activity.width == screen.width
         assert activity.height >= 6
-        for pane in ("#tasks", "#activity", "#gates"):
+        for pane in ("#tasks", "#activity", "#actions"):
             assert screen.contains_region(app.query_one(pane).region)
 
 
-async def test_the_gates_title_is_fully_visible_at_80_columns(git_repo: Path) -> None:
+async def test_the_actions_title_is_fully_visible_at_80_columns(git_repo: Path) -> None:
     app = _app(git_repo)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
-        gates = app.query_one("#gates")
-        assert gates.region.width >= len(gates.border_title) + 4
+        actions = app.query_one("#actions")
+        assert actions.region.width >= len(actions.border_title) + 4
 
 
 async def test_a_forty_character_name_is_whole_at_110_columns(git_repo: Path) -> None:
@@ -222,7 +223,7 @@ async def test_the_columns_leave_room_for_the_scrollbar(
 MENU_LABELS = {
     "folder": "(f)older",
     "permissions": "(p)ermissions",
-    "gates": "(g)ates",
+    "actions": "(a)ctions",
     "reset": "(r)eset",
     "tasks": "(t)asks",
     "sandbox": "sandbo(x)",

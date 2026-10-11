@@ -32,7 +32,7 @@ from alr.tasks import TaskList
 
 async def start(
     tasks_file: str,
-    gate_timeout: str,
+    action_timeout: str,
     session_args: Sequence[str],
     commit: CommitMode,
     reset: bool = False,
@@ -51,7 +51,7 @@ async def start(
     with ExitStack() as locks:
         await _start_locked(
             tasks_file,
-            gate_timeout,
+            action_timeout,
             session_args,
             commit,
             reset,
@@ -63,7 +63,7 @@ async def start(
 
 async def _start_locked(
     tasks_file: str,
-    gate_timeout: str,
+    action_timeout: str,
     session_args: Sequence[str],
     commit: CommitMode,
     reset: bool,
@@ -78,7 +78,7 @@ async def _start_locked(
     repo = await repo_for(sys.stdout, tasks_file, commits, str(path), locks)
     reset_count = reset_in_memory(task_list) if reset else 0
     refuse_failed_report(sys.stdout, task_list)
-    info = _info(tasks_file, gate_timeout, sandbox_settings, commit)
+    info = _info(tasks_file, action_timeout, sandbox_settings, commit)
     log = RunLog.open(path, info)
     try:
         if reset_count:
@@ -87,7 +87,7 @@ async def _start_locked(
         await _run_logged(
             task_list,
             tasks_file,
-            gate_timeout,
+            action_timeout,
             session_args,
             repo,
             commit,
@@ -118,14 +118,14 @@ def _save_reset(tasks_file: str, task_list: TaskList, log: RunLog) -> None:
 
 
 def _info(
-    tasks_file: str, gate_timeout: str, sandbox_settings: str, commit: CommitMode
+    tasks_file: str, action_timeout: str, sandbox_settings: str, commit: CommitMode
 ) -> Info:
     return Info(
         version=metadata.version("alr"),
         tasks_file=tasks_file,
         permissions="sandbox" if sandbox_settings else "skip",
         sandbox_settings=sandbox_settings,
-        gate_timeout=gate_timeout,
+        action_timeout=action_timeout,
         commit=commit.value,
     )
 
@@ -133,7 +133,7 @@ def _info(
 async def _run_logged(
     task_list: TaskList,
     tasks_file: str,
-    gate_timeout: str,
+    action_timeout: str,
     session_args: Sequence[str],
     repo: Repo | None,
     commit: CommitMode,
@@ -142,7 +142,7 @@ async def _run_logged(
 ) -> None:
     options = RunOptions(
         tasks_file=tasks_file,
-        gate_timeout=gate_timeout,
+        action_timeout=action_timeout,
         session_args=session_args,
         repo=repo,
         commit_mode=commit,

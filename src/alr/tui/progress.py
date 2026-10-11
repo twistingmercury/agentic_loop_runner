@@ -4,11 +4,11 @@ import time
 from collections.abc import Callable
 
 from alr.durations import format_elapsed
-from alr.engine.gates import first_line
+from alr.engine.actions import first_line
 from alr.record.events import (
     CommitStarted,
     Event,
-    GateStarted,
+    ActionStarted,
     RunDone,
     TaskFinished,
     TaskStarted,
@@ -27,16 +27,16 @@ class Progress:
     def __init__(
         self,
         total_tasks: int,
-        gate_count: int,
+        action_count: int,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._total_tasks = total_tasks
-        self._gate_count = gate_count
+        self._action_count = action_count
         self._clock = clock
         self._run_start: float | None = None
         self._step_start = 0.0
         self._task_number = 0
-        self._gate_number = 0
+        self._action_number = 0
         self._step = ""
         self._done = False
 
@@ -49,11 +49,11 @@ class Progress:
         match event:
             case TaskStarted():
                 self._task_number += 1
-                self._gate_number = 0
+                self._action_number = 0
                 self._start_step("session", now)
-            case GateStarted(gate=gate):
-                self._gate_number += 1
-                label = f"gate {self._gate_number} of {self._gate_count}: {first_line(gate.cmd)}"
+            case ActionStarted(action=action):
+                self._action_number += 1
+                label = f"action {self._action_number} of {self._action_count}: {first_line(action.command)}"
                 self._start_step(label, now)
             case CommitStarted():
                 self._start_step("commit", now)

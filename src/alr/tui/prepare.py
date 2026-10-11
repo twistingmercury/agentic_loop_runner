@@ -93,7 +93,7 @@ async def _prepare(
     log = None if log_path is None else _open_log(settings, log_path)
     options = RunOptions(
         tasks_file=settings.tasks_file,
-        gate_timeout=settings.gate_timeout,
+        action_timeout=settings.action_timeout,
         session_args=session_args,
         repo=repo,
         commit_mode=settings.commit_mode,
@@ -150,11 +150,11 @@ async def _check_log_folder(settings: RunSettings, repo: Repo | None) -> Path | 
 
 
 def _save_changes(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:
-    """Save the edited gates and the reset together, once; nothing to save leaves the file alone."""
-    if settings.gates is not None:
-        task_list.shared.gates = settings.gates
+    """Save the edited actions and the reset together, once; nothing to save leaves the file alone."""
+    if settings.after_task is not None:
+        task_list.shared.after_task = settings.after_task
 
-    if settings.gates is None and not reset_count:
+    if settings.after_task is None and not reset_count:
         return
 
     save_for_start(settings.tasks_file, task_list)
@@ -167,7 +167,7 @@ def _open_log(settings: RunSettings, path: Path) -> RunLog:
         tasks_file=settings.tasks_file,
         permissions="skip" if skip else "sandbox",
         sandbox_settings="" if skip else settings.sandbox_file,
-        gate_timeout=settings.gate_timeout,
+        action_timeout=settings.action_timeout,
         commit=settings.commit_mode.value,
     )
     return RunLog.open(path, info)

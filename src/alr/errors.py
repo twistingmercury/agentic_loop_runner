@@ -73,7 +73,7 @@ class RunError(AlrError):
 
 
 class CommitFailedError(RunError):
-    """A task's work passed its gates but git would not commit it."""
+    """A task's work passed its actions but git would not commit it."""
 
     exit_code = 4
 
