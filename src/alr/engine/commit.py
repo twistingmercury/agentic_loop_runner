@@ -297,8 +297,12 @@ def _lock_path(repo: Repo) -> Path:
 def _lock(path: Path, flags: int, operation: int) -> int:
     """Open the lock file and flock it without waiting; return the descriptor, which holds the lock.
 
-    Opened read-only: flock does not need write access, so a second user of a
-    shared repository can lock the file the first one made.
+    Opened read-only: flock does not need write access. The file is created
+    with 0o666 masked by the umask, and core.sharedRepository does not change
+    that, so a second user of a shared repository can open the file the first
+    one made only when the first user's umask left it readable by others.
+    Under a stricter umask their open fails with EACCES, and the run is refused
+    as git-error.
     """
     try:
         fd = os.open(path, flags | os.O_RDONLY, 0o666)
