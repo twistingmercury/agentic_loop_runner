@@ -152,8 +152,9 @@ async def recheck_ignored(
     A task's own commands can edit .gitignore, and `git add -A` takes no
     exclusions: an ignore rule is all that keeps the task file and the log
     folder out of the commit, so it is checked again right before staging.
-    A git that cannot start is a reason too, as it is for the `git add` that
-    would follow.
+    A git that cannot start, or a `git check-ignore` that fails, is a reason
+    too, as it is for the `git add` that would follow: tasks may already be
+    committed by now, so it fails this commit and does not refuse the run.
     """
     task_rel = _relative(repo, tasks_file)
     log_rel = None if run_dir is None else _relative(repo, run_dir)
@@ -161,6 +162,9 @@ async def recheck_ignored(
         return await _first_visible(repo, task_rel, log_rel)
     except OSError as exc:
         return proc.start_failed_text("git", exc)
+    except RefusedError as exc:
+        # The reason follows "commit failed: ", which already says what it was.
+        return exc.message.removeprefix("--commit: ")
 
 
 async def _first_visible(
