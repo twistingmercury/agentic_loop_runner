@@ -1,6 +1,7 @@
 """The stream front end: every process captured, every step reported as an event."""
 
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -17,9 +18,11 @@ from helpers import (
 )
 
 from alr.engine import loop, proc
+from alr.engine.actions import action_env
 from alr.engine.commit import Repo, open_repo
 from alr.engine.frontend import FirstLine
 from alr.engine.sandbox import bypass_args
+from alr.plain.frontend import PlainFrontEnd
 from alr.errors import RunError
 from alr.record.events import (
     Activity,
@@ -576,8 +579,68 @@ async def test_a_action_starts_without_the_git_guards(
     calls = spy_on_start(monkeypatch)
     task = Task(1, "First", "p1")
 
-    await StreamFrontEnd(events.append).run_action(task, Action(command="true"))
+    await StreamFrontEnd(events.append).run_action(task, Action(command="true"), {})
 
     [call] = calls
     assert not call.get("new_session")
     assert not call.get("die_with_parent")
+
+
+HOSTILE_NAME = 'fix "auth"; $(touch pwned) `id`'
+
+
+@pytest.fixture(params=["stream", "plain"])
+def action_front_end(request: pytest.FixtureRequest) -> StreamFrontEnd | PlainFrontEnd:
+    if request.param == "stream":
+        return StreamFrontEnd(lambda _event: None)
+
+    return PlainFrontEnd()
+
+
+async def test_an_action_receives_the_task_name_verbatim(
+    action_front_end: StreamFrontEnd | PlainFrontEnd, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    task = Task(1, HOSTILE_NAME, "p")
+    action = Action(command=f"printf %s \"$ALR_TASK_NAME\" > '{out}'")
+
+    error = await action_front_end.run_action(
+        task, action, action_env(task, "tasks.yaml", "logs")
+    )
+
+    assert error is None
+    assert out.read_text() == HOSTILE_NAME
+    assert not (tmp_path / "pwned").exists()
+
+
+async def test_an_action_keeps_the_inherited_environment(
+    action_front_end: StreamFrontEnd | PlainFrontEnd,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    out = tmp_path / "out"
+    task = Task(1, "First", "p")
+    action = Action(command=f"printf '%s|%s' \"$PATH\" \"$HOME\" > '{out}'")
+
+    await action_front_end.run_action(
+        task, action, action_env(task, "tasks.yaml", "logs")
+    )
+
+    assert out.read_text() == f"{os.environ['PATH']}|{tmp_path}"
+
+
+async def test_an_action_receives_paths_with_spaces(
+    action_front_end: StreamFrontEnd | PlainFrontEnd, tmp_path: Path
+) -> None:
+    folder = tmp_path / "my run"
+    folder.mkdir()
+    task = Task(1, "First", "p")
+    action = Action(
+        command='printf %s "$ALR_TASK_FILE|$ALR_LOG_DIR" > "$ALR_LOG_DIR/out"'
+    )
+    env = action_env(task, str(folder / "my tasks.yaml"), str(folder))
+
+    await action_front_end.run_action(task, action, env)
+
+    assert (folder / "out").read_text() == f"{folder / 'my tasks.yaml'}|{folder}"

@@ -13,6 +13,7 @@ import pytest
 from helpers import cancel_run, run_loop, saved_tasks, wait_for_text, wait_until_gone
 
 from alr.engine import actions
+from alr.engine.actions import action_env
 from alr.errors import RunError
 from alr.tasks import COMPLETED, FAILED, PENDING, Action, Shared, Task, TaskList
 
@@ -490,3 +491,47 @@ async def test_run_multi_line_action_errors_name_only_the_first_line(
     assert saved.after_task_list()[0].command == action.command, (
         "the stored command stays whole"
     )
+
+
+def test_action_env_for_a_task(tmp_path: Path) -> None:
+    task = Task(id=7, name='fix "auth"; $(x)', prompt="p")
+    env = action_env(task, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
+
+    assert env == {
+        "ALR_TASK_ID": "7",
+        "ALR_TASK_NAME": 'fix "auth"; $(x)',
+        "ALR_TASK_FILE": str(tmp_path / "tasks.yaml"),
+        "ALR_LOG_DIR": str(tmp_path / "logs"),
+    }
+
+
+def test_action_env_after_the_run_has_no_task_variables(tmp_path: Path) -> None:
+    env = action_env(None, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
+
+    assert sorted(env) == ["ALR_LOG_DIR", "ALR_TASK_FILE"]
+
+
+def test_action_env_makes_relative_paths_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    env = action_env(None, "tasks.yaml", "logs")
+
+    assert env == {
+        "ALR_TASK_FILE": str(tmp_path / "tasks.yaml"),
+        "ALR_LOG_DIR": str(tmp_path / "logs"),
+    }
+
+
+async def test_the_loop_gives_an_action_the_task_and_the_run_paths(
+    tmp_path: Path,
+) -> None:
+    seen = tmp_path / "seen"
+    command = 'printf "%s|%s|%s" "$ALR_TASK_ID" "$ALR_TASK_FILE" "$ALR_LOG_DIR"'
+    task_list = _with_actions_task(Action(command=f"{command} > '{seen}'"))
+    tasks_file = tmp_path / "tasks.yaml"
+
+    await run_loop(task_list, tasks_file, repo=None)
+
+    assert seen.read_text() == f"1|{tasks_file}|{tmp_path / 'logs'}"

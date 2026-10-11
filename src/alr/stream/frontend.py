@@ -1,8 +1,9 @@
 """The stream front end: what a full-screen run does with each process."""
 
 import asyncio
+import os
 from asyncio.subprocess import PIPE
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from alr.engine import proc
 from alr.engine.frontend import FirstLine, SessionResult
@@ -58,11 +59,13 @@ class StreamFrontEnd:
     def session_finished(self, task: Task, seconds: float) -> None:
         self._report(SessionFinished(task, seconds))
 
-    async def run_action(self, task: Task, action: Action) -> str | None:
+    async def run_action(
+        self, task: Task, action: Action, env: Mapping[str, str]
+    ) -> str | None:
         # Only the first line, so a multi-line command stays one activity line.
         self._report(Activity(task, "→ action " + first_line(action.command)))
         self._report(ActionStarted(task, action))
-        return await self._run_command(task, ["sh", "-c", action.command])
+        return await self._run_command(task, ["sh", "-c", action.command], env=env)
 
     def action_finished(
         self,
@@ -103,6 +106,7 @@ class StreamFrontEnd:
         argv: Sequence[str],
         *,
         cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
         gentle: bool = False,
         tap: Callable[[str], None] | None = None,
     ) -> str | None:
@@ -114,6 +118,7 @@ class StreamFrontEnd:
                 stdout=PIPE,
                 stderr=PIPE,
                 cwd=cwd,
+                env=None if env is None else {**os.environ, **env},
                 gentle=gentle,
                 new_session=gentle,
                 die_with_parent=gentle,

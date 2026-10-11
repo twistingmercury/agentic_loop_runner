@@ -1,6 +1,6 @@
 """What the engine asks of a front end: run the processes and note the progress."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -67,8 +67,13 @@ class FrontEnd(Protocol):
         """Note the session outcome and duration."""
         ...
 
-    async def run_action(self, task: Task, action: Action) -> str | None:
-        """Run this action command; return the exit. The engine applies the time limit around the call."""
+    async def run_action(
+        self, task: Task, action: Action, env: Mapping[str, str]
+    ) -> str | None:
+        """Run this action command with env added to alr's own environment; return the exit.
+
+        The engine applies the time limit around the call.
+        """
         ...
 
     def action_finished(

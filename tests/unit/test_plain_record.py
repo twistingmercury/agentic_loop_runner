@@ -508,7 +508,7 @@ async def test_a_action_starts_without_the_git_guards(
     calls = spy_on_start(monkeypatch)
     task = Task(1, "First", "p1")
 
-    await PlainFrontEnd().run_action(task, Action(command="true"))
+    await PlainFrontEnd().run_action(task, Action(command="true"), {})
 
     [call] = calls
     assert not call.get("new_session")

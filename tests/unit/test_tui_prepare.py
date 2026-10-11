@@ -52,6 +52,17 @@ async def test_prepare_returns_the_options_for_a_valid_setup(git_repo: Path) -> 
     prepared.close()
 
 
+async def test_prepare_gives_the_run_the_log_folder_even_with_logging_off(
+    git_repo: Path,
+) -> None:
+    settings = _settings(git_repo, logging=False)
+
+    prepared = await prepare(settings)
+
+    assert prepared.options.log_dir == str(settings.log_folder())
+    prepared.close()
+
+
 def _outside_settings(
     outside: Path, monkeypatch: pytest.MonkeyPatch, **changes: object
 ) -> RunSettings:

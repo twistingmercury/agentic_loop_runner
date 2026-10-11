@@ -19,7 +19,7 @@ from alr.engine.commit import (
     recheck_ignored,
 )
 from alr.engine.frontend import FrontEnd
-from alr.engine.actions import run_actions
+from alr.engine.actions import action_env, run_actions
 from alr.engine.result import last_result_line, outcome
 from alr.engine.stop import Stop
 from alr.errors import (
@@ -89,6 +89,9 @@ class RunOptions:
 
     run_dir: str | None = None
     """The run's own log folder, checked again before each commit; None when logging is off."""
+
+    log_dir: str = ""
+    """The folder the run folders go in, beside the task file; given to every action, logging or not."""
 
 
 def read_tasks(path: str) -> TaskList:
@@ -481,8 +484,13 @@ async def _run_task(
     if state != COMPLETED:
         return _Outcome(state, error)
 
+    env = action_env(task, options.tasks_file, options.log_dir)
     state, error = await run_actions(
-        replace(task), task_list.after_task_list(), options.action_timeout, front_end
+        replace(task),
+        task_list.after_task_list(),
+        options.action_timeout,
+        front_end,
+        env,
     )
     per_task = options.commit_mode is CommitMode.TASK
     if state != COMPLETED or options.repo is None or not per_task:

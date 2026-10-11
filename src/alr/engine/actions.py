@@ -2,7 +2,8 @@
 
 import asyncio
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from alr.engine.frontend import FrontEnd
 from alr.errors import RunCancelledError, quote
@@ -16,6 +17,21 @@ DEFAULT_ACTION_TIMEOUT = "10m"
 def first_line(text: str) -> str:
     """The part of a multi-line value that messages quote, so it stays on one line."""
     return text.split("\n", 1)[0]
+
+
+def action_env(task: Task | None, tasks_file: str, log_dir: str) -> dict[str, str]:
+    """The ALR_* variables for one action; task is None for after_run.
+
+    The paths are made absolute because an action may change directory.
+    """
+    env = {
+        "ALR_TASK_FILE": str(Path(tasks_file).resolve()),
+        "ALR_LOG_DIR": str(Path(log_dir).resolve()),
+    }
+    if task is None:
+        return env
+
+    return {"ALR_TASK_ID": str(task.id), "ALR_TASK_NAME": task.name, **env}
 
 
 def action_limit(action: Action, override: str) -> tuple[str, str]:
@@ -44,13 +60,17 @@ def action_failure(
 
 
 async def run_actions(
-    task: Task, actions: Sequence[Action], override: str, front_end: FrontEnd
+    task: Task,
+    actions: Sequence[Action],
+    override: str,
+    front_end: FrontEnd,
+    env: Mapping[str, str],
 ) -> tuple[str, str]:
     """Run the file's actions in order; the first that fails makes the task failed."""
     for action in actions:
         limit, _ = action_limit(action, override)
         try:
-            error, timed_out = await _run_action(task, action, limit, front_end)
+            error, timed_out = await _run_action(task, action, limit, front_end, env)
         except asyncio.CancelledError:
             # Nothing is saved, so the next run picks the task up again.
             raise RunCancelledError(
@@ -66,11 +86,11 @@ async def run_actions(
 
 
 async def _run_action(
-    task: Task, action: Action, limit: str, front_end: FrontEnd
+    task: Task, action: Action, limit: str, front_end: FrontEnd, env: Mapping[str, str]
 ) -> tuple[str | None, bool]:
     """Run one action and report how it ended; a cancelled action reports nothing."""
     started = time.monotonic()
-    error, timed_out = await _run_limited(task, action, limit, front_end)
+    error, timed_out = await _run_limited(task, action, limit, front_end, env)
     front_end.action_finished(
         task, action, limit, error, timed_out, time.monotonic() - started
     )
@@ -78,7 +98,7 @@ async def _run_action(
 
 
 async def _run_limited(
-    task: Task, action: Action, limit: str, front_end: FrontEnd
+    task: Task, action: Action, limit: str, front_end: FrontEnd, env: Mapping[str, str]
 ) -> tuple[str | None, bool]:
     """Run one action under its limit and return its exit text and whether the limit ended it."""
     try:
@@ -88,6 +108,6 @@ async def _run_limited(
 
     try:
         async with asyncio.timeout(seconds):
-            return await front_end.run_action(task, action), False
+            return await front_end.run_action(task, action, env), False
     except TimeoutError:
         return None, True

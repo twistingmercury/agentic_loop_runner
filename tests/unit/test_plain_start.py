@@ -152,6 +152,22 @@ async def test_start_success(record: Path, tmp_path: Path) -> None:
     assert _calls(record) == 2, "expected claude invoked once per task"
 
 
+async def test_start_gives_actions_the_log_folder_beside_the_task_file(
+    record: Path, tmp_path: Path
+) -> None:
+    seen = tmp_path / "seen"
+    tasks_file = write_file(
+        tmp_path / "tasks.yaml",
+        "shared:\n  prompt: shared\n  after_task:\n"
+        f"    - action: printf %s \"$ALR_LOG_DIR\" > '{seen}'\n"
+        "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
+    )
+
+    await _start(tasks_file)
+
+    assert seen.read_text() == str(tmp_path / "logs")
+
+
 async def test_start_refuses_when_any_task_failed(
     record: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

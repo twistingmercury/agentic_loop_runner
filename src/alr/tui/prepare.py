@@ -100,6 +100,7 @@ async def _prepare(
         stop=Stop() if stop is None else stop,
         # The folder the log really opened, which has a suffix when the name was taken.
         run_dir=None if log is None else str(log.path),
+        log_dir=str(settings.log_folder()),
     )
     prepared = Prepared(task_list, options, log, locks)
     # After the log opens, so a check or the log failing never leaves the task file rewritten.

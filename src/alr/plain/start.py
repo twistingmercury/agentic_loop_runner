@@ -148,6 +148,7 @@ async def _run_logged(
         commit_mode=commit,
         stop=stop,
         run_dir=str(log.path),
+        log_dir=str(log.path.parent),
     )
     try:
         await run(task_list, options, PlainFrontEnd(record=log.record))

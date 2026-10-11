@@ -120,6 +120,7 @@ async def run_loop(
         commit_mode=commit_mode,
         stop=stop or Stop(),
         run_dir=run_dir,
+        log_dir=str(tasks_file.parent / "logs"),
     )
     await loop.run(
         task_list, options, PlainFrontEnd() if front_end is None else front_end
