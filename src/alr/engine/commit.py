@@ -2,7 +2,7 @@
 
 import fcntl
 import os
-from collections.abc import Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -27,6 +27,9 @@ _NOT_A_REPO = ("not a git repository", "must be run in a work tree")
 
 _LOCK_NAME = "alr.lock"
 _LOCKED_MESSAGE = "another alr run is committing in this repository"
+
+# Runs right before staging; a reason it returns is the commit's failure.
+type Guard = Callable[[], Awaitable[str | None]]
 
 
 class CommitMode(StrEnum):
@@ -137,22 +140,56 @@ async def check_log_dir(repo: Repo | None, run_dir: str) -> None:
     )
 
 
-async def commit(repo: Repo, task: Task, front_end: FrontEnd) -> str | None:
-    """Commit what the task left in the work tree, named after the task; return why git refused, or None."""
-    return await _commit_changes(repo, task, front_end, [task.name])
+async def recheck_ignored(
+    repo: Repo, tasks_file: str, run_dir: str | None
+) -> str | None:
+    """Say which bookkeeping path git can see now, or None when both are still hidden.
+
+    A task's own commands can edit .gitignore, and `git add -A` takes no
+    exclusions: an ignore rule is all that keeps the task file and the log
+    folder out of the commit, so it is checked again right before staging.
+    A git that cannot start is a reason too, as it is for the `git add` that
+    would follow.
+    """
+    task_rel = _relative(repo, tasks_file)
+    log_rel = None if run_dir is None else _relative(repo, run_dir)
+    try:
+        return await _first_visible(repo, task_rel, log_rel)
+    except OSError as exc:
+        return proc.start_failed_text("git", exc)
+
+
+async def _first_visible(
+    repo: Repo, task_rel: str | None, log_rel: str | None
+) -> str | None:
+    """Name the first of the task file and the log folder that git does not ignore, or None."""
+    if task_rel is not None and not await _ignored(repo, task_rel):
+        return f"task file visible: {task_rel}"
+
+    if log_rel is not None and not await _ignored(repo, log_rel):
+        return f"log folder visible: {Path(log_rel).parent}"
+
+    return None
+
+
+async def commit(
+    repo: Repo, task: Task, front_end: FrontEnd, guard: Guard
+) -> str | None:
+    """Commit what the task left in the work tree, named after the task; return why it was not made, or None."""
+    return await _commit_changes(repo, task, front_end, [task.name], guard)
 
 
 async def commit_all(
-    repo: Repo, tasks: Sequence[Task], front_end: FrontEnd
+    repo: Repo, tasks: Sequence[Task], front_end: FrontEnd, guard: Guard
 ) -> str | None:
-    """Commit everything the run left in the work tree, once; return why git refused, or None.
+    """Commit everything the run left in the work tree, once; return why it was not made, or None.
 
     The front end's calls each name a task, so the last one carries the git steps.
     """
     noun = "task" if len(tasks) == 1 else "tasks"
     title = f"alr: {len(tasks)} {noun} completed"
     body = "\n".join(f"{task.id}: {task.name}" for task in tasks)
-    return await _commit_changes(repo, tasks[-1], front_end, [title, body])
+    return await _commit_changes(repo, tasks[-1], front_end, [title, body], guard)
 
 
 async def head(repo: Repo) -> str | None:
@@ -174,13 +211,22 @@ async def work_tree_root() -> str | None:
 
 
 async def _commit_changes(
-    repo: Repo, task: Task, front_end: FrontEnd, messages: Sequence[str]
+    repo: Repo,
+    task: Task,
+    front_end: FrontEnd,
+    messages: Sequence[str],
+    guard: Guard,
 ) -> str | None:
-    """Stage everything and commit it; return why git refused, or None.
+    """Stage everything and commit it; return why it was not made, or None.
 
-    A task that changed nothing is not an error and gets no empty commit; that
-    also covers a session that committed by itself.
+    The guard runs first, so a reason it gives leaves nothing staged. A task
+    that changed nothing is not an error and gets no empty commit; that also
+    covers a session that committed by itself.
     """
+    reason = await guard()
+    if reason is not None:
+        return reason
+
     error = await front_end.run_git(task, ["git", "add", "-A"], repo.root)
     if error is not None:
         return error

@@ -5,10 +5,19 @@ import contextlib
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
-from alr.engine.commit import CommitMode, Repo, commit, commit_all, head
+from alr.engine.commit import (
+    CommitMode,
+    Guard,
+    Repo,
+    commit,
+    commit_all,
+    head,
+    recheck_ignored,
+)
 from alr.engine.frontend import FrontEnd
 from alr.engine.gates import run_gates
 from alr.engine.result import last_result_line, outcome
@@ -77,6 +86,9 @@ class RunOptions:
 
     stop: Stop = field(default_factory=Stop)
     """Which signal stopped the run; the caller that handles signals fills it in."""
+
+    run_dir: str | None = None
+    """The run's own log folder, checked again before each commit; None when logging is off."""
 
 
 def read_tasks(path: str) -> TaskList:
@@ -244,7 +256,9 @@ async def _commit_after_all(
 
     before = await head(options.repo)
     try:
-        error = await commit_all(options.repo, ran, front_end)
+        error = await commit_all(
+            options.repo, ran, front_end, _guard(options, options.repo)
+        )
     except asyncio.CancelledError:
         # A stop before the commit lands saves nothing: the file is still as the run found it.
         await _save_if_landed(
@@ -475,8 +489,18 @@ async def _run_task(
         return _Outcome(state, error)
 
     return await _commit_task(
-        task, task_list, options.repo, options.tasks_file, front_end
+        task,
+        task_list,
+        options.repo,
+        options.tasks_file,
+        front_end,
+        _guard(options, options.repo),
     )
+
+
+def _guard(options: RunOptions, repo: Repo) -> Guard:
+    """Check, right before the commit stages anything, that the bookkeeping paths are still ignored."""
+    return partial(recheck_ignored, repo, options.tasks_file, options.run_dir)
 
 
 async def _commit_task(
@@ -485,11 +509,12 @@ async def _commit_task(
     repo: Repo,
     tasks_file: str,
     front_end: FrontEnd,
+    guard: Guard,
 ) -> _Outcome:
-    """Commit the task's work; return completed, or failed with git's reason."""
+    """Commit the task's work; return completed, or failed with the reason it was not made."""
     before = await head(repo)
     try:
-        reason = await commit(repo, replace(task), front_end)
+        reason = await commit(repo, replace(task), front_end, guard)
         # Read inside the try, so a stop here still saves the commit that landed.
         landed = None if reason is not None else await _landed_since(repo, before)
     except asyncio.CancelledError:

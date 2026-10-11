@@ -257,6 +257,38 @@ async def test_prepare_opens_the_run_log_in_an_ignored_folder(git_repo: Path) ->
     assert list((git_repo / "run" / "logs").glob("*/run.jsonl"))
 
 
+async def test_prepare_hands_the_engine_the_folder_the_log_opened(
+    git_repo: Path,
+) -> None:
+    prepared = await prepare(_settings(git_repo, logging=True))
+    prepared.close()
+
+    assert prepared.log is not None
+    assert prepared.options.run_dir == str(prepared.log.path)
+
+
+async def test_prepare_hands_the_engine_the_suffixed_folder_when_the_name_was_taken(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    taken = git_repo / "run" / "logs" / "20261007T155618"
+    taken.mkdir(parents=True)
+    monkeypatch.setattr(prepare_module, "run_dir", lambda _log_dir, _start: taken)
+
+    prepared = await prepare(_settings(git_repo, logging=True))
+    prepared.close()
+
+    assert prepared.options.run_dir == str(taken.with_name(taken.name + "-1"))
+
+
+async def test_prepare_without_logging_has_no_run_folder_for_the_engine(
+    git_repo: Path,
+) -> None:
+    prepared = await prepare(_settings(git_repo, logging=False))
+    prepared.close()
+
+    assert prepared.options.run_dir is None
+
+
 async def test_prepare_leaves_the_task_file_alone_when_the_log_cannot_open(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,6 +1,7 @@
 """--commit: the repository checks before a run and the commit after each completed task."""
 
 import asyncio
+import errno
 import fcntl
 import os
 import signal
@@ -35,6 +36,7 @@ from alr.engine.commit import (
     head,
     held_lock,
     open_repo,
+    recheck_ignored,
     work_tree_root,
 )
 from alr.engine.stop import Stop
@@ -47,7 +49,7 @@ from alr.errors import (
 )
 from alr.engine.frontend import FrontEnd
 from alr.plain.frontend import PlainFrontEnd
-from alr.record.events import Event
+from alr.record.events import Event, RunDone
 from alr.stream.frontend import StreamFrontEnd
 from alr.tasks import (
     COMPLETED,
@@ -552,6 +554,180 @@ async def test_run_commit_survives_a_gate_editing_gitignore(git_repo: Path) -> N
     assert _head_files(git_repo) == [".gitignore", "one.txt"]
     assert git(git_repo, "status", "--porcelain") == ""
     assert _saved_states(tasks_file) == [(COMPLETED, "")]
+
+
+# An ignore rule is all that keeps the task file and the log folder out of
+# `git add -A`, and a task's own commands can edit it: every commit checks the
+# rules again right before it stages anything.
+_UNIGNORE_TASK_FILE = "commit failed: task file visible: run/tasks.yaml"
+# Empties the .gitignore that hides run/, then does the task's work.
+_UNIGNORE_ALL = Gate(cmd=": > .gitignore; echo work > one.txt")
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_task_that_unignores_the_task_file_fails_its_commit(
+    git_repo: Path,
+) -> None:
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _gated_task(_UNIGNORE_ALL), tasks_file, repo=await _open(tasks_file)
+        )
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value) == f"task 1: First failed: {_UNIGNORE_TASK_FILE}"
+    assert commit_subjects(git_repo) == ["init"], "nothing may be committed"
+    assert _head_staged(git_repo) == [], "nothing may be staged"
+    assert _saved_states(tasks_file) == [(FAILED, _UNIGNORE_TASK_FILE)]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_task_that_unignores_the_log_folder_fails_its_commit(
+    git_repo: Path,
+) -> None:
+    _ignore_and_commit(git_repo, "run/", "logs/")
+    subjects = commit_subjects(git_repo)
+    tasks_file = _task_file(git_repo)
+    # run/ stays hidden, so only the log folder becomes visible.
+    unignore = Gate(cmd="echo 'run/' > .gitignore; echo work > one.txt")
+    want_error = "commit failed: log folder visible: logs"
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _gated_task(unignore),
+            tasks_file,
+            repo=await _open(tasks_file),
+            run_dir=str(git_repo / "logs" / RUN_DIR),
+        )
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value) == f"task 1: First failed: {want_error}"
+    assert commit_subjects(git_repo) == subjects, "nothing may be committed"
+    assert _head_staged(git_repo) == [], "nothing may be staged"
+    assert _saved_states(tasks_file) == [(FAILED, want_error)]
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_run_mode_unignored_file_fails_the_final_commit(git_repo: Path) -> None:
+    tasks_file = _task_file(git_repo)
+
+    with pytest.raises(CommitFailedError) as caught:
+        await run_loop(
+            _two_tasks(_UNIGNORE_ALL),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=CommitMode.RUN,
+        )
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value) == _UNIGNORE_TASK_FILE
+    assert commit_subjects(git_repo) == ["init"], "nothing may be committed"
+    assert _head_staged(git_repo) == [], "nothing may be staged"
+    assert _saved_states(tasks_file) == [(PENDING, ""), (FAILED, _UNIGNORE_TASK_FILE)]
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("commit_mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_a_git_failure_in_the_recheck_refuses_with_git_error(
+    git_repo: Path, commit_mode: CommitMode
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _gated_task(Gate(cmd="echo work > one.txt; echo garbage > .git/index"))
+    _save_first(task_list, tasks_file)
+    before = tasks_file.read_bytes()
+
+    with pytest.raises(RefusedError) as caught:
+        await run_loop(
+            task_list,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=commit_mode,
+        )
+
+    assert caught.value.reason == "git-error"
+    assert str(caught.value).startswith(
+        "refused: git-error: --commit: git check-ignore: "
+    )
+    assert commit_subjects(git_repo) == ["init"], "nothing may be committed"
+    assert tasks_file.read_bytes() == before, "no task may be saved as failed or done"
+
+
+@pytest.mark.parametrize(
+    ("ignore", "log_folder", "want"),
+    [
+        pytest.param("run/\nlogs/\n", True, None, id="both hidden"),
+        pytest.param("run/\n", False, None, id="no log folder to check"),
+        pytest.param(
+            "logs/\n", True, "task file visible: run/tasks.yaml", id="task file"
+        ),
+        pytest.param("run/\n", True, "log folder visible: logs", id="log folder"),
+        pytest.param(
+            "", True, "task file visible: run/tasks.yaml", id="the task file is first"
+        ),
+    ],
+)
+async def test_recheck_ignored_names_the_path_git_can_see(
+    git_repo: Path, ignore: str, log_folder: bool, want: str | None
+) -> None:
+    repo = await _open(_task_file(git_repo))
+    # After the repository opened, as a task's own commands would.
+    (git_repo / ".gitignore").write_text(ignore, encoding="utf-8")
+    run_dir = str(git_repo / "logs" / RUN_DIR) if log_folder else None
+
+    reason = await recheck_ignored(repo, str(_task_file(git_repo)), run_dir)
+
+    assert reason == want
+
+
+async def test_recheck_ignored_needs_no_rule_for_paths_outside_the_tree(
+    git_repo: Path, outside: Path
+) -> None:
+    repo = await _open(_task_file(git_repo))
+    (git_repo / ".gitignore").write_text("", encoding="utf-8")
+
+    reason = await recheck_ignored(
+        repo, str(outside / "tasks.yaml"), str(outside / "logs" / RUN_DIR)
+    )
+
+    assert reason is None
+
+
+async def test_recheck_ignored_refuses_with_git_error_when_check_ignore_fails(
+    git_repo: Path,
+) -> None:
+    repo = await _open(_task_file(git_repo))
+    _break_config(git_repo)
+
+    with pytest.raises(RefusedError) as caught:
+        await recheck_ignored(repo, str(_task_file(git_repo)), None)
+
+    assert caught.value.reason == "git-error"
+
+
+async def test_recheck_ignored_gives_a_git_that_cannot_start_as_the_reason(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = await _open(_task_file(git_repo))
+    monkeypatch.setenv("PATH", "")
+
+    reason = await recheck_ignored(repo, str(_task_file(git_repo)), None)
+
+    assert reason == "git: not found on PATH"
+
+
+async def test_recheck_ignored_does_not_blame_git_for_a_path_it_cannot_resolve(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = await _open(_task_file(git_repo))
+
+    def unresolvable(repo: Repo, path: str) -> str:
+        raise OSError(errno.EIO, "disk on fire")
+
+    monkeypatch.setattr(commit, "_relative", unresolvable)
+
+    with pytest.raises(OSError, match="disk on fire"):
+        await recheck_ignored(repo, str(_task_file(git_repo)), None)
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -1529,6 +1705,84 @@ async def test_the_tasks_pane_marks_no_row_failed_when_the_save_after_the_run_co
 
         # The commit landed and the file says pending: nothing failed.
         assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "·"]
+
+
+async def _row_symbols(events: list[Event], task_list: TaskList) -> list[str]:
+    """What the tasks pane shows once it has seen the run's events, one symbol per row."""
+    pane = TasksPane()
+    async with _PaneHost(pane).run_test():
+        pane.load(task_list)
+        for event in events:
+            pane.apply(event)
+
+        return [pane.get_row_at(i)[0] for i in range(len(task_list.tasks))]
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize(
+    ("commit_mode", "want_states"),
+    [
+        pytest.param(
+            CommitMode.TASK,
+            [(FAILED, _UNIGNORE_TASK_FILE), (PENDING, "")],
+            id="task mode",
+        ),
+        pytest.param(
+            CommitMode.RUN,
+            [(PENDING, ""), (FAILED, _UNIGNORE_TASK_FILE)],
+            id="run mode",
+        ),
+    ],
+)
+async def test_the_tasks_pane_follows_the_saved_file_after_an_unignore_failure(
+    git_repo: Path, commit_mode: CommitMode, want_states: list[tuple[str, str]]
+) -> None:
+    tasks_file = _task_file(git_repo)
+    events: list[Event] = []
+
+    with pytest.raises(CommitFailedError):
+        await run_loop(
+            _two_tasks(_UNIGNORE_ALL),
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=commit_mode,
+            front_end=StreamFrontEnd(events.append),
+        )
+
+    done = events[-1]
+    assert isinstance(done, RunDone)
+    assert (done.result, done.exit_code) == (RunResult.COMMIT_FAILED, 4)
+    assert _saved_states(tasks_file) == want_states
+    symbols = {FAILED: "✖", PENDING: "·"}
+    assert await _row_symbols(events, _two_tasks(_UNIGNORE_ALL)) == [
+        symbols[state] for state, _ in want_states
+    ]
+
+
+@pytest.mark.usefixtures("fake_claude")
+@pytest.mark.parametrize("commit_mode", [CommitMode.TASK, CommitMode.RUN])
+async def test_the_tasks_pane_follows_the_saved_file_after_a_failed_recheck(
+    git_repo: Path, commit_mode: CommitMode
+) -> None:
+    tasks_file = _task_file(git_repo)
+    task_list = _two_tasks(Gate(cmd="echo work > one.txt; echo garbage > .git/index"))
+    _save_first(task_list, tasks_file)
+    events: list[Event] = []
+
+    with pytest.raises(RefusedError):
+        await run_loop(
+            task_list,
+            tasks_file,
+            repo=await _open(tasks_file),
+            commit_mode=commit_mode,
+            front_end=StreamFrontEnd(events.append),
+        )
+
+    done = events[-1]
+    assert isinstance(done, RunDone)
+    assert (done.result, done.exit_code) == (RunResult.FAILED, 3)
+    assert _saved_states(tasks_file) == [(PENDING, ""), (PENDING, "")]
+    assert await _row_symbols(events, _two_tasks()) == ["·", "·"]
 
 
 @pytest.mark.usefixtures("fake_claude")

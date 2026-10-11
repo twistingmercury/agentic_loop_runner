@@ -419,6 +419,23 @@ async def test_start_without_commit_flag_ignores_a_dirty_tree(
     assert commit_subjects(git_repo) == ["init"]
 
 
+async def test_start_commit_fails_a_task_that_unignores_the_log_folder(
+    record: Path, git_repo: Path
+) -> None:
+    # run/tasks.yaml stays hidden, so only the folder this run logs into becomes visible.
+    tasks_file = write_file(
+        git_repo / "run" / "tasks.yaml",
+        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo run/tasks.yaml > .gitignore; echo work > one.txt\ntasks:\n  - id: 1\n    name: First\n    prompt: p1\n",
+    )
+
+    with pytest.raises(CommitFailedError) as caught:
+        await _start(tasks_file, commit=CommitMode.TASK)
+
+    assert caught.value.exit_code == 4
+    assert str(caught.value).endswith("commit failed: log folder visible: run/logs")
+    assert commit_subjects(git_repo) == ["init"]
+
+
 async def test_start_after_all_mode_makes_one_commit_for_the_run(
     record: Path, git_repo: Path, outside: Path
 ) -> None:

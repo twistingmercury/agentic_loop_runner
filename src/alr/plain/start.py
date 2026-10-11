@@ -147,6 +147,7 @@ async def _run_logged(
         repo=repo,
         commit_mode=commit,
         stop=stop,
+        run_dir=str(log.path),
     )
     try:
         await run(task_list, options, PlainFrontEnd(record=log.record))

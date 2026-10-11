@@ -180,6 +180,16 @@ def test_open_existing_run_folder_gets_a_suffixed_folder(
     ]
 
 
+def test_path_is_the_folder_the_log_opened_in(opened: tuple[RunLog, Path]) -> None:
+    log, path = opened
+
+    second = RunLog.open(path, INFO, now=fixed_now)
+    second.close()
+
+    assert log.path == path
+    assert second.path == path.with_name(path.name + "-1"), "not the name asked for"
+
+
 def test_open_unwritable_parent_names_the_run_log_folder(tmp_path: Path) -> None:
     # A file where a folder should be fails the same way for every user, root
     # included, which a read-only folder does not.

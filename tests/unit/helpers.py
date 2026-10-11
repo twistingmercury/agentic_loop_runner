@@ -109,6 +109,7 @@ async def run_loop(
     front_end: FrontEnd | None = None,
     commit_mode: CommitMode = CommitMode.TASK,
     stop: Stop | None = None,
+    run_dir: str | None = None,
 ) -> None:
     """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(
@@ -118,6 +119,7 @@ async def run_loop(
         repo=repo,
         commit_mode=commit_mode,
         stop=stop or Stop(),
+        run_dir=run_dir,
     )
     await loop.run(
         task_list, options, PlainFrontEnd() if front_end is None else front_end

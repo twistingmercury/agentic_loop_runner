@@ -190,6 +190,11 @@ class RunLog:
         self._detail: TextIO | None = None
         self._detail_path: Path | None = None
 
+    @property
+    def path(self) -> Path:
+        """The run's folder: the name asked for, or its suffixed one when that was taken."""
+        return self._path
+
     @classmethod
     def open(
         cls,

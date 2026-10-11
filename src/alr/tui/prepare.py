@@ -90,6 +90,7 @@ async def _prepare(
     # is read again from disk.
     reset_count = reset_in_memory(task_list) if settings.reset_failed else 0
     refuse_failed(task_list)
+    log = None if log_path is None else _open_log(settings, log_path)
     options = RunOptions(
         tasks_file=settings.tasks_file,
         gate_timeout=settings.gate_timeout,
@@ -97,8 +98,9 @@ async def _prepare(
         repo=repo,
         commit_mode=settings.commit_mode,
         stop=Stop() if stop is None else stop,
+        # The folder the log really opened, which has a suffix when the name was taken.
+        run_dir=None if log is None else str(log.path),
     )
-    log = None if log_path is None else _open_log(settings, log_path)
     prepared = Prepared(task_list, options, log, locks)
     # After the log opens, so a check or the log failing never leaves the task file rewritten.
     try:
