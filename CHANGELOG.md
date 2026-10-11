@@ -46,14 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committing run, or a dry run with a commit mode, is refused with exit 3 and
   the reason `locked`. The kernel drops the lock when alr dies, so a killed run
   leaves none stuck. The `git add` and `git commit` alr starts run in their own
-  session, with no controlling terminal, so a signing program that wants to
-  prompt fails instead of waiting. On Linux the kernel also sends that git
-  SIGTERM if alr dies (`PR_SET_PDEATHSIG`); elsewhere a SIGKILL of alr during a
-  commit can still let the commit land. Right before every `git add`, alr checks
-  again that git ignores the task file and the log folder: if a task's commands
-  made either visible, nothing is staged, the task is `failed` with
+  session, with no controlling terminal, so a program that prompts on `/dev/tty`
+  (a signing program, say) fails instead of waiting. A program that opens a
+  terminal by path, or a GUI pinentry, can still wait, and a stop still ends it.
+  On Linux the kernel also sends that git SIGTERM if alr dies
+  (`PR_SET_PDEATHSIG`); elsewhere a SIGKILL of alr during a commit can still let
+  the commit land. Right before every `git add`, alr checks again that git
+  ignores the task file and the `logs/` directory: if a task's commands made
+  either visible, nothing is staged, the task is `failed` with
   `commit failed: task file visible: <path>` or `commit failed: log folder
-  visible: <folder>`, and the run exits 4.
+  visible: <logs dir>`, and the run exits 4. If git cannot answer that check,
+  the task fails the same way with git's message.
 - `run_finished` in the run log has `result` (`completed`, `failed`,
   `commit_failed`, or `stopped`) and `exit`, the code alr returns.
 - In `run` mode a task whose gates passed is logged and shown as `passed` until

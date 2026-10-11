@@ -105,7 +105,7 @@ they should edit.
 | `1`   | A task or gate failed, or the run hit an error such as a failed save                      |
 | `2`   | Usage error: a bad or missing flag, or a run folder with no `tasks.yaml`                  |
 | `3`   | Refused to start; nothing ran and nothing was left on disk: no run log, and the task file unchanged |
-| `4`   | A commit failed (or the pre-add re-check found a path visible); the task is `failed` and its work stays staged |
+| `4`   | A commit failed, or the pre-add re-check found a path visible; the task is `failed`. A failed commit leaves its work staged, and a re-check failure stages nothing |
 | `130` | Stopped by SIGINT (Ctrl-C)                                                                |
 | `143` | Stopped by SIGTERM                                                                        |
 
@@ -127,7 +127,9 @@ The reason is one of:
 | `git-error`                | git failed while alr looked at the repository, or alr could not open or lock `alr.lock` |
 
 A failed commit's reason is the first line of git's (or the hook's) output, in the task's
-`error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The run log's
+`error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The pre-add re-check
+(below) gives `commit failed: task file visible: <path>` or `commit failed: log folder visible:
+<folder>/logs`, and a git that cannot answer the re-check gives `commit failed: <git's message>`. The run log's
 `run_finished` line has the `result` (`completed`, `failed`, `commit_failed`, or `stopped`),
 the `error`, and the `exit` code. `run_started` has `"commit": "none"`, `"task"`, or `"run"`.
 A `--dry-run` is refused like a real run, in the same order and with the same exit 3, including for a task that is
@@ -167,18 +169,22 @@ A committing run is guarded three ways, on top of those checks:
   a stuck lock; the `alr.lock` file a run leaves behind is not a lock, and you can
   leave it or delete it.
 - **The ignore rules are checked again before every `git add`.** A task's own
-  commands can edit `.gitignore`. If git then sees the task file or the run's log
+  commands can edit `.gitignore`. If git then sees the task file or the `logs/`
   folder, nothing is staged, the task is `failed` with `commit failed: task file
-  visible: <path>` or `commit failed: log folder visible: <folder>`, and the run
-  exits 4. In `--commit run` the check runs once, before the one commit. The log
+  visible: <path>` or `commit failed: log folder visible: <folder>/logs`, and the
+  run exits 4. The `logs/` check covers every folder under it, including older
+  runs'. In `--commit run` the check runs once, before the one commit. The log
   folder is only checked when the run keeps a log.
 - **git runs in its own session and dies with alr.** The `git add` and `git commit`
-  that alr starts have no controlling terminal, so a signing program that wants to
-  prompt (a GPG pinentry) fails instead of waiting on a person. On Linux the kernel
-  also sends that git SIGTERM if alr dies, even by SIGKILL (`PR_SET_PDEATHSIG`), so
-  git removes its index lock and no commit lands after alr is gone. On other
-  platforms there is no such stop: a SIGKILL of alr during a commit can still let
-  the commit land afterwards.
+  that alr starts have no controlling terminal, so a signing program that prompts
+  on `/dev/tty` fails instead of waiting on a person. A program that opens a
+  terminal by path (`GPG_TTY`), or a GUI pinentry through gpg-agent, is not stopped
+  by this and can still wait; Ctrl-C or Stop still ends the run. On Linux the
+  kernel also sends that git SIGTERM if alr dies, even by SIGKILL
+  (`PR_SET_PDEATHSIG`), so git removes its index lock and no `git add` or
+  `git commit` that alr started lands after alr is gone. On other platforms there
+  is no such stop: a SIGKILL of alr during a commit can still let the commit land
+  afterwards.
 
 After a failed or stopped run, the work tree holds the leftovers, and the next
 committing run refuses to start until the tree is clean; the error lists the
@@ -237,6 +243,31 @@ in [docs/plans/](docs/plans/).
   Do not run `alr` on a task file you do not trust.
 - This is a breaking change from earlier `alr` builds: there is no `-p/--prompt` and no
   `prompt.md`, and the `abandoned` state is gone.
+
+### Commit limits
+
+The commit guards above do not cover these cases:
+
+- **Only git is tied to alr's life.** On Linux the kernel stops the `git add` and
+  `git commit` alr starts, but not the hooks git runs, the gates, or the Claude
+  sessions. After a SIGKILL of alr they can keep running, and one still running can
+  write into a later run's commits once the lock is free. Prefer Ctrl-C or SIGTERM,
+  which lets alr stop them, and after a SIGKILL check that nothing is still running
+  before you rerun.
+- **A SIGKILL during a post-commit hook.** The commit has landed, but `tasks.yaml`
+  still says `pending`, so the next run redoes that task. No commit alr started lands
+  after alr is gone; a commit that landed before a post-commit hook finished is not
+  recorded.
+- **The lock stops only another committing run.** A `--commit none` run in the same
+  work tree is not stopped, and what it writes can be committed by the other run.
+- **The re-check covers two paths only.** The task file and the `logs/` folder are
+  checked. Any other ignored file that a task un-ignores (`.env`, build output) is
+  staged by `git add -A` and committed. A pre-commit hook that edits `.gitignore` and
+  runs `git add` after the check is not caught either.
+- **The dry run only looks at the lock.** With a commit mode it takes the lock for an
+  instant, so a real run that starts at that moment is refused `locked`; rerun it.
+- **git 2.13 or newer is required.** `--commit` uses `git rev-parse --absolute-git-dir`,
+  and an older git refuses every committing run with `git-error`.
 
 ## Development Considerations
 
