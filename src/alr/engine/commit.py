@@ -1,5 +1,6 @@
 """--commit: check the repository before a run, and commit each completed task's work."""
 
+import errno
 import fcntl
 import os
 from collections.abc import Awaitable, Callable, Iterator, Sequence
@@ -106,13 +107,16 @@ def check_unlocked(repo: Repo | None) -> None:
     """Refuse like held_lock when another run holds the lock, without keeping it.
 
     Read-only, as a dry run writes nothing: no lock file is made, and the
-    lock taken is shared, so two dry runs never refuse each other.
+    lock taken is shared, so two dry runs never refuse each other. Without a
+    lock file yet, the git directory must still allow making one, as a real
+    run's would be refused otherwise.
     """
     if repo is None:
         return
 
     path = _lock_path(repo)
     if not path.exists():
+        _check_creatable(path)
         return
 
     os.close(_lock(path, 0, fcntl.LOCK_SH))
@@ -292,6 +296,12 @@ async def _find_git_dir(root: str) -> str:
 
 def _lock_path(repo: Repo) -> Path:
     return Path(repo.git_dir) / _LOCK_NAME
+
+
+def _check_creatable(path: Path) -> None:
+    """Refuse, as making the lock file would, a git directory the user cannot write, creating nothing."""
+    if not os.access(path.parent, os.W_OK | os.X_OK):
+        raise _unusable(path, OSError(errno.EACCES, os.strerror(errno.EACCES)))
 
 
 def _lock(path: Path, flags: int, operation: int) -> int:

@@ -2120,3 +2120,27 @@ async def test_check_unlocked_writes_nothing(git_repo: Path) -> None:
     check_unlocked(repo)
 
     assert not (Path(repo.git_dir) / "alr.lock").exists()
+
+
+async def test_check_unlocked_refuses_a_git_dir_the_lock_cannot_be_made_in(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = await find_repo(str(_task_file(git_repo)))
+    access = os.access
+
+    def deny_the_git_dir(path: str | Path, mode: int, **kwargs: bool) -> bool:
+        # chmod 555 would not stop root, so the refusal is made here instead.
+        denied = Path(path) == Path(repo.git_dir) and mode & os.W_OK
+        return not denied and access(path, mode, **kwargs)
+
+    monkeypatch.setattr(os, "access", deny_the_git_dir)
+
+    with pytest.raises(RefusedError) as caught:
+        check_unlocked(repo)
+
+    assert caught.value.reason == "git-error"
+    assert str(caught.value) == (
+        f"refused: git-error: --commit: cannot lock {repo.git_dir}/alr.lock: "
+        "Permission denied"
+    )
+    assert not (Path(repo.git_dir) / "alr.lock").exists()
