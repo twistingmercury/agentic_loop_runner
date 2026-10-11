@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-11
+
 ### Changed
 
 - **Breaking:** exit codes. A stop now exits 130 (SIGINT) or 143 (SIGTERM), not
