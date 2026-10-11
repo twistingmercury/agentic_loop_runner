@@ -55,9 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or an unwritable `logs/` left the file reset; a failed log open left an empty
   run folder; and the view saved the gates and the reset before it opened the
   log. Quitting the view before Start now leaves the file untouched too.
-- `--dry-run` refuses like a real run: a task that is `failed` and a log folder
-  git can see both exit 3 (`failed-tasks`, `log-folder-visible`), and its
-  invalid-file message no longer carries `failed to start loop runner:`.
+- `--dry-run` refuses like a real run: a task that is `failed` exits 3
+  (`failed-tasks`), and with `--commit task` or `--commit run` a log folder git
+  can see exits 3 (`log-folder-visible`). Its invalid-file message no longer
+  carries `failed to start loop runner:`.
 - The full-screen view exits 143 after SIGTERM, not 130, and a second Stop
   press while a run is stopping no longer turns the stop into exit 0.
 - A stop that lands after git has already made the commit no longer undoes it:
