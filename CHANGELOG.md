@@ -18,10 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `error: refused: <reason>: <message>`, with the reason `dirty-tree`,
   `task-file-visible`, `log-folder-visible`, `failed-tasks`,
   `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`,
-  `task-file-unwritable` (a `--reset-failed` that cannot save the task file), or
-  `git-error`. A refusal leaves nothing on disk: no run log, and the task file
-  as it was. `--reset-failed` is applied in memory first and saved only after
-  every other check and the log folder have passed.
+  `task-file-unwritable` (a save at startup that fails: the `--reset-failed`
+  reset or, in the view, the edited gates), or `git-error`. A refusal leaves
+  nothing on disk: no run log, and the task file as it was. `--reset-failed` is
+  applied in memory first and saved only after every other check and the log
+  folder have passed.
 - **Breaking:** `run_started.commit` in the run log is a string, `"none"`,
   `"task"`, or `"run"`, where it was a boolean.
 - **Breaking:** `--commit run` saves nothing until the commit lands. If a task
@@ -86,9 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain failure is no longer reported as a stop.
 - The full-screen view's rows follow the saved state after a stop: a task saved
   `completed` stays completed, and only rows not saved return to pending.
-- With `--commit task`, a failed save after a commit that landed names the
-  commit hash in the error, as the `run` mode and stopped cases already did,
-  and exits 4.
+- A failed save after a commit that landed names the commit hash in the error
+  and exits 4 in every commit mode. After a stop, that exit 4 replaces the
+  stop's 130 or 143.
 - Tests now pin the edges of the task name rule (`\x00`, `\x1f`, `\x7f`, `\x9f`,
   with tab, space, and `\xa0` allowed), a failing `discard()` that must not hide
   the refusal, and `--reset-failed` with no failed task leaving `tasks.yaml`
