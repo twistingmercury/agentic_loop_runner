@@ -13,7 +13,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Action, Task
+from alr.tasks import RUN_SCOPE, Action, Task
 from alr.tui.progress import Progress
 
 FIRST = Task(id=3, name="First", prompt="p")
@@ -258,4 +258,41 @@ def test_after_all_commit_reads_commit_once_it_starts(
     assert (after_finish, progress.text()) == (
         "task 1 of 1 · run 4.0s",
         "task 1 of 1 · commit · 1.0s · run 5.0s",
+    )
+
+
+def test_after_run_action_is_labelled_after_the_run_and_leaves_the_task_actions_alone(
+    progress: Progress, clock: FakeClock
+) -> None:
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(ActionStarted(FIRST, FORMAT))
+    progress.feed(TaskFinished(FIRST, None, 1.0))
+    progress.feed(ActionStarted(RUN_SCOPE, TESTS))
+    clock.advance(4)
+
+    assert progress.text() == (
+        "task 1 of 12 · after the run: uv run pytest -n auto tests/unit · 4.0s · run 4.0s"
+    )
+
+
+def test_after_run_action_with_no_task_actions_is_still_labelled_after_the_run(
+    clock: FakeClock,
+) -> None:
+    progress = Progress(total_tasks=1, action_count=0, clock=clock)
+    progress.feed(TaskStarted(FIRST))
+    progress.feed(TaskFinished(FIRST, None, 1.0))
+    progress.feed(ActionStarted(RUN_SCOPE, FORMAT))
+
+    assert "after the run: uv run ruff format --check" in progress.text()
+    assert "action" not in progress.text().replace("after the run", "")
+
+
+def test_after_run_shows_progress_when_no_task_was_pending(
+    progress: Progress, clock: FakeClock
+) -> None:
+    progress.feed(ActionStarted(RUN_SCOPE, TESTS))
+    clock.advance(65)
+
+    assert progress.text() == (
+        "after the run: uv run pytest -n auto tests/unit · 1m 5s · run 1m 5s"
     )
