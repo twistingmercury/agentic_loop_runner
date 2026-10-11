@@ -46,8 +46,10 @@ async def start(
     cancellation carries on. An OSError from the spawn propagates unchanged.
     new_session starts the child as a session leader instead, which is also a
     group leader, so a stop still reaches it. With no controlling terminal, a
-    program that would prompt on one (git running a signing program) fails
-    instead of waiting on a person.
+    program that prompts on /dev/tty (git running a signing program, say) fails
+    instead of waiting on a person. A program that opens a terminal by path
+    (GPG_TTY) or a GUI pinentry through gpg-agent is not stopped by this and can
+    still wait; a stop still gets it out.
     die_with_parent has the kernel send the child SIGTERM when alr dies, even by
     SIGKILL, which runs no cleanup of alr's own. SIGTERM, not SIGKILL, so git
     still removes its index lock. Only Linux has this; elsewhere the flag does
