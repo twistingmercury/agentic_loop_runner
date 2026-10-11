@@ -858,6 +858,23 @@ async def test_a_refused_start_during_a_stop_clears_the_stop_state(
         assert not app._stopping
 
 
+async def test_a_refused_start_during_a_sigterm_stop_forgets_the_signal(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
+    app = AlrApp(_settings(git_repo))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        await until(lambda: app.state is AppState.READY)
+
+        # Left at SIGTERM, a later Ctrl-C stop would end 143 instead of 130.
+        assert app._stop.signum == signal.SIGINT
+
+
 async def test_the_first_stop_after_a_refused_start_is_graceful(
     git_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
