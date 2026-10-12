@@ -1,20 +1,18 @@
 """Every exit code alr can return, with the result its run log records.
 
-0 completed, 1 failed, 2 usage, 3 refused, 4 commit failed, 130 and 143 stopped.
+0 completed, 1 failed, 2 usage, 3 refused, 4 after_run failed, 130 and 143 stopped.
 """
 
-import json
 import signal
 from pathlib import Path
-from typing import Any
 
 import pytest
 from e2e_helpers import (
     ONE_TASK,
-    TWO_TASKS,
     assert_no_tmp_file,
     read_tasks_yaml,
     run_alr,
+    run_log,
     run_args,
     shared_block,
     start_alr,
@@ -26,28 +24,9 @@ from test_signal import stopped_at_exit
 
 ONE_TASK_YAML = shared_block() + ONE_TASK
 
-# The fake claude changes no files, so an action does the "work" a commit picks up.
-WORK_ACTION = [{"action": "echo one > one.txt"}]
-ONE_WORK_TASK_YAML = shared_block("Body.", WORK_ACTION) + ONE_TASK
-
-# The action lets the first task through and fails the second, so a run-mode
-# commit has a task that completed and a task that failed.
-SECOND_TASK_FAILS = [
-    {"action": "if [ -e one.txt ]; then exit 1; else echo one > one.txt; fi"}
-]
-SECOND_TASK_FAILS_YAML = shared_block("Body.", SECOND_TASK_FAILS) + TWO_TASKS
-
-TWO_WORK_TASKS_YAML = (
-    shared_block(
-        "Body.",
-        [
-            {
-                "action": "if [ -e one.txt ]; then echo two > two.txt; else echo one > one.txt; fi"
-            }
-        ],
-    )
-    + TWO_TASKS
-)
+AFTER_RUN_FAILS = [{"action": "exit 7"}]
+AFTER_RUN_FAILS_YAML = shared_block("Body.", [], AFTER_RUN_FAILS) + ONE_TASK
+AFTER_RUN_FAILURE = 'action "exit 7" failed: exit status 7'
 
 BLOCKED_TASK_YAML = (
     shared_block()
@@ -57,13 +36,6 @@ BLOCKED_TASK_YAML = (
     prompt: Block forever.
 """
 )
-
-
-def run_log(folder: Path) -> list[dict[str, Any]]:
-    """The run's ledger: the one run.jsonl under <folder>/logs, one entry per line."""
-    (run_folder,) = (folder / "logs").iterdir()
-    lines = (run_folder / "run.jsonl").read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines]
 
 
 def assert_run_finished(folder: Path, result: str, exit_code: int) -> None:
@@ -104,15 +76,18 @@ def test_bad_flag_exits_2(tmp_path: Path, fake_claude: Path) -> None:
     assert not (tmp_path / "logs").exists()
 
 
-def test_refusal_exits_3_and_writes_no_log(git_repo: Path, fake_claude: Path) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
+def test_refusal_exits_3_and_writes_no_log(tmp_path: Path, fake_claude: Path) -> None:
+    failed_yaml = (
+        shared_block()
+        + "tasks:\n  - {id: 1, name: First, prompt: p1, state: failed, error: boom}\n"
+    )
+    tasks_path = write_tasks_yaml(tmp_path, failed_yaml)
 
-    res = run_alr(*run_args(tasks_path), "--commit", "run")
+    res = run_alr(*run_args(tasks_path))
 
     assert res.code == 3, res
-    assert res.err.splitlines()[0].startswith("error: refused: dirty-tree: ")
-    assert not (tasks_path.parent / "logs").exists()
+    assert res.err.splitlines()[0].startswith("error: refused: failed-tasks: ")
+    assert not (tmp_path / "logs").exists()
 
 
 def test_reset_failed_with_an_unwritable_log_folder_leaves_the_file_alone(
@@ -152,23 +127,17 @@ def test_reset_failed_keeps_a_users_own_tmp_file(
     assert_no_tmp_file(tasks_path)
 
 
-def install_pre_commit_hook(git_repo: Path, script: str) -> None:
-    hook = git_repo / ".git" / "hooks" / "pre-commit"
-    hook.parent.mkdir(exist_ok=True)
-    hook.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
-    hook.chmod(0o700)
+def test_after_run_failure_exits_4_and_leaves_the_tasks_completed(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, AFTER_RUN_FAILS_YAML)
 
-
-def test_commit_failure_exits_4(git_repo: Path, fake_claude: Path) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-    install_pre_commit_hook(git_repo, "echo no\nexit 1")
-
-    res = run_alr(*run_args(tasks_path), "--commit", "task")
+    res = run_alr(*run_args(tasks_path))
 
     assert res.code == 4, res
-    assert "commit failed: no" in res.err
-    assert_run_finished(tasks_path.parent, "commit_failed", 4)
-    assert task_states(read_tasks_yaml(tasks_path)) == {1: "failed"}
+    assert AFTER_RUN_FAILURE in res.err
+    assert_run_finished(tmp_path, "run_failed", 4)
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
 
 
 @pytest.mark.parametrize(
@@ -195,100 +164,61 @@ def test_a_signal_exits_128_plus_its_number(
         assert_run_finished(tmp_path, "stopped", 128 + sig)
 
 
-def test_run_mode_failed_run_leaves_nothing_completed(
-    git_repo: Path, fake_claude: Path
+def test_after_run_failure_has_no_task_in_the_run_finished_error(
+    tmp_path: Path, fake_claude: Path
 ) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", SECOND_TASK_FAILS_YAML)
+    tasks_path = write_tasks_yaml(tmp_path, AFTER_RUN_FAILS_YAML)
 
-    res = run_alr(*run_args(tasks_path), "--commit", "run")
+    run_alr(*run_args(tasks_path))
 
-    assert res.code == 1, res
-    assert list(task_states(read_tasks_yaml(tasks_path)).values()) == [
-        "pending",
-        "failed",
-    ]
+    assert run_log(tmp_path)[-1]["error"] == AFTER_RUN_FAILURE
 
 
-def test_run_mode_failed_commit_exits_4_and_leaves_the_last_task_failed(
-    git_repo: Path, fake_claude: Path
+def test_an_after_task_failure_names_the_task_in_the_run_finished_error(
+    tmp_path: Path, fake_claude: Path
 ) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", TWO_WORK_TASKS_YAML)
-    install_pre_commit_hook(git_repo, "echo no\nexit 1")
-
-    res = run_alr(*run_args(tasks_path), "--commit", "run")
-
-    assert res.code == 4, res
-    assert list(task_states(read_tasks_yaml(tasks_path)).values()) == [
-        "pending",
-        "failed",
-    ]
-    assert_run_finished(tasks_path.parent, "commit_failed", 4)
-
-
-def test_task_mode_commit_failure_names_the_task_in_the_run_finished_error(
-    git_repo: Path, fake_claude: Path
-) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-    install_pre_commit_hook(git_repo, "echo no\nexit 1")
-
-    run_alr(*run_args(tasks_path), "--commit", "task")
-
-    assert run_log(tasks_path.parent)[-1]["error"] == (
-        "task 1: First task failed: commit failed: no"
+    tasks_path = write_tasks_yaml(
+        tmp_path, shared_block("Body.", [{"action": "exit 7"}]) + ONE_TASK
     )
 
+    res = run_alr(*run_args(tasks_path))
 
-def test_run_mode_commit_failure_has_no_task_in_the_run_finished_error(
-    git_repo: Path, fake_claude: Path
+    assert res.code == 1, res
+    assert (
+        run_log(tmp_path)[-1]["error"]
+        == f"task 1: First task failed: {AFTER_RUN_FAILURE}"
+    )
+    assert_run_finished(tmp_path, "failed", 1)
+
+
+def test_the_ledger_says_completed_once_the_actions_passed(
+    tmp_path: Path, fake_claude: Path
 ) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-    install_pre_commit_hook(git_repo, "echo no\nexit 1")
+    tasks_path = write_tasks_yaml(
+        tmp_path, shared_block("Body.", [{"action": "true"}]) + ONE_TASK
+    )
 
-    run_alr(*run_args(tasks_path), "--commit", "run")
-
-    assert run_log(tasks_path.parent)[-1]["error"] == "commit failed: no"
-
-
-def test_run_mode_ledger_says_passed_until_the_commit_lands(
-    git_repo: Path, fake_claude: Path
-) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-
-    res = run_alr(*run_args(tasks_path), "--commit", "run")
+    res = run_alr(*run_args(tasks_path))
 
     assert res.code == 0, res
-    finished = [e for e in run_log(tasks_path.parent) if e["event"] == "task_finished"]
-    assert [e["state"] for e in finished] == ["passed"]
-    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
-
-
-def test_task_mode_ledger_says_completed(git_repo: Path, fake_claude: Path) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-
-    res = run_alr(*run_args(tasks_path), "--commit", "task")
-
-    assert res.code == 0, res
-    finished = [e for e in run_log(tasks_path.parent) if e["event"] == "task_finished"]
+    finished = [e for e in run_log(tmp_path) if e["event"] == "task_finished"]
     assert [e["state"] for e in finished] == ["completed"]
 
 
-@pytest.mark.parametrize("mode", ["task", "run"])
-def test_a_signal_during_a_commit_exits_143(
-    git_repo: Path, fake_claude: Path, mode: str
+def test_a_signal_during_an_after_task_action_exits_143(
+    tmp_path: Path, fake_claude: Path
 ) -> None:
-    tasks_path = write_tasks_yaml(git_repo / "run", ONE_WORK_TASK_YAML)
-    ready_file = tasks_path.parent / "ready"
-    # The pre-commit hook runs before the commit exists, so the stop arrives mid-commit.
-    install_pre_commit_hook(git_repo, f"echo $$ > {ready_file}\nsleep 60")
+    ready_file = tmp_path / "ready"
+    action = {"action": f"echo $$ > '{ready_file}'; exec sleep 60"}
+    tasks_yaml = shared_block("Body.", [action]) + ONE_TASK
+    tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
 
-    with stopped_at_exit(
-        start_alr(*run_args(tasks_path), "--commit", mode), ready_file
-    ) as process:
+    with stopped_at_exit(start_alr(*run_args(tasks_path)), ready_file) as process:
         wait_for_file(ready_file, 10)
 
         process.send_signal(signal.SIGTERM)
         out, err = process.communicate(timeout=15)
 
         assert process.returncode == 143, (out, err)
-        assert_run_finished(tasks_path.parent, "stopped", 143)
-        assert tasks_path.read_text(encoding="utf-8") == ONE_WORK_TASK_YAML
+        assert_run_finished(tmp_path, "stopped", 143)
+        assert tasks_path.read_text(encoding="utf-8") == tasks_yaml

@@ -33,19 +33,10 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def outside(tmp_path: Path) -> Path:
-    """A folder next to the repository, so outside its work tree."""
-    path = tmp_path.resolve() / "outside"
-    path.mkdir()
-    return path
-
-
-@pytest.fixture
 def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a git repository holding one commit, and make it the working directory.
 
-    The commit ignores run/, where tests keep the task file as a --commit task or --commit run
-    requires, and the folder exists so a run can save the file there.
+    Nothing is ignored, so a commit action sees whatever a run leaves in the tree.
     """
     # Symlinks resolved, so the path compares equal to the one git reports.
     repo = tmp_path.resolve() / "repo"
@@ -53,18 +44,16 @@ def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _isolate_git(monkeypatch, repo)
     monkeypatch.chdir(repo)
     (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
-    (repo / ".gitignore").write_text("run/\n", encoding="utf-8")
     for args in (
         ["init", "--quiet", "--initial-branch=main"],
         ["config", "user.email", "test@example.com"],
         ["config", "user.name", "Test"],
         ["config", "commit.gpgsign", "false"],
-        ["add", "seed.txt", ".gitignore"],
+        ["add", "seed.txt"],
         ["commit", "--quiet", "-m", "init"],
     ):
         subprocess.run(["git", *args], cwd=repo, check=True)
 
-    (repo / "run").mkdir()
     return repo
 
 

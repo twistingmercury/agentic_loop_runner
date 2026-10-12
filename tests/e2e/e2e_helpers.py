@@ -86,12 +86,17 @@ def write_tasks_yaml(folder: Path, content: str) -> Path:
 
 
 def shared_block(
-    prompt: str = SHARED_PROMPT, after_task: list[dict[str, str]] | None = None
+    prompt: str = SHARED_PROMPT,
+    after_task: list[dict[str, str]] | None = None,
+    after_run: list[dict[str, str]] | None = None,
 ) -> str:
     """The shared: block that opens a task file; put the tasks after it."""
     shared: dict[str, Any] = {"prompt": prompt}
     if after_task is not None:
         shared["after_task"] = after_task
+
+    if after_run is not None:
+        shared["after_run"] = after_run
 
     return yaml.safe_dump({"shared": shared}, sort_keys=False)
 
@@ -128,6 +133,13 @@ def read_task_log(tasks_path: Path, task_id: int) -> str:
     """The text of a task's log from the run's one folder under <dir>/logs."""
     (folder,) = (tasks_path.parent / "logs").iterdir()
     return (folder / f"task-{task_id}.log").read_text(encoding="utf-8")
+
+
+def run_log(folder: Path) -> list[dict[str, Any]]:
+    """The run's ledger: the one run.jsonl under <folder>/logs, one entry per line."""
+    (run_folder,) = (folder / "logs").iterdir()
+    lines = (run_folder / "run.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
 
 
 def assert_no_tmp_file(tasks_path: Path) -> None:
