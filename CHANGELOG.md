@@ -24,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** a commit is an action now. `--commit` is removed and refused
   (exit 2); put a commit action last in `shared.after_task` instead. The
-  bundled skill and template show one that keeps `tasks.yaml` and the logs out
-  of the commit with the `:(exclude)` form of `git add`.
+  bundled skill and template show one that adds everything from the repository
+  root, then unstages `tasks.yaml` and the logs with `git reset`, so a
+  gitignored run folder works.
 - **Breaking:** `shared.gates` is now `shared.after_task`, and a gate's `cmd` is
   now `action`. The old names are refused, naming the new ones.
 - **Breaking:** `--gate-timeout` is now `--action-timeout`; the old flag is
@@ -38,11 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `action_timeout`.
 - **Breaking:** a task is no longer guaranteed its own commit. `alr` does not
   look at git.
+- Plain output `gate: <cmd>` is now `action: <cmd>`; the detail-log marker
+  `→ gate` is now `→ action`.
+- `after_run` output goes to `task-0.log`, and its `action_finished` log lines
+  carry `"task": 0`.
+- A per-task `after_task` or `after_run` is refused, like a per-task `gates`;
+  they are set once for the whole file, under `shared`.
+- An `ALR_TASK_ID` or `ALR_TASK_NAME` inherited from an outer alr no longer
+  reaches `after_run` actions.
 - The view's pane "Gates & commits" is now "Actions", and the `(g)ates` button is
   `(a)ctions`. The Commit dropdown is gone.
 
 ### Removed
 
+- The detail-log marker `→ commit`.
 - **Breaking:** the commit lock (`alr.lock`), the clean-tree and ignore checks,
   and the refusal reasons `dirty-tree`, `task-file-visible`,
   `log-folder-visible`, `git-error`, and `locked`.

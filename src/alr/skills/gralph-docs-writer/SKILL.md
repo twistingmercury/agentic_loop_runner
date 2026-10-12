@@ -59,18 +59,18 @@ of it:
 after_task:
   - action: GENERATE_BUILD_AND_TEST_COMMAND
   - action: >-
-      git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
+      git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" &&
       (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
 ```
 
-Write the exclusions in the long `:(exclude)` form: both variables are absolute
-paths, and git ignores the short `:!` form when the path is absolute. The
-`git diff --cached --quiet ||` part is there because a task that changed nothing
-has nothing to commit; without it a clean tree makes the action fail. The run
-folder (`tasks.yaml` and `logs/`) must be inside the git work tree for this
-action. If it is outside, git refuses the `:(exclude)` paths (exit 128), so drop
-the two entries and use a plain `git add -A`, since git cannot see those files
-anyway.
+The action adds everything from the repository root, then unstages the run
+folder's own files, so an ignored run folder (the layout Gralph has always asked
+for) works and a visible one is still kept out. The
+`git diff --cached --quiet ||` part is there because a task that changed
+nothing has nothing to commit; without it a clean tree makes the action fail.
+The run folder (`tasks.yaml` and `logs/`) must be inside the git work tree for
+this action. If it is outside, git refuses the `git reset` paths (exit 128), so
+drop that step and keep the run folder out of the repository.
 
 An absent `after_task` means the run's actions are undecided: the full-screen
 view asks for them. `after_task: []` records a decision that there are none.
@@ -154,7 +154,7 @@ authorized.
    merely to validate generated files.
    When an action commits, also tell the user that the commit takes whatever
    is in the work tree, so a sandbox settings file kept inside the repository
-   needs a `.gitignore` line (or an `:(exclude)` entry). Do not edit
+   needs a `.gitignore` line (or its own path in the `git reset` step). Do not edit
    `.gitignore` yourself unless asked.
 
 ## Task scope

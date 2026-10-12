@@ -35,7 +35,7 @@ shared:
     - action: uv run pytest
       timeout: 10m
     - action: >-
-        git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
+        git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" &&
         (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
   after_run:
     - action: git push --dry-run
@@ -128,15 +128,16 @@ nothing else is allowed.
 A commit is just an action: `alr` has no commit mode, does not look at git, and
 does not promise a task its own commit. The commit action takes whatever is in
 the work tree, so keep `tasks.yaml` and the logs out of it, as the example above
-does. It uses the long `:(exclude)` form because both variables are absolute
-paths and git ignores the short `:!` form for an absolute path, so it would
-exclude nothing. The `git diff --cached --quiet ||` part is there because a task
-that changed nothing has nothing to commit; without it a clean tree makes the
-action fail. The run folder (`tasks.yaml` and `logs/`) must be inside the git
-work tree for this action: if it is outside, git refuses the `:(exclude)` paths
-(exit 128), so drop the two entries and use a plain `git add -A`, since git
-cannot see those files anyway. A sandbox settings file inside the repository needs its own
-`.gitignore` line or `:(exclude)` entry. Signing, hooks, the message, and any
+does. It adds everything from the repository root, then unstages the run
+folder's own files, so an ignored run folder (the layout `alr` has always asked
+for, such as `.local/` in `.gitignore`) works and a visible one is still kept
+out. The `git diff --cached --quiet ||` part is there because a task that
+changed nothing has nothing to commit; without it a clean tree makes the action
+fail. The run folder (`tasks.yaml` and `logs/`) must be inside the git work tree
+for this action: if it is outside, git refuses the `git reset` paths (exit 128),
+so drop that step and keep the run folder out of the repository. A sandbox
+settings file inside the repository needs its own `.gitignore` line or
+`git reset` path. Signing, hooks, the message, and any
 push are the action's job.
 
 ### Migrating from commit modes and gates
@@ -147,7 +148,7 @@ its replacement:
 | Before                      | Now                                                      |
 | --------------------------- | -------------------------------------------------------- |
 | `--commit task`             | A commit action last in `shared.after_task`; `--commit` exits 2 |
-| `--commit run`              | A commit action in `shared.after_run`; it runs after every task has already been saved `completed` |
+| `--commit run`              | A commit action in `shared.after_run` with a fixed message, such as `git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" && (git diff --cached --quiet \|\| git commit -s -m "alr: tasks completed")`; `after_run` actions have no `ALR_TASK_ID` or `ALR_TASK_NAME`, and it runs after every task has already been saved `completed` |
 | `shared.gates`              | `shared.after_task`                                      |
 | `cmd:` in a gate            | `action:`                                                |
 | `--gate-timeout`            | `--action-timeout`                                       |
@@ -189,6 +190,9 @@ A real run logs to `<folder>/logs/<timestamp>/` (a dry run writes nothing). Plai
 mode always logs; the full-screen view has a Logging dropdown, on by default. If
 two runs start in the same second, the later one's folder gets a `-1` suffix
 (then `-2`); `alr` does not report the final folder name back.
+
+`after_run` actions belong to no task, so their output goes to `task-0.log`, and
+their `action_finished` lines in the run log carry `"task": 0`.
 
 In plain mode, `task-N.log` also holds each action's output and Claude's stderr,
 so you can see why an action failed. The terminal shows the same output, but an

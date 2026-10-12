@@ -254,8 +254,7 @@ How gralph's packages map onto this:
   and one still running can write into a later run's work tree.
 - Nothing stops two runs in one work tree. alr takes no lock, so one run's commit action can commit the other's changes.
 - A commit action takes whatever is in the work tree; keeping `tasks.yaml` and the logs out of it is the action's job.
-  The template and the bundled skill use the long `:(exclude)` form with `ALR_TASK_FILE` and `ALR_LOG_DIR`, because git
-  ignores the short `:!` form when the path is absolute.
+  The template and the bundled skill use `git add -A -- :/` followed by `git reset` of `ALR_TASK_FILE` and `ALR_LOG_DIR`.
 - An earlier action's effects stay when a later one fails.
 
 **Key Characteristics:**
