@@ -7,7 +7,15 @@ from helpers import block_saving
 
 from alr import tasks
 from alr.errors import TaskFileError, quote
-from alr.tasks import COMPLETED, FAILED, PENDING, Gate, Shared, Task, TaskList
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    PENDING,
+    Action,
+    Shared,
+    Task,
+    TaskList,
+)
 
 SHARED = Shared(prompt="shared")
 PROMPT = 'Line one: with "quotes" and a colon\n\n  indented line\nhéllo — done\n'
@@ -69,15 +77,15 @@ def _one_task_list() -> TaskList:
             TaskList(
                 shared=Shared(
                     prompt="shared",
-                    gates=[
-                        Gate(cmd="go test ./..."),
-                        Gate(cmd='echo one\necho "two"\n'),
+                    after_task=[
+                        Action(command="go test ./..."),
+                        Action(command='echo one\necho "two"\n'),
                     ],
                 ),
                 tasks=[Task(id=1, name="First", prompt="p")],
             ),
             None,
-            id="gates",
+            id="actions",
         ),
         pytest.param(
             TaskList(
@@ -233,7 +241,10 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
     task_list = TaskList(
         shared=Shared(
             prompt="Be careful.",
-            gates=[Gate(cmd="go test ./...", timeout="90s"), Gate(cmd="echo one")],
+            after_task=[
+                Action(command="go test ./...", timeout="90s"),
+                Action(command="echo one"),
+            ],
         ),
         tasks=[
             Task(id=1, name="First", prompt="p", state=PENDING),
@@ -246,10 +257,10 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
     saved = _saved(path)
     assert tasks.parse_tasks(saved) == task_list
     assert saved.startswith(
-        "shared:\n  prompt: Be careful.\n  gates:\n"
-        "    - cmd: go test ./...\n      timeout: 90s\n"
+        "shared:\n  prompt: Be careful.\n  after_task:\n"
+        "    - action: go test ./...\n      timeout: 90s\n"
     )
-    assert "\n    - cmd: echo one\ntasks:\n  - id: 1\n    name: First\n" in saved
+    assert "\n    - action: echo one\ntasks:\n  - id: 1\n    name: First\n" in saved
     assert saved.endswith(
         "\n  - id: 2\n    name: Second\n    prompt: q\n    state: failed\n    error: boom\n"
     )
@@ -261,18 +272,18 @@ def test_save_tasks_writes_two_space_indent(tmp_path: Path) -> None:
         pytest.param(
             "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
             "tasks:",
-            "gates",
+            "actions",
             id="absent",
         ),
         pytest.param(
-            "shared:\n  prompt: shared\n  gates: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
-            "  gates: []\n",
+            "shared:\n  prompt: shared\n  after_task: []\ntasks:\n  - id: 1\n    name: First\n    prompt: do it\n    state: pending\n",
+            "  after_task: []\n",
             "error:",
             id="empty",
         ),
     ],
 )
-def test_save_tasks_keeps_gates_absent_empty_or_set(
+def test_save_tasks_keeps_actions_absent_empty_or_set(
     tmp_path: Path, text: str, present: str, absent: str
 ) -> None:
     path = tmp_path / "tasks.yaml"
@@ -353,3 +364,36 @@ def test_save_tasks_round_trips_random_strings(tmp_path: Path) -> None:
             continue
 
         assert _round_trips(tmp_path, name, text) == (name, text), repr(text)
+
+
+@pytest.mark.parametrize(
+    ("shared", "want"),
+    [
+        pytest.param(Shared(prompt="p"), "shared:\n  prompt: p\ntasks:", id="absent"),
+        pytest.param(
+            Shared(prompt="p", after_task=[], after_run=[]),
+            "shared:\n  prompt: p\n  after_task: []\n  after_run: []\ntasks:",
+            id="empty",
+        ),
+        pytest.param(
+            Shared(
+                prompt="p",
+                after_task=[Action("a", "5m")],
+                after_run=[Action("b")],
+            ),
+            "shared:\n  prompt: p\n  after_task:\n    - action: a\n      timeout: 5m\n"
+            "  after_run:\n    - action: b\ntasks:",
+            id="set, in prompt, after_task, after_run order",
+        ),
+    ],
+)
+def test_save_tasks_writes_after_task_and_after_run(
+    tmp_path: Path, shared: Shared, want: str
+) -> None:
+    path = tmp_path / "tasks.yaml"
+    task_list = TaskList(shared=shared, tasks=[Task(id=1, name="n", prompt="x")])
+
+    tasks.save_tasks(str(path), task_list)
+
+    assert want in _saved(path)
+    assert tasks.parse_tasks(_saved(path)).shared == shared

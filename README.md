@@ -31,9 +31,14 @@ shared:
   prompt: |
     You are working on the widget service. End your output with one JSON line:
     {"state": "completed"} or {"state": "failed", "error": "why"}.
-  gates:
-    - cmd: uv run pytest
+  after_task:
+    - action: uv run pytest
       timeout: 10m
+    - action: >-
+        git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" &&
+        (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
+  after_run:
+    - action: git push --dry-run
 tasks:
   - id: 1
     name: Add the widget repository
@@ -48,184 +53,159 @@ alr -d .local/feature --dry-run
 # Run the tasks, with Claude in its sandbox.
 alr -d .local/feature --sandbox-settings ~/sandbox.json
 
-# Run a folder that holds tasks.yaml and sandbox.json, and commit each task.
-alr -d .local/feature --commit task
-
 # Install the bundled task-file skill into ~/.claude/skills and exit.
 alr --install-skill
 ```
 
-In a terminal, `alr` opens a full-screen view: a settings strip (Commit and
-Logging dropdowns, which lock once a run starts), a menu row, three panes (tasks and gates
-and commits on top, activity across the full width below), and dialogs that ask for whatever the flags and the
-task file leave open (run folder, permissions, gates). Nothing runs, and nothing is
-written, until you press Start. It is keyboard-driven and never captures the mouse:
-the menu button names show their keys (there is no footer): `s` starts a run (the button
-then reads `Stop (^c)`), Ctrl-C stops it, `q` quits, `f`, `p`, `g` open the folder, permissions,
-and gates dialogs (Folder, Permissions, Reset, and Quit grey out during a run), `r` resets failed tasks to pending (after you confirm), `t` and `x`
-show `tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a dialog. The Gates
-button does nothing while a run is going. The Task pane shows only the last 5,000 lines of a
-task, with no warning; the run log keeps every line. While a run goes, a status line above the Task
-pane ticks every second and says where the run is, such as
-`task 2 of 5 · gate 1 of 3: uv run pytest · 12.3s · run 1m 4s` (the task out of the tasks
-pending at Start, the step, the step's time, and the run's time). In a narrow window the step is
-cut with `…` so the times still show. The line is only `task n of N · run <time>` between tasks.
-The Tasks pane's Time column counts the running task up and keeps each finished task's time. The view's Commit dropdown
-offers none (the default), per task, and after all, and starts from `--commit` (outside a git work tree, choosing
-a commit mode shows a note that nothing will be committed), and it keeps run logs in `<folder>/logs`, which git must ignore when it commits. Use
-`--plain`, a non-terminal, or `--dry-run` for plain output.
+In a terminal, `alr` opens a full-screen view: a settings strip (a Logging
+dropdown, which locks once a run starts), a menu row, three panes (tasks and
+actions on top, activity across the full width below), and dialogs that ask for
+whatever the flags and the task file leave open (run folder, permissions,
+actions). Nothing runs, and nothing is written, until you press Start. It is
+keyboard-driven and never captures the mouse: the menu button names show their
+keys (there is no footer): `s` starts a run (the button then reads `Stop (^c)`),
+Ctrl-C stops it, `q` quits, `f`, `p`, `a` open the folder, permissions, and
+actions dialogs (Folder, Permissions, Reset, and Quit grey out during a run),
+`r` resets failed tasks to pending (after you confirm), `t` and `x` show
+`tasks.yaml` and `sandbox.json` (these two open any time), and Esc closes a
+dialog. The Actions dialog holds two lists, "After each task" and "After the
+run". The Actions button does nothing while a run is going. The Task pane shows
+only the last 5,000 lines of a task, with no warning; the run log keeps every
+line. While a run goes, a status line above the Task pane ticks every second and
+says where the run is, such as
+`task 2 of 5 · action 1 of 3: uv run pytest · 12.3s · run 1m 4s` (the task out
+of the tasks pending at Start, the step, the step's time, and the run's time).
+In a narrow window the step is cut with `…` so the times still show. The line is
+only `task n of N · run <time>` between tasks. The Tasks pane's Time column
+counts the running task up and keeps each finished task's time. The view keeps
+run logs in `<folder>/logs`. Use `--plain`, a non-terminal, or `--dry-run` for
+plain output.
 
-| Flag                        | Short | Description                                                                              |
-| --------------------------- | ----- | ---------------------------------------------------------------------------------------- |
-| `--dir <folder>`            | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
-| `--dry-run`                 |       | Validate and report only                                                                 |
-| `--sandbox-settings <path>` |       | Run sessions in Claude's sandbox with this settings file                                 |
-| `--yolo`                    |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
-| `--commit {none,task,run}`  |       | When to commit: `none` (the default) never touches git, `task` commits each task after its gates pass and marks it completed only once the commit succeeds, `run` commits once after the last task (a failed or stopped run makes no commit) |
-| `--reset-failed`            |       | Set every failed task back to pending before the run, without asking                     |
-| `--install-skill`           |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
-| `--plain`                   |       | Use plain output instead of the full-screen view                                         |
-| `--gate-timeout <duration>` |       | Limit for every gate, such as `90s` or `10m`; overrides each gate's own timeout          |
-| `--version`                 | `-v`  | Print the version, the OS, and the architecture                                          |
+| Flag                         | Short | Description                                                                              |
+| ---------------------------- | ----- | ---------------------------------------------------------------------------------------- |
+| `--dir <folder>`             | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
+| `--dry-run`                  |       | Validate and report only; prints each action's limit in `after_task:` and `after_run:` lines |
+| `--sandbox-settings <path>`  |       | Run sessions in Claude's sandbox with this settings file                                 |
+| `--yolo`                     |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
+| `--reset-failed`             |       | Set every failed task back to pending before the run, without asking                     |
+| `--install-skill`            |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
+| `--plain`                    |       | Use plain output instead of the full-screen view                                         |
+| `--action-timeout <duration>` |      | Limit for every action, such as `90s` or `10m`; overrides each action's own timeout      |
+| `--version`                  | `-v`  | Print the version, the OS, and the architecture                                          |
 
 A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
 `--yolo`; the full-screen view asks in a dialog when neither is given.
-`--commit` needs a value; a bare `--commit`, a value other than `none`, `task`, or `run`, and the old
-`--commit-after-all` are usage errors (argparse rejects them and exits 2). In the view's Commit dropdown, "per task"
-is `task` and "after all" is `run`. `--commit` commits into the repository
-around the current directory, not the one around `-d`: the Claude sessions and
-the gates run in the current directory, so run `alr` from inside the repository
-they should edit.
+
+### Actions
+
+An action is a shell command that `alr` runs itself, through `sh -c`, in its own
+working directory. The task file has two lists of them under `shared`. Each entry
+has `action` (required) and `timeout` (optional, such as `90s` or `10m`);
+nothing else is allowed.
+
+| List         | When it runs                                         | If an action fails                                      |
+| ------------ | ---------------------------------------------------- | ------------------------------------------------------- |
+| `after_task` | After each task's session reports `completed`, in order | The task is `failed` and the later actions do not run; exit 1 |
+| `after_run`  | Once at the end of every run that has no failed task | The run stops; the tasks stay `completed`; exit 4        |
+
+- A task is `completed` only after its session reported success and every
+  `after_task` action exited 0. A failed or timed-out action saves the task as
+  `failed`, with that action's text as the reason.
+- `after_run` also runs when every task was already completed, so a rerun after
+  an `after_run` failure retries it.
+- `--action-timeout` sets the time limit of every action; without it, an action
+  uses its own `timeout`, else 10 minutes. A timeout counts as a failure.
+- An absent `after_task` is undecided: the view asks for it. `after_task: []` is
+  a decision that there are none. An absent `after_run` and `after_run: []` both
+  mean none.
+- `alr` sets these environment variables on the action's process. Use them in
+  double quotes, as `"$ALR_TASK_NAME"`, so a value is data to the shell and never
+  code. Every action gets `ALR_TASK_FILE` and `ALR_LOG_DIR`, both absolute
+  paths; `after_task` actions also get `ALR_TASK_ID` and `ALR_TASK_NAME`.
+- `alr` does not undo an action, so an action that cannot be repeated, such as a
+  commit, goes last in `after_task`.
+
+A commit is just an action: `alr` has no commit mode, does not look at git, and
+does not promise a task its own commit. The commit action takes whatever is in
+the work tree, so keep `tasks.yaml` and the logs out of it, as the example above
+does. It adds everything from the repository root, then unstages the run
+folder's own files, so an ignored run folder (the layout `alr` has always asked
+for, such as `.local/` in `.gitignore`) works and a visible one is still kept
+out. The `git diff --cached --quiet ||` part is there because a task that
+changed nothing has nothing to commit; without it a clean tree makes the action
+fail. The run folder (`tasks.yaml` and `logs/`) must be inside the git work tree
+for this action: if it is outside, git refuses the `git reset` paths (exit 128),
+so drop that step and keep the run folder out of the repository. A sandbox
+settings file inside the repository needs its own `.gitignore` line or
+`git reset` path. Signing, hooks, the message, and any
+push are the action's job.
+
+### Migrating from commit modes and gates
+
+These were removed with no aliases; each is refused with a message that names
+its replacement:
+
+| Before                      | Now                                                      |
+| --------------------------- | -------------------------------------------------------- |
+| `--commit task`             | A commit action last in `shared.after_task`; `--commit` exits 2 |
+| `--commit run`              | A commit action in `shared.after_run` with a fixed message, such as `git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" && (git diff --cached --quiet \|\| git commit -s -m "alr: tasks completed")`; `after_run` actions have no `ALR_TASK_ID` or `ALR_TASK_NAME`, and it runs after every task has already been saved `completed` |
+| `shared.gates`              | `shared.after_task`                                      |
+| `cmd:` in a gate            | `action:`                                                |
+| `--gate-timeout`            | `--action-timeout`                                       |
 
 ### Exit codes
 
 | Code  | Meaning                                                                                  |
 | ----- | ---------------------------------------------------------------------------------------- |
 | `0`   | Every task completed (or the dry run found the file valid)                                |
-| `1`   | A task or gate failed, or the run hit an error such as a failed save                      |
-| `2`   | Usage error: a bad or missing flag, or a run folder with no `tasks.yaml`                  |
+| `1`   | A task or one of its `after_task` actions failed, or the run hit an error such as a failed save |
+| `2`   | Usage error: a bad or missing flag, a removed flag, or a run folder with no `tasks.yaml`  |
 | `3`   | Refused to start; nothing ran and nothing was left on disk: no run log, and the task file unchanged |
-| `4`   | A commit failed, or the pre-add re-check found a path visible; the task is `failed`. A failed commit leaves its work staged, and a re-check failure stages nothing |
+| `4`   | An `after_run` action failed; every task stays `completed`, and a rerun retries `after_run` |
 | `130` | Stopped by SIGINT (Ctrl-C)                                                                |
 | `143` | Stopped by SIGTERM                                                                        |
 
 A refusal's first line on stderr is `error: refused: <reason>: <message>`, such as
-`error: refused: dirty-tree: --commit needs a clean work tree; commit, stash, or remove:`.
-The reason is one of:
+`error: refused: failed-tasks: ...`. The reason is one of:
 
 | Reason                     | Why alr will not start                                                                |
 | -------------------------- | ------------------------------------------------------------------------------------- |
-| `dirty-tree`               | A committing run found uncommitted changes                                            |
-| `task-file-visible`        | A committing run found the task file visible to git                                   |
-| `log-folder-visible`       | A committing run found the log folder visible to git                                  |
-| `locked`                   | Another committing run holds this repository's commit lock                            |
 | `failed-tasks`             | The task file holds a failed task; fix it and set it to pending (or `--reset-failed`) |
 | `invalid-task-file`        | The task file cannot be read or is not valid                                          |
 | `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                                    |
 | `log-unwritable`           | The run log folder cannot be created or opened                                        |
-| `task-file-unwritable`     | A save at startup failed: the `--reset-failed` reset, or edited gates in the view     |
-| `git-error`                | git failed while alr looked at the repository, or alr could not open or lock `alr.lock` |
+| `task-file-unwritable`     | A save at startup failed: the `--reset-failed` reset, or edited actions in the view   |
 
-A failed commit's reason is the first line of git's (or the hook's) output, in the task's
-`error` as `commit failed: <reason>`; `task-N.log` keeps the full text. The pre-add re-check
-(below) gives `commit failed: task file visible: <path>` or `commit failed: log folder visible:
-<folder>/logs`, and a git that cannot answer the re-check gives `commit failed: <git's message>`. The run log's
-`run_finished` line has the `result` (`completed`, `failed`, `commit_failed`, or `stopped`),
-the `error`, and the `exit` code. `run_started` has `"commit": "none"`, `"task"`, or `"run"`.
-A `--dry-run` is refused like a real run, in the same order and with the same exit 3, including for a task that is
-`failed` (the table prints first). The full-screen view exits with the same codes: a stop by SIGTERM is `143`, and a
-Stop press or Ctrl-C is `130`. A refused run leaves the task file as it was and nothing under `logs/`, not even a `logs/` it had to create;
-`--reset-failed` is saved only after every check has passed.
+The run log's `run_finished` line has the `result` (`completed`, `failed`,
+`run_failed`, or `stopped`), the `error`, and the `exit` code. Every action
+writes an `action_finished` line with its result and the limit it ran under, and
+`run_started` records `action_timeout` when `--action-timeout` was passed. A `--dry-run` is refused like a real run,
+in the same order and with the same exit 3, including for a task that is
+`failed` (the table prints first). The full-screen view exits with the same
+codes: a stop by SIGTERM is `143`, and a Stop press or Ctrl-C is `130`. A refused
+run leaves the task file as it was and nothing under `logs/`, not even a `logs/`
+it had to create; `--reset-failed` is saved only after every check has passed.
 
-A `run` commit shows in `git log` with the subject `alr: <n> tasks completed` (`alr: 1 task completed` for one task) and
-a body that lists `<id>: <name>` for each task that ran. A `task` commit uses the task's name as its subject.
+A real run logs to `<folder>/logs/<timestamp>/` (a dry run writes nothing). Plain
+mode always logs; the full-screen view has a Logging dropdown, on by default. If
+two runs start in the same second, the later one's folder gets a `-1` suffix
+(then `-2`); `alr` does not report the final folder name back.
 
-A committing run (`task` or `run`) needs the task file and the run's `logs/`
-folder kept out of git: each must be ignored by git or sit outside the
-repository. Otherwise the run refuses to start with an error such as
-`--commit needs the task file ignored by git or outside the repository:
-tasks.yaml`. For a run folder `<folder>` inside the repository, add these lines
-to `.gitignore`:
+`after_run` actions belong to no task, so their output goes to `task-0.log`, and
+their `action_finished` lines in the run log carry `"task": 0`.
 
-```gitignore
-<folder>/tasks.yaml
-<folder>/logs/
-```
-
-Ignoring the whole folder with `<folder>/` works too. Do not run `git clean -fdx`
-in the repository: `-x` also deletes ignored files, which includes the task file
-and the logs.
-
-A committing run is guarded three ways, on top of those checks:
-
-- **One committing run per repository.** The run takes an exclusive lock on
-  `alr.lock` in the repository's git directory (`.git/alr.lock`; a linked worktree
-  has its own git directory, so its own lock) and keeps it until it ends. A second
-  committing run, or a `--dry-run` with `--commit task` or `run`, is refused with
-  exit 3 and the reason `locked`, whether it comes from plain mode or the full-screen
-  view. The check comes after the task file check and before the log folder and
-  clean tree checks, because a run that holds the lock leaves the tree dirty. The
-  kernel drops the lock when alr dies, even by SIGKILL, so a killed run never leaves
-  a stuck lock; the `alr.lock` file a run leaves behind is not a lock, and you can
-  leave it or delete it.
-- **The ignore rules are checked again before every `git add`.** A task's own
-  commands can edit `.gitignore`. If git then sees the task file or the `logs/`
-  folder, nothing is staged, the task is `failed` with `commit failed: task file
-  visible: <path>` or `commit failed: log folder visible: <folder>/logs`, and the
-  run exits 4. The `logs/` check covers every folder under it, including older
-  runs'. In `--commit run` the check runs once, before the one commit. The log
-  folder is only checked when the run keeps a log.
-- **git runs in its own session and dies with alr.** The `git add` and `git commit`
-  that alr starts have no controlling terminal, so a signing program that prompts
-  on `/dev/tty` fails instead of waiting on a person. A program that opens a
-  terminal by path (`GPG_TTY`), or a GUI pinentry through gpg-agent, is not stopped
-  by this and can still wait; Ctrl-C or Stop still ends the run. On Linux the
-  kernel also sends that git SIGTERM if alr dies, even by SIGKILL
-  (`PR_SET_PDEATHSIG`), so git removes its index lock and no `git add` or
-  `git commit` that alr started lands after alr is gone. On other platforms there
-  is no such stop: a SIGKILL of alr during a commit can still let the commit land
-  afterwards.
-
-After a failed or stopped run, the work tree holds the leftovers, and the next
-committing run refuses to start until the tree is clean; the error lists the
-files. A failed run leaves its task `failed` and needs `--reset-failed`. A
-stopped run leaves the interrupted task `pending`, which needs no reset. In
-`task` mode a task is `completed` only after its commit lands. A stop that
-arrives after git has already made a commit does not undo it: the tasks that
-commit covers are saved `completed`, so a rerun never redoes committed work.
-Clean up by mode:
-
-- `task`: each earlier task is already committed, so the leftovers are only the
-  work of the failed or interrupted task. Discard it with `git reset` (this
-  unstages and changes no files), then `git restore .` and `git clean -fd`.
-  `git clean -fd` leaves the ignored task file and `logs/` alone. Then run
-  again, with `--reset-failed` after a failure.
-- `run`: `tasks.yaml` is saved once, at the end, and no task is marked
-  `completed` until the one commit lands. A stop before the commit lands does
-  not touch the file at all. A failed or stopped run leaves
-  nothing completed: the failed task is `failed` and every other task that ran
-  is back to `pending`. The leftovers are only work this run made, so discard
-  them the same way as in `task` mode, then run again, with `--reset-failed`
-  after a failure. Tasks completed by an earlier run stay completed; their work
-  is already in that run's commit.
-
-A real run logs to `<folder>/logs/<timestamp>/` in every commit mode (a dry run
-writes nothing). Plain mode always logs; the full-screen view has a Logging
-dropdown, on by default. If two runs start in the same second, the later one's
-folder gets a `-1` suffix (then `-2`); `alr` does not report the final folder
-name back. The git check looks at the plain folder name.
-
-In plain mode, `task-N.log` also holds each gate's output, git's output, and Claude's stderr, so you can
-see why a gate failed. The terminal shows the same output, but a gate sees a pipe instead of a terminal.
+In plain mode, `task-N.log` also holds each action's output and Claude's stderr,
+so you can see why an action failed. The terminal shows the same output, but an
+action sees a pipe instead of a terminal.
 
 ## How it works
 
 Tasks run one at a time, in file order, each in a fresh `claude --print` session. The
 shared prompt and the task go to Claude on stdin. The runner owns task state: Claude
 reports its outcome as one JSON line at the end of its output. When a task completes,
-the file's `shared.gates` run, and the task counts as done only if every gate exits
-zero. The file is saved after every task, and the first failed task stops the run. With
-`--commit run`, the file is saved once, at the end, after the one commit lands.
+the file's `shared.after_task` actions run, and the task counts as done only if every
+action exits zero. The file is saved after every task, and the first failed task stops the
+run. After the last task, `shared.after_run` runs once.
 
 Each task has an `id`, a `name`, a `prompt`, and an optional `state` of `pending`,
 `completed`, or `failed`.
@@ -239,35 +219,22 @@ in [docs/plans/](docs/plans/).
 - No automatic retries: at most one attempt per task per run.
 - Claude Code is the only supported agent. It uses your installed CLI's own model and
   authentication settings; `alr` adds no model-selection flags.
-- The task file is code: its prompts go to Claude and its gates run through `sh -c`.
+- The task file is code: its prompts go to Claude and its actions run through `sh -c`.
   Do not run `alr` on a task file you do not trust.
 - This is a breaking change from earlier `alr` builds: there is no `-p/--prompt` and no
   `prompt.md`, and the `abandoned` state is gone.
 
-### Commit limits
+### Action limits
 
-The commit guards above do not cover these cases:
-
-- **Only git is tied to alr's life.** On Linux the kernel stops the `git add` and
-  `git commit` alr starts, but not the hooks git runs, the gates, or the Claude
-  sessions. After a SIGKILL of alr they can keep running, and one still running can
-  write into a later run's commits once the lock is free. Prefer Ctrl-C or SIGTERM,
-  which lets alr stop them, and after a SIGKILL check that nothing is still running
-  before you rerun.
-- **A SIGKILL during a post-commit hook.** The commit has landed, but `tasks.yaml`
-  still says `pending`, so the next run redoes that task. No commit alr started lands
-  after alr is gone; a commit that landed before a post-commit hook finished is not
-  recorded.
-- **The lock stops only another committing run.** A `--commit none` run in the same
-  work tree is not stopped, and what it writes can be committed by the other run.
-- **The re-check covers two paths only.** The task file and the `logs/` folder are
-  checked. Any other ignored file that a task un-ignores (`.env`, build output) is
-  staged by `git add -A` and committed. A pre-commit hook that edits `.gitignore` and
-  runs `git add` after the check is not caught either.
-- **The dry run only looks at the lock.** With a commit mode it takes the lock for an
-  instant, so a real run that starts at that moment is refused `locked`; rerun it.
-- **git 2.13 or newer is required.** `--commit` uses `git rev-parse --absolute-git-dir`,
-  and an older git refuses every committing run with `git-error`.
+- **`alr` ends only what it started.** After a SIGKILL of `alr`, an action or a
+  Claude session can keep running. Prefer Ctrl-C or SIGTERM, which lets `alr` stop
+  them, and after a SIGKILL check that nothing is still running before you rerun.
+- **Nothing stops two runs from sharing a work tree.** `alr` takes no lock, so two
+  runs in one tree can commit each other's changes.
+- **A task is not guaranteed its own commit.** A commit action takes whatever is
+  in the work tree.
+- **An earlier action's effects stay when a later one fails.** Order is yours to
+  get right; see [Actions](#actions).
 
 ## Development Considerations
 
@@ -292,7 +259,7 @@ make help      # list available targets
 
 `make test` runs the unit tests in parallel with `pytest-xdist` (`-n auto`), and so does the Docker build. To run them
 one at a time, which is the way to use a debugger, use `uv run pytest -n 0 tests/unit` (or point it at one test file or
-use `-k`). A `tasks.yaml` gate may use `uv run pytest -n auto tests/unit`.
+use `-k`). A `tasks.yaml` action may use `uv run pytest -n auto tests/unit`.
 
 ### Versioning
 

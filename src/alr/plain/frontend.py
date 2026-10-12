@@ -3,25 +3,23 @@
 import asyncio
 import sys
 from asyncio.subprocess import PIPE
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import BinaryIO
 
 from alr.engine import proc
-from alr.engine.frontend import FirstLine, SessionResult
-from alr.engine.gates import first_line
+from alr.engine.frontend import SessionResult
+from alr.engine.actions import first_line, merged_env
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     Event,
-    GateFinished,
-    GateStarted,
+    ActionFinished,
+    ActionStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Gate, RunResult, Task
+from alr.tasks import Action, RunResult, Task
 
 _READ_SIZE = 64 * 1024
 
@@ -67,40 +65,25 @@ class PlainFrontEnd:
     def session_finished(self, task: Task, seconds: float) -> None:
         self._report(SessionFinished(task, seconds))
 
-    async def run_gate(self, task: Task, gate: Gate) -> str | None:
-        # Flushed, so the line stays ahead of the gate's own output.
-        print(f"gate: {gate.cmd}", flush=True)
-        self._report(Activity(task, "→ gate " + first_line(gate.cmd)))
-        self._report(GateStarted(task, gate))
-        return await self._run_command(task, ["sh", "-c", gate.cmd])
+    async def run_action(
+        self, task: Task, action: Action, env: Mapping[str, str]
+    ) -> str | None:
+        # Flushed, so the line stays ahead of the action's own output.
+        print(f"action: {action.command}", flush=True)
+        self._report(Activity(task, "→ action " + first_line(action.command)))
+        self._report(ActionStarted(task, action))
+        return await self._run_command(task, ["sh", "-c", action.command], env=env)
 
-    def gate_finished(
+    def action_finished(
         self,
         task: Task,
-        gate: Gate,
+        action: Action,
         limit: str,
         error: str | None,
         timed_out: bool,
         seconds: float,
     ) -> None:
-        self._report(GateFinished(task, gate, limit, error, timed_out, seconds))
-
-    def commit_started(self, task: Task) -> None:
-        # Only the first line, so a multi-line name stays one line. Flushed,
-        # so the line stays ahead of git's own output.
-        print(f"commit: {first_line(task.name)}", flush=True)
-        self._report(Activity(task, "→ commit " + first_line(task.name)))
-        self._report(CommitStarted(task))
-
-    async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        first = FirstLine()
-        error = await self._run_command(
-            task, argv, cwd=cwd, gentle=True, tap=first.take
-        )
-        return first.reason(error)
-
-    def committed(self, task: Task, commit_hash: str) -> None:
-        self._report(Committed(task, commit_hash))
+        self._report(ActionFinished(task, action, limit, error, timed_out, seconds))
 
     def task_finished(self, task: Task, error: str | None, seconds: float) -> None:
         self._report(TaskFinished(task, error, seconds))
@@ -115,44 +98,32 @@ class PlainFrontEnd:
         task: Task,
         argv: Sequence[str],
         *,
-        cwd: str | None = None,
-        gentle: bool = False,
-        tap: Callable[[str], None] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> str | None:
-        """Run a gate or a git command: show its output as it comes and report each line."""
+        """Run an action: show its output as it comes and report each line."""
         # No stdin. Both outputs are piped so each line can reach the run log.
         try:
-            # gentle is true only for git, which gets no controlling terminal
-            # and is stopped by the kernel if alr dies.
             process = await proc.start(
                 argv,
                 stdout=PIPE,
                 stderr=PIPE,
-                cwd=cwd,
-                gentle=gentle,
-                new_session=gentle,
-                die_with_parent=gentle,
+                env=None if env is None else merged_env(env),
             )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)
 
-        # Bounded: a gate's or git's own exit is its result, so a descendant
+        # Bounded: an action's own exit is its result, so a descendant
         # that outlives it and holds the pipes must not hold up the run.
         return await proc.finish(
             process,
-            _pump_outputs(process, self._raw_line(task, tap)),
-            gentle=gentle,
+            _pump_outputs(process, self._raw_line(task)),
             bounded=True,
         )
 
-    def _raw_line(
-        self, task: Task, tap: Callable[[str], None] | None = None
-    ) -> Callable[[bytes], None]:
+    def _raw_line(self, task: Task) -> Callable[[bytes], None]:
         def report_line(line: bytes) -> None:
             text = line.decode("utf-8", errors="replace").rstrip("\r\n")
             self._report(Activity(task, text))
-            if tap is not None:
-                tap(text)
 
         return report_line
 

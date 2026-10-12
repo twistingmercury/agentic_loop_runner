@@ -12,18 +12,16 @@ from textual.widgets.data_table import ColumnKey
 
 from alr.record.events import (
     Activity,
-    Committed,
     Event,
-    GateFinished,
+    ActionFinished,
     RunDone,
-    RunResult,
     TaskFinished,
     TaskStarted,
 )
 from alr.durations import format_elapsed
-from alr.tasks import COMPLETED, FAILED, PASSED, TaskList
+from alr.tasks import COMPLETED, FAILED, RUN_SCOPE, TaskList
 
-_SYMBOLS = {COMPLETED: "✔", PASSED: "●", FAILED: "✖"}
+_SYMBOLS = {COMPLETED: "✔", FAILED: "✖"}
 _PENDING = "·"
 _RUNNING = "▶"
 _MIN_NAME = 10
@@ -60,10 +58,6 @@ class TasksPane(DataTable[str]):
         """The whole name of each task, for the cut to start from."""
         # A test passes its own clock so the running time moves without waiting.
         self._clock = clock
-        self._passed: list[str] = []
-        """The row keys of the tasks that passed and wait for the commit, in order."""
-        self._committed: list[str] = []
-        """The row keys a landed commit covers, in order."""
         self._running_task: tuple[str, float] | None = None
         """The running task's row key and when it started."""
 
@@ -80,8 +74,6 @@ class TasksPane(DataTable[str]):
         """Fill the table from the file's tasks, as they stand now."""
         self.clear()
         self._running_task = None
-        self._passed = []
-        self._committed = []
         self._names = {str(task.id): task.name for task in task_list.tasks}
         longest = max((len(key) for key in self._names), default=2)
         self.columns[ColumnKey("id")].width = max(2, longest)
@@ -128,56 +120,20 @@ class TasksPane(DataTable[str]):
             self._set_state(event.task.id, _SYMBOLS.get(event.task.state, _PENDING))
             self._running_task = None
             self._set_time(str(event.task.id), event.seconds)
-            self._note_passed(event)
-
-        if isinstance(event, Committed):
-            self._note_committed()
 
         if isinstance(event, RunDone):
-            self._settle(event)
+            self._settle()
 
-    def _note_passed(self, event: TaskFinished) -> None:
-        if event.task.state == PASSED:
-            self._passed.append(str(event.task.id))
+    def _settle(self) -> None:
+        """Take a task still shown as running back to pending when the run ends.
 
-    def _note_committed(self) -> None:
-        """Remember which rows the landed commit covers.
-
-        In `run` mode that is every passed row; in `task` mode it is the
-        running task, which has no TaskFinished yet when a stop arrives.
+        A stop inside a task saves nothing, so tasks.yaml still says pending.
         """
-        covered = list(self._passed)
-        if self._running_task is not None:
-            covered.append(self._running_task[0])
-
-        self._committed.extend(covered)
-
-    def _settle(self, event: RunDone) -> None:
-        """Make the rows that are still provisional show what tasks.yaml holds.
-
-        ADR-025: a `run`-mode run saves once, so a passed row is not complete
-        until the commit lands, and a stop after the commit landed saves the
-        covered tasks `completed` (as does a `task`-mode stop after its
-        commit). A failed commit is saved on the last task that ran. Any other
-        ending leaves unsaved rows pending, as the file does.
-        """
-        passed, self._passed = self._passed, []
-        committed, self._committed = self._committed, []
         running, self._running_task = self._running_task, None
-        if event.result is RunResult.COMPLETED:
+        if running is None:
             return
 
-        # Only a stop saves the covered tasks after the commit; a failure there
-        # is a failed save, so the file still says pending.
-        landed = committed if event.result is RunResult.STOPPED else []
-        for key in [*passed, *([running[0]] if running else [])]:
-            symbol = _SYMBOLS[COMPLETED] if key in landed else _PENDING
-            self._set_state(int(key), symbol)
-
-        # A landed commit whose save failed is exit 4 too, but nothing failed:
-        # the file says pending and no task carries the failure.
-        if event.result is RunResult.COMMIT_FAILED and passed and not committed:
-            self._set_state(int(passed[-1]), _SYMBOLS[FAILED])
+        self._set_state(int(running[0]), _PENDING)
 
     def tick(self) -> None:
         """Count the running task's time up; the view calls this once a second."""
@@ -269,6 +225,10 @@ class ActivityPane(RichLog):
         if not isinstance(event, Activity):
             return
 
+        # The after_run actions have no row to select, so their lines take the pane.
+        if event.task.id == RUN_SCOPE.id:
+            self.show(event.task.id, event.task.name)
+
         self._by_task.setdefault(event.task.id, deque(maxlen=ACTIVITY_LINE_CAP)).append(
             event.line
         )
@@ -278,11 +238,11 @@ class ActivityPane(RichLog):
             self.write(event.line, scroll_end=self.is_vertical_scroll_end)
 
 
-class GatesPane(RichLog):
-    """Gate results and commit hashes, kept apart so they never scroll away in the activity."""
+class ActionsPane(RichLog):
+    """Action results, kept apart so they never scroll away in the activity."""
 
     def on_mount(self) -> None:
-        self.border_title = "Gates & commits"
+        self.border_title = "Actions"
 
     def __init__(self, id: str | None = None) -> None:
         # Same settings as the activity pane: raw text, and wrapping at the pane's own edge.
@@ -316,18 +276,26 @@ class GatesPane(RichLog):
         self.write(line)
 
     def apply(self, event: Event) -> None:
-        if isinstance(event, GateFinished):
-            self._add(_gate_line(event))
-
-        if isinstance(event, Committed):
-            self._add(f"{event.task.id}. commit {event.commit_hash[:7]}")
+        if isinstance(event, ActionFinished):
+            self._add(_action_line(event))
 
 
-def _gate_line(event: GateFinished) -> str:
+def _action_line(event: ActionFinished) -> str:
+    if event.task.id == RUN_SCOPE.id:
+        took = format_elapsed(event.seconds)
+        return f"after run: {event.action.command} {_outcome(event)} {took}"
+
     symbol = "✔"
     if event.timed_out:
         symbol = "⏱"
     elif event.error is not None:
         symbol = "✖"
 
-    return f"{event.task.id}. {symbol} {event.gate.cmd} {format_elapsed(event.seconds)}"
+    return f"{event.task.id}. {symbol} {event.action.command} {format_elapsed(event.seconds)}"
+
+
+def _outcome(event: ActionFinished) -> str:
+    if event.timed_out:
+        return "timed out"
+
+    return "failed" if event.error is not None else "passed"

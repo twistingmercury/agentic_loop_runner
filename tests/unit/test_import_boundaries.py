@@ -45,3 +45,10 @@ def test_engine_never_prints() -> None:
         assert "print(" not in source, f"{path} prints"
         assert "sys.stdout" not in source, f"{path} writes to stdout"
         assert "sys.stderr" not in source, f"{path} writes to stderr"
+
+
+def test_no_module_runs_git() -> None:
+    # alr is git-blind: a commit is an action the user writes, never alr's own call.
+    for path in sorted(SRC.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        assert '"git"' not in source, f"{path} names git as an executable"

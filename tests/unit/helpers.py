@@ -20,14 +20,13 @@ from typing import Any
 import pytest
 
 from alr import tasks
-from alr.engine import loop, proc
-from alr.engine.commit import CommitMode, Repo
+from alr.engine import loop
 from alr.engine.frontend import FrontEnd
 from alr.engine.sandbox import bypass_args
 from alr.engine.stop import Stop
 from alr.errors import RunCancelledError
 from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import Shared, TaskList
+from alr.tasks import RunResult, Shared, TaskList
 
 SHARED = Shared(prompt="shared")
 ALR = Path(sys.executable).parent / "alr"
@@ -82,44 +81,37 @@ def fake_claude_records(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in lines if line]
 
 
-def git(repo: Path, *args: str) -> str:
-    done = subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    return done.stdout
+class RecordingFrontEnd(PlainFrontEnd):
+    """The plain front end that notes how the run ended and what it said."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.done: list[str | None] = []
+        self.endings: list[tuple[RunResult, int]] = []
 
-def commit_subjects(repo: Path) -> list[str]:
-    """The commit subjects, newest first."""
-    return git(repo, "log", "--format=%s").strip().split("\n")
+    def run_done(
+        self, error: str | None, seconds: float, result: RunResult, exit_code: int
+    ) -> None:
+        self.done.append(error)
+        self.endings.append((result, exit_code))
 
 
 async def run_loop(
     task_list: TaskList,
     tasks_file: Path,
     *,
-    gate_timeout: str = "",
+    action_timeout: str = "",
     session_args: list[str] | None = None,
-    repo: Repo | None = None,
     front_end: FrontEnd | None = None,
-    commit_mode: CommitMode = CommitMode.TASK,
     stop: Stop | None = None,
-    run_dir: str | None = None,
 ) -> None:
     """Run the loop on task_list, with the plain front end unless front_end is given."""
     options = loop.RunOptions(
         tasks_file=str(tasks_file),
-        gate_timeout=gate_timeout,
+        action_timeout=action_timeout,
         session_args=bypass_args() if session_args is None else session_args,
-        repo=repo,
-        commit_mode=commit_mode,
         stop=stop or Stop(),
-        run_dir=run_dir,
+        log_dir=str(tasks_file.parent / "logs"),
     )
     await loop.run(
         task_list, options, PlainFrontEnd() if front_end is None else front_end
@@ -202,22 +194,6 @@ def _probe(pid: int) -> bool:
     return True
 
 
-def gone_within(pid: int, timeout: float) -> bool:
-    """Poll until pid is no longer running; False if it still is after timeout seconds."""
-    deadline = time.monotonic() + timeout
-    while process_is_running(pid):
-        if time.monotonic() > deadline:
-            return False
-
-        time.sleep(0.01)
-
-    return True
-
-
-def wait_process_gone(pid: int, timeout: float) -> None:
-    assert gone_within(pid, timeout), f"process {pid} is still alive"
-
-
 async def wait_until_gone(pid: int, timeout: float = 2) -> None:
     """The same wait for a test that runs an event loop, which a sleep must not block."""
     deadline = asyncio.get_running_loop().time() + timeout
@@ -226,19 +202,6 @@ async def wait_until_gone(pid: int, timeout: float = 2) -> None:
             pytest.fail(f"process {pid} remained running")
 
         await asyncio.sleep(0.01)
-
-
-def spy_on_start(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Record the keyword arguments of every proc.start call, still starting the child."""
-    calls: list[dict[str, Any]] = []
-    real_start = proc.start
-
-    async def start(argv: Any, **kwargs: Any) -> Any:
-        calls.append(kwargs)
-        return await real_start(argv, **kwargs)
-
-    monkeypatch.setattr(proc, "start", start)
-    return calls
 
 
 async def kill_holder_and_let_pipes_close(pid_file: Path) -> None:

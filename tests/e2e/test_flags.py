@@ -27,8 +27,7 @@ def test_help_flag() -> None:
         "--dir",
         "--sandbox-settings",
         "--yolo",
-        "--gate-timeout",
-        "--commit",
+        "--action-timeout",
         "--dry-run",
         "--plain",
         "--version",
@@ -36,6 +35,8 @@ def test_help_flag() -> None:
         assert flag in res.out
 
     assert "--prompt" not in res.out
+    assert "--commit" not in res.out
+    assert "--gate-timeout" not in res.out
 
 
 def test_missing_tasks() -> None:

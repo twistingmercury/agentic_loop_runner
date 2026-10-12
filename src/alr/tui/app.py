@@ -15,7 +15,6 @@ from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine import proc
-from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
@@ -28,15 +27,15 @@ from alr.tui.dialogs import (
     error_text,
     FileViewer,
     FolderDialog,
-    GatesDialog,
+    ActionsDialog,
     PermissionsDialog,
     ResetDialog,
     SummaryDialog,
 )
-from alr.tui.panes import ActivityPane, GatesPane, TasksPane
+from alr.tui.panes import ActivityPane, ActionsPane, TasksPane
 from alr.tui.prepare import Prepared, prepare
 from alr.tui.progress import Progress
-from alr.tasks import FAILED, PENDING, Task, TaskList
+from alr.tasks import FAILED, PENDING, Action, Task, TaskList
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -75,12 +74,9 @@ class AlrApp(App[None]):
     }
     Button:focus { background: $accent; text-style: bold; }
     #start { margin: 1 0; }
-    #commit-box { width: 27; height: auto; }
-    #commit-row, #logging-row { width: auto; height: auto; }
+    #logging-row { width: auto; height: auto; }
     .field { width: auto; height: 3; padding: 0 1; content-align: left middle; }
-    #commit { width: 18; }
     #logging { width: 12; }
-    #commit-note { height: auto; padding: 0 1; }
     #permissions { width: auto; padding: 1 2; }
     #reason { height: auto; padding: 0 1; color: $warning; }
     #panes { height: 1fr; }
@@ -88,7 +84,7 @@ class AlrApp(App[None]):
     #top > *, #activity { border: round $primary; }
     #top > * { height: 1fr; }
     #tasks { width: 3fr; min-width: 28; }
-    #gates { width: 2fr; }
+    #actions { width: 2fr; }
     #activity { width: 100%; height: 3fr; }
     #progress { height: 1; padding: 0 1; }
     """
@@ -99,7 +95,7 @@ class AlrApp(App[None]):
         Binding("q", "quit_if_idle", "Quit"),
         Binding("f", "menu('folder')", "Folder"),
         Binding("p", "menu('permissions')", "Permissions"),
-        Binding("g", "menu('gates')", "Gates"),
+        Binding("a", "menu('actions')", "Actions"),
         Binding("r", "menu('reset')", "Reset"),
         Binding("t", "menu('tasks')", "Tasks file"),
         Binding("x", "menu('sandbox')", "Sandbox file"),
@@ -125,30 +121,10 @@ class AlrApp(App[None]):
         self._clock = clock
         self._progress: Progress | None = None
         self._ticker: Timer | None = None
-        self.in_work_tree: bool | None = None
-        """None until the launch check has answered."""
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="strip"):
-            with Vertical(id="commit-box"):
-                with Horizontal(id="commit-row"):
-                    yield Static("Commit:", id="commit-label", classes="field")
-                    yield Select(
-                        [
-                            ("none", CommitMode.NONE),
-                            ("per task", CommitMode.TASK),
-                            ("after all", CommitMode.RUN),
-                        ],
-                        value=self.settings.commit_mode,
-                        allow_blank=False,
-                        id="commit",
-                    )
-                note = Static(
-                    "no git repository: nothing will be committed", id="commit-note"
-                )
-                note.display = False
-                yield note
             yield Static("", id="permissions")
             with Horizontal(id="logging-row"):
                 yield Static("Logging:", id="logging-label", classes="field")
@@ -163,7 +139,7 @@ class AlrApp(App[None]):
         with Horizontal(id="menu"):
             yield Button("(f)older", id="menu-folder")
             yield Button("(p)ermissions", id="menu-permissions")
-            yield Button("(g)ates", id="menu-gates")
+            yield Button("(a)ctions", id="menu-actions")
             yield Button("(r)eset", id="menu-reset")
             yield Button("(t)asks", id="menu-tasks")
             yield Button("sandbo(x)", id="menu-sandbox")
@@ -171,7 +147,7 @@ class AlrApp(App[None]):
         with Vertical(id="panes"):
             with Horizontal(id="top"):
                 yield TasksPane(id="tasks", clock=self._clock)
-                yield GatesPane(id="gates")
+                yield ActionsPane(id="actions")
             yield Static("", id="progress")
             yield _activity_pane()
         yield Static("", id="status")
@@ -183,37 +159,6 @@ class AlrApp(App[None]):
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
         self.run_worker(self.launch_sequence(), exit_on_error=False)
-
-    def _look_for_work_tree(self) -> None:
-        """Start the work-tree lookup, but only once a commit mode asks and nothing has answered.
-
-        With `none` git is never touched, so the lookup waits for the user to
-        pick a mode that commits. A failed lookup leaves the answer open; Start
-        opens the repository itself and reports its error.
-        """
-        if (
-            self.settings.commit_mode is CommitMode.NONE
-            or self.in_work_tree is not None
-        ):
-            return
-
-        self.run_worker(self._check_work_tree(), exit_on_error=False)
-
-    async def _check_work_tree(self) -> None:
-        """Learn whether a work tree is around, so the note can say nothing will be committed."""
-        self.in_work_tree = await work_tree_root() is not None
-        self._show_commit_note()
-
-    def _show_commit_note(self) -> None:
-        """Warn only when a commit was asked for and there is no repository to hold it.
-
-        Decided from the current mode and answer, so a lookup that finishes
-        after the user changed the mode still leaves the note right.
-        """
-        asked = self.settings.commit_mode is not CommitMode.NONE
-        self.query_one("#commit-note", Static).display = (
-            asked and self.in_work_tree is False
-        )
 
     def _read_tasks(self) -> None:
         """Load the task file; an unreadable one is reported by the dialogs."""
@@ -255,7 +200,7 @@ class AlrApp(App[None]):
 
     async def launch_sequence(self) -> None:
         """Ask, in order, only for what the flags and the task file leave open."""
-        # Read here, not after the first refresh: needs_gates must see the file.
+        # Read here, not after the first refresh: needs_actions must see the file.
         self._read_tasks()
         if not self.settings.tasks_file:
             await self.ask_folder()
@@ -266,8 +211,8 @@ class AlrApp(App[None]):
         if self.settings.permissions is Permissions.UNSET:
             await self.ask_permissions()
 
-        if self.needs_gates():
-            await self.ask_gates()
+        if self.needs_actions():
+            await self.ask_actions()
 
     async def ask_folder(self) -> None:
         """Show the folder dialog and apply an accepted answer to the settings."""
@@ -275,9 +220,10 @@ class AlrApp(App[None]):
         if check is None:
             return
 
-        # Gates edited for another folder must never be saved into this one's file.
+        # Actions edited for another folder must never be saved into this one's file.
         if check.tasks_file != self.settings.tasks_file:
-            self.settings.gates = None
+            self.settings.after_task = None
+            self.settings.after_run = None
 
         self.settings.tasks_file = check.tasks_file
         try:
@@ -344,22 +290,26 @@ class AlrApp(App[None]):
 
         return self.settings.missing()
 
-    def needs_gates(self) -> bool:
-        """True when the loaded file leaves the gates undecided and the user has not decided."""
-        if self._task_list is None or self.settings.gates is not None:
+    def needs_actions(self) -> bool:
+        """True when the loaded file leaves the actions undecided and the user has not decided."""
+        if self._task_list is None or self.settings.after_task is not None:
             return False
 
-        return self._task_list.shared.gates is None
+        return self._task_list.shared.after_task is None
 
-    async def ask_gates(self) -> None:
-        """Show the gates dialog; nothing is saved until Start passes its checks."""
-        current = self.settings.gates
-        if current is None and self._task_list is not None:
-            current = self._task_list.gate_list()
+    async def ask_actions(self) -> None:
+        """Show the actions dialog; nothing is saved until Start passes its checks."""
+        after_task = self.settings.after_task
+        after_run = self.settings.after_run
+        if self._task_list is not None:
+            after_task = _edited_or_filed(after_task, self._task_list.after_task_list())
+            after_run = _edited_or_filed(after_run, self._task_list.after_run_list())
 
-        gates = await self.push_screen_wait(GatesDialog(current or []))
-        if gates is not None:
-            self.settings.gates = gates
+        answer = await self.push_screen_wait(
+            ActionsDialog(after_task or [], after_run or [])
+        )
+        if answer is not None:
+            self.settings.after_task, self.settings.after_run = answer
 
     def on_unmount(self) -> None:
         # The status line goes with the screen, so no tick may come after it.
@@ -369,7 +319,6 @@ class AlrApp(App[None]):
     def _lock_dropdowns(self) -> None:
         """A run copies the settings at Start, so later changes would only mislead."""
         locked = self.state in (AppState.RUNNING, AppState.FINISHED)
-        self.query_one("#commit", Select).disabled = locked
         self.query_one("#logging", Select).disabled = locked
 
     def _refresh(self) -> None:
@@ -389,7 +338,7 @@ class AlrApp(App[None]):
         self.query_one("#reason", Static).update(reason or "")
 
     def _grey_out_menu(self) -> None:
-        """Grey out what a run makes inert; Gates, Tasks and Sandbox are left as they are."""
+        """Grey out what a run makes inert; Actions, Tasks and Sandbox are left as they are."""
         running = self.state is AppState.RUNNING
         spent = self.state is AppState.FINISHED
         # The setup dialogs stay shut once a run has started; Quit only waits for the run.
@@ -451,17 +400,12 @@ class AlrApp(App[None]):
         action = {
             "folder": self.ask_folder,
             "permissions": self.ask_permissions,
-            "gates": self.ask_gates,
+            "actions": self.ask_actions,
             "reset": self.ask_reset,
         }
         self.run_worker(action[item](), exit_on_error=False)
 
     def on_select_changed(self, message: Select.Changed) -> None:
-        if message.select.id == "commit" and isinstance(message.value, CommitMode):
-            self.settings.commit_mode = message.value
-            self._look_for_work_tree()
-            self._show_commit_note()
-
         if message.select.id == "logging" and isinstance(message.value, bool):
             self.settings.logging = message.value
 
@@ -500,7 +444,7 @@ class AlrApp(App[None]):
             self._worker.cancel()
 
     def _quit_after_stop(self) -> None:
-        """Quit once the stop under way is done, so a hook that traps TERM does not outlive alr."""
+        """Quit once the stop under way is done, so the killed process group is gone before alr exits."""
         if self._quitting:
             return
 
@@ -551,8 +495,8 @@ class AlrApp(App[None]):
     def _start_ticking(self, prepared: Prepared) -> None:
         """Follow the run on the status line, which counts up every second."""
         pending = sum(task.state == PENDING for task in prepared.task_list.tasks)
-        gates = len(prepared.task_list.gate_list())
-        self._progress = Progress(pending, gates, clock=self._clock)
+        actions = len(prepared.task_list.after_task_list())
+        self._progress = Progress(pending, actions, clock=self._clock)
         self._ticker = self.set_interval(1, self._tick)
 
     def _tick(self) -> None:
@@ -633,7 +577,7 @@ class AlrApp(App[None]):
             self.query_one(ActivityPane).show(event.task.id, event.task.name)
 
         self.query_one(ActivityPane).apply(event)
-        self.query_one(GatesPane).apply(event)
+        self.query_one(ActionsPane).apply(event)
         if isinstance(event, RunDone):
             self._finish(event)
 
@@ -696,3 +640,8 @@ def run_app(settings: RunSettings) -> int:
     # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
     app.run(mouse=False)
     return app.exit_code
+
+
+def _edited_or_filed(edited: list[Action] | None, filed: list[Action]) -> list[Action]:
+    """The list edited in the view, or the file's own when it was not touched."""
+    return filed if edited is None else edited

@@ -21,9 +21,8 @@ class FolderCheck:
 async def check_folder(folder: str) -> FolderCheck:
     """Accept a run folder, or raise why not.
 
-    A folder outside a git work tree is fine: the run then commits nothing,
-    as in plain mode. A file with failed tasks is accepted too: the view
-    shows them and offers a reset.
+    A file with failed tasks is accepted: the view shows them and offers a
+    reset.
     """
     tasks_file = Path(folder) / "tasks.yaml"
     if not tasks_file.is_file():

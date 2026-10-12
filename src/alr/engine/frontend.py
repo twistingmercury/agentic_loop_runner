@@ -1,35 +1,10 @@
 """What the engine asks of a front end: run the processes and note the progress."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from alr.tasks import Gate, RunResult, Task
-
-# Long enough to name what went wrong, short enough for one error line; the
-# task's own log keeps the full text.
-_REASON_LIMIT = 200
-
-
-class FirstLine:
-    """The first non-empty line a command printed, kept so a failure can say why."""
-
-    def __init__(self) -> None:
-        self._text = ""
-
-    def take(self, line: str) -> None:
-        """Keep line, trimmed, unless an earlier line was already kept."""
-        if self._text:
-            return
-
-        self._text = line.strip()[:_REASON_LIMIT]
-
-    def reason(self, error: str | None) -> str | None:
-        """Return the failure's reason: None for success, else the first line printed, else the exit text."""
-        if error is None:
-            return None
-
-        return self._text or error
+from alr.tasks import Action, RunResult, Task
 
 
 @dataclass(frozen=True)
@@ -67,32 +42,25 @@ class FrontEnd(Protocol):
         """Note the session outcome and duration."""
         ...
 
-    async def run_gate(self, task: Task, gate: Gate) -> str | None:
-        """Run this gate command; return the exit. The engine applies the time limit around the call."""
+    async def run_action(
+        self, task: Task, action: Action, env: Mapping[str, str]
+    ) -> str | None:
+        """Run this action command with env added to alr's own environment; return the exit.
+
+        The engine applies the time limit around the call.
+        """
         ...
 
-    def gate_finished(
+    def action_finished(
         self,
         task: Task,
-        gate: Gate,
+        action: Action,
         limit: str,
         error: str | None,
         timed_out: bool,
         seconds: float,
     ) -> None:
-        """Note a gate's result and duration."""
-        ...
-
-    def commit_started(self, task: Task) -> None:
-        """Note that something is staged and a commit follows."""
-        ...
-
-    async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        """Run this git command; return the exit."""
-        ...
-
-    def committed(self, task: Task, commit_hash: str) -> None:
-        """Note the new commit hash."""
+        """Note an action's result and duration."""
         ...
 
     def task_finished(self, task: Task, error: str | None, seconds: float) -> None:

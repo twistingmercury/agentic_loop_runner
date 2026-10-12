@@ -7,52 +7,42 @@ from pathlib import Path
 
 import pytest
 from helpers import (
-    git,
     kill_holder_and_let_pipes_close,
     run_loop,
-    spy_on_start,
-    wait_for_text,
 )
 
 from alr.engine import proc
-from alr.engine.commit import CommitMode, open_repo
 from alr.errors import RunError
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     Event,
-    GateFinished,
-    GateStarted,
+    ActionFinished,
+    ActionStarted,
     RunDone,
     SessionFinished,
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import COMPLETED, PASSED, Gate, RunResult, Shared, Task, TaskList
+from alr.tasks import Action, RunResult, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
 RESULT = '{"state":"completed","error":""}'
 
 
-def _task_list(*task_gates: Gate) -> TaskList:
+def _task_list(*task_actions: Action) -> TaskList:
     return TaskList(
-        shared=Shared(prompt="shared prompt", gates=list(task_gates)),
+        shared=Shared(prompt="shared prompt", after_task=list(task_actions)),
         tasks=[Task(id=1, name="First", prompt="p1")],
     )
 
 
-async def _run(
-    tasks_file: Path, *task_gates: Gate, repo_wanted: bool = False
-) -> list[Event]:
+async def _run(tasks_file: Path, *task_actions: Action) -> list[Event]:
     events: list[Event] = []
-    repo = await open_repo(str(tasks_file)) if repo_wanted else None
     await run_loop(
-        _task_list(*task_gates),
+        _task_list(*task_actions),
         tasks_file,
-        repo=repo,
         front_end=PlainFrontEnd(events.append),
     )
     return events
@@ -63,84 +53,43 @@ def _lines(events: list[Event]) -> list[str]:
 
 
 async def test_each_step_records_its_event(tmp_path: Path) -> None:
-    gate = Gate(cmd="true")
+    action = Action(command="true")
 
-    events = await _run(tmp_path / "tasks.yaml", gate)
+    events = await _run(tmp_path / "tasks.yaml", action)
 
     kinds = [type(event) for event in events if not isinstance(event, Activity)]
     assert kinds == [
         TaskStarted,
         SessionFinished,
-        GateStarted,
-        GateFinished,
+        ActionStarted,
+        ActionFinished,
         TaskFinished,
         RunDone,
     ]
     started = events[0]
     assert isinstance(started, TaskStarted)
     assert started.task.id == 1
-    [finished] = [e for e in events if isinstance(e, GateFinished)]
-    assert finished.gate == gate
+    [finished] = [e for e in events if isinstance(e, ActionFinished)]
+    assert finished.action == action
     assert finished.error is None
     [done] = [e for e in events if isinstance(e, RunDone)]
     assert done.error is None
     assert (done.result, done.exit_code) == (RunResult.COMPLETED, 0)
 
 
-async def test_a_run_mode_task_is_passed_until_the_commit_completes_it(
-    git_repo: Path,
-) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    events: list[Event] = []
-
-    await run_loop(
-        _task_list(Gate(cmd="echo work > one.txt")),
-        tasks_file,
-        repo=await open_repo(str(tasks_file)),
-        front_end=PlainFrontEnd(events.append),
-        commit_mode=CommitMode.RUN,
-    )
-
-    [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.task.state == PASSED
-
-
-async def test_a_task_mode_task_is_completed_when_it_finishes(git_repo: Path) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
-
-    [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.task.state == COMPLETED
-
-
-async def test_gate_started_is_reported_once_after_its_marker_and_before_it_finishes(
+async def test_action_started_is_reported_once_after_its_marker_and_before_it_finishes(
     tmp_path: Path,
 ) -> None:
-    gate = Gate(cmd="true")
+    action = Action(command="true")
 
-    events = await _run(tmp_path / "tasks.yaml", gate)
+    events = await _run(tmp_path / "tasks.yaml", action)
 
-    [started] = [e for e in events if isinstance(e, GateStarted)]
-    assert started.gate == gate
-    marker = events.index(Activity(started.task, "→ gate true"))
+    [started] = [e for e in events if isinstance(e, ActionStarted)]
+    assert started.action == action
+    marker = events.index(Activity(started.task, "→ action true"))
     assert events.index(started) == marker + 1
-    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    [finished] = [e for e in events if isinstance(e, ActionFinished)]
     assert events.index(started) < events.index(finished)
-
-
-async def test_commit_started_is_reported_once_after_its_marker_and_before_committed(
-    git_repo: Path,
-) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
-
-    [started] = [e for e in events if isinstance(e, CommitStarted)]
-    marker = events.index(Activity(started.task, "→ commit First"))
-    assert events.index(started) == marker + 1
-    [committed] = [e for e in events if isinstance(e, Committed)]
-    assert events.index(started) < events.index(committed)
 
 
 async def test_claude_stdout_lines_arrive_in_order_with_the_last_unterminated(
@@ -203,18 +152,18 @@ async def test_a_session_writing_a_lot_to_both_streams_does_not_block(
     assert RESULT in lines
 
 
-async def test_the_gate_marker_names_only_the_first_line(tmp_path: Path) -> None:
-    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="echo hi\necho there"))
+async def test_the_action_marker_names_only_the_first_line(tmp_path: Path) -> None:
+    events = await _run(tmp_path / "tasks.yaml", Action(command="echo hi\necho there"))
 
-    assert "→ gate echo hi" in _lines(events)
+    assert "→ action echo hi" in _lines(events)
 
 
-async def test_gate_stdout_and_stderr_reach_the_terminal_and_the_record(
+async def test_action_stdout_and_stderr_reach_the_terminal_and_the_record(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    gate = Gate(cmd="echo from-out; echo from-err >&2")
+    action = Action(command="echo from-out; echo from-err >&2")
 
-    events = await _run(tmp_path / "tasks.yaml", gate)
+    events = await _run(tmp_path / "tasks.yaml", action)
 
     captured = capfd.readouterr()
     assert "from-out" in captured.out
@@ -222,126 +171,51 @@ async def test_gate_stdout_and_stderr_reach_the_terminal_and_the_record(
     assert "from-err\n" not in captured.out
     assert "from-out\n" not in captured.err
     lines = _lines(events)
-    marker = lines.index("→ gate echo from-out; echo from-err >&2")
+    marker = lines.index("→ action echo from-out; echo from-err >&2")
     assert sorted(lines[marker + 1 : marker + 3]) == ["from-err", "from-out"]
 
 
-async def test_gate_lines_are_recorded_between_the_marker_and_gate_finished(
+async def test_action_lines_are_recorded_between_the_marker_and_action_finished(
     tmp_path: Path,
 ) -> None:
-    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="echo one; echo two"))
+    events = await _run(tmp_path / "tasks.yaml", Action(command="echo one; echo two"))
 
-    [finished] = [e for e in events if isinstance(e, GateFinished)]
-    marker = events.index(Activity(finished.task, "→ gate echo one; echo two"))
+    [finished] = [e for e in events if isinstance(e, ActionFinished)]
+    marker = events.index(Activity(finished.task, "→ action echo one; echo two"))
     one, two = Activity(finished.task, "one"), Activity(finished.task, "two")
     assert marker < events.index(one) < events.index(two) < events.index(finished)
 
 
-async def test_gate_last_line_without_a_newline_is_recorded(tmp_path: Path) -> None:
-    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="printf 'a\\r\\nb'"))
+async def test_action_last_line_without_a_newline_is_recorded(tmp_path: Path) -> None:
+    events = await _run(tmp_path / "tasks.yaml", Action(command="printf 'a\\r\\nb'"))
 
     lines = _lines(events)
     assert lines[lines.index("a") + 1] == "b"
 
 
-async def test_failing_gate_still_records_its_output_and_returns_the_exit_text(
+async def test_failing_action_still_records_its_output_and_returns_the_exit_text(
     tmp_path: Path,
 ) -> None:
     events: list[Event] = []
 
     with pytest.raises(RunError):
         await run_loop(
-            _task_list(Gate(cmd="echo boom >&2; exit 3")),
+            _task_list(Action(command="echo boom >&2; exit 3")),
             tmp_path / "tasks.yaml",
             front_end=PlainFrontEnd(events.append),
         )
 
-    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    [finished] = [e for e in events if isinstance(e, ActionFinished)]
     assert "boom" in _lines(events)
     assert finished.error == "exit status 3"
 
 
-async def test_gate_stderr_is_decoded_leniently(tmp_path: Path) -> None:
-    events = await _run(tmp_path / "tasks.yaml", Gate(cmd="printf 'bad\\377\\n' >&2"))
+async def test_action_stderr_is_decoded_leniently(tmp_path: Path) -> None:
+    events = await _run(
+        tmp_path / "tasks.yaml", Action(command="printf 'bad\\377\\n' >&2")
+    )
 
     assert "bad\ufffd" in _lines(events)
-
-
-def _install_hook(repo: Path, script: str) -> None:
-    hook = repo / ".git" / "hooks" / "pre-commit"
-    hook.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
-    hook.chmod(0o700)
-
-
-async def test_commit_marker_and_hash_are_recorded(git_repo: Path) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
-
-    assert "→ commit First" in _lines(events)
-    [committed] = [e for e in events if isinstance(e, Committed)]
-    assert committed.commit_hash == git(git_repo, "rev-parse", "HEAD").strip()
-
-
-async def test_git_output_reaches_the_terminal_and_the_record_after_the_commit_marker(
-    git_repo: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    _install_hook(git_repo, "echo hook-out; echo hook-err >&2")
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(tasks_file, Gate(cmd="echo work > one.txt"), repo_wanted=True)
-
-    captured = capfd.readouterr()
-    # git itself sends a hook's stdout to stderr; the commit summary is stdout.
-    assert "hook-out\nhook-err\n" in captured.err
-    assert "hook-err" not in captured.out
-    assert "file changed" in captured.out
-    assert "file changed" not in captured.err
-    lines = _lines(events)
-    after_marker = lines[lines.index("→ commit First") + 1 :]
-    assert {"hook-out", "hook-err"} <= set(after_marker)
-    assert any("file changed" in line for line in after_marker)
-
-
-async def test_failing_git_command_records_its_output_and_returns_the_exit_text(
-    git_repo: Path,
-) -> None:
-    _install_hook(git_repo, "echo hook-refused >&2; exit 1")
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    events: list[Event] = []
-
-    with pytest.raises(RunError):
-        await run_loop(
-            _task_list(Gate(cmd="echo work > one.txt")),
-            tasks_file,
-            repo=await open_repo(str(tasks_file)),
-            front_end=PlainFrontEnd(events.append),
-        )
-
-    lines = _lines(events)
-    assert "hook-refused" in lines[lines.index("→ commit First") + 1 :]
-    [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.error == "task 1: First failed: commit failed: hook-refused"
-    [done] = [e for e in events if isinstance(e, RunDone)]
-    assert (done.result, done.exit_code) == (RunResult.COMMIT_FAILED, 4)
-
-
-async def test_cancel_during_git_stops_the_group_gently(tmp_path: Path) -> None:
-    ready, stopped = tmp_path / "ready", tmp_path / "stopped"
-    script = f"trap 'echo bye > {stopped}; exit 0' TERM; echo ready > {ready}; sleep 60 & wait"
-    task = Task(id=1, name="First", prompt="p1")
-    run = asyncio.ensure_future(
-        PlainFrontEnd().run_git(task, ["sh", "-c", script], str(tmp_path))
-    )
-    await wait_for_text(ready)
-
-    run.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await run
-
-    assert stopped.read_text(encoding="utf-8") == "bye\n", (
-        "SIGTERM must reach the child before any SIGKILL"
-    )
 
 
 async def test_no_recorder_prints_the_same_output(
@@ -350,11 +224,11 @@ async def test_no_recorder_prints_the_same_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", f"one\n{RESULT}")
-    gate = Gate(cmd="echo from-gate")
+    action = Action(command="echo from-action")
 
-    await run_loop(_task_list(gate), tmp_path / "a.yaml", front_end=PlainFrontEnd())
+    await run_loop(_task_list(action), tmp_path / "a.yaml", front_end=PlainFrontEnd())
     plain = capfd.readouterr().out
-    await _run(tmp_path / "b.yaml", gate)
+    await _run(tmp_path / "b.yaml", action)
     recorded = capfd.readouterr().out
 
     assert recorded == plain
@@ -383,41 +257,43 @@ async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_
     assert b"".join(chunks) == line
 
 
-async def test_a_gate_that_exits_while_a_background_process_holds_its_pipes_returns_after_the_grace_period(
+async def test_a_action_that_exits_while_a_background_process_holds_its_pipes_returns_after_the_grace_period(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
     pid_file = tmp_path / "holder.pid"
-    gate = Gate(cmd=f"sleep 30 & echo $! > {pid_file}; echo hi")
+    action = Action(command=f"sleep 30 & echo $! > {pid_file}; echo hi")
     started = time.monotonic()
 
     try:
-        events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", gate), 10)
+        events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", action), 10)
         elapsed = time.monotonic() - started
     finally:
         await kill_holder_and_let_pipes_close(pid_file)
 
     assert "hi" in _lines(events)
     assert elapsed < 5
-    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    [finished] = [e for e in events if isinstance(e, ActionFinished)]
     assert finished.error is None
 
 
-async def test_a_gate_that_exited_in_time_does_not_time_out_on_an_escaped_descendant(
+async def test_a_action_that_exited_in_time_does_not_time_out_on_an_escaped_descendant(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
     pid_file = tmp_path / "escaped.pid"
     # setsid takes the sleeper out of the group a time limit would stop.
-    gate = Gate(cmd=f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & echo hi")
+    action = Action(
+        command=f"setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' & echo hi"
+    )
     events: list[Event] = []
 
     try:
         await asyncio.wait_for(
             run_loop(
-                _task_list(gate),
+                _task_list(action),
                 tmp_path / "tasks.yaml",
-                gate_timeout="1s",
+                action_timeout="1s",
                 front_end=PlainFrontEnd(events.append),
             ),
             10,
@@ -425,23 +301,23 @@ async def test_a_gate_that_exited_in_time_does_not_time_out_on_an_escaped_descen
     finally:
         await kill_holder_and_let_pipes_close(pid_file)
 
-    [finished] = [e for e in events if isinstance(e, GateFinished)]
+    [finished] = [e for e in events if isinstance(e, ActionFinished)]
     assert finished.timed_out is False
     assert finished.error is None
     assert "hi" in _lines(events)
 
 
-async def test_a_gate_writing_a_lot_to_both_streams_does_not_block(
+async def test_a_action_writing_a_lot_to_both_streams_does_not_block(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     # Far more than a pipe holds, on stderr first while stdout is still open:
-    # reading the streams one after the other would leave the gate stuck.
-    gate = Gate(
-        cmd="head -c 1000000 /dev/zero | tr '\\0' a >&2; "
+    # reading the streams one after the other would leave the action stuck.
+    action = Action(
+        command="head -c 1000000 /dev/zero | tr '\\0' a >&2; "
         "head -c 1000000 /dev/zero | tr '\\0' b"
     )
 
-    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", gate), 10)
+    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", action), 10)
 
     captured = capfd.readouterr()
     assert captured.err == "a" * 1_000_000
@@ -451,53 +327,12 @@ async def test_a_gate_writing_a_lot_to_both_streams_does_not_block(
     assert "b" * 1_000_000 in lines
 
 
-async def test_a_gate_reads_end_of_file_from_stdin(
+async def test_a_action_reads_end_of_file_from_stdin(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    gate = Gate(cmd="read x; echo got=$x")
+    action = Action(command="read x; echo got=$x")
 
-    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", gate), 10)
+    events = await asyncio.wait_for(_run(tmp_path / "tasks.yaml", action), 10)
 
     assert "got=\n" in capfd.readouterr().out
     assert "got=" in _lines(events)
-
-
-async def test_a_git_command_reads_end_of_file_from_stdin(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    task = Task(id=1, name="First", prompt="p1")
-
-    # cat stands in for git: it ends only when stdin does.
-    error = await asyncio.wait_for(
-        PlainFrontEnd().run_git(task, ["sh", "-c", "cat; echo done"], str(tmp_path)),
-        10,
-    )
-
-    assert error is None
-    assert capfd.readouterr().out == "done\n"
-
-
-async def test_git_starts_in_its_own_session_and_dies_with_alr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls = spy_on_start(monkeypatch)
-    task = Task(1, "First", "p1")
-
-    await PlainFrontEnd().run_git(task, ["true"], str(tmp_path))
-
-    [call] = calls
-    assert call["new_session"] is True
-    assert call["die_with_parent"] is True
-
-
-async def test_a_gate_starts_without_the_git_guards(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = spy_on_start(monkeypatch)
-    task = Task(1, "First", "p1")
-
-    await PlainFrontEnd().run_gate(task, Gate(cmd="true"))
-
-    [call] = calls
-    assert not call.get("new_session")
-    assert not call.get("die_with_parent")

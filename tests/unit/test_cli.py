@@ -1,22 +1,18 @@
 """The command line: flags, startup checks in gralph's order, routing, and stopping on a signal."""
 
 import asyncio
-import contextlib
 import os
 import platform
 import re
 import signal
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import gone_within, start_alr, wait_for_file
+from helpers import start_alr, wait_for_file
 
 from alr import cli
-from alr.engine import proc
-from alr.engine.commit import CommitMode
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
 from alr.tui.settings import Permissions, RunSettings
@@ -32,8 +28,8 @@ SANDBOXED = [
 ]
 BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
 NO_PERMISSIONS = "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
-BAD_DURATION = "--gate-timeout: must be a duration string such as 90s or 10m"
-GATE_TIMEOUT_FLAG = "--gate-timeout"
+BAD_DURATION = "--action-timeout: must be a duration string such as 90s or 10m"
+ACTION_TIMEOUT_FLAG = "--action-timeout"
 
 
 @pytest.fixture
@@ -93,13 +89,13 @@ def test_session_args_errors(
 @pytest.mark.parametrize(
     ("value", "want"),
     [
-        pytest.param("0s", GATE_TIMEOUT_FLAG, id="zero"),
-        pytest.param("-5m", GATE_TIMEOUT_FLAG, id="negative"),
+        pytest.param("0s", ACTION_TIMEOUT_FLAG, id="zero"),
+        pytest.param("-5m", ACTION_TIMEOUT_FLAG, id="negative"),
     ],
 )
-def test_check_gate_timeout_errors(value: str, want: str) -> None:
+def test_check_action_timeout_errors(value: str, want: str) -> None:
     with pytest.raises(UsageError) as caught:
-        cli.check_gate_timeout(value)
+        cli.check_action_timeout(value)
 
     assert want in str(caught.value)
 
@@ -154,7 +150,7 @@ def test_missing_required_flags_are_each_named(
 
 
 def test_a_bad_flag_value_exits_2(folder: Path) -> None:
-    assert cli.main(["--plain", "--gate-timeout", "soon", "-d", str(folder)]) == 2
+    assert cli.main(["--plain", "--action-timeout", "soon", "-d", str(folder)]) == 2
 
 
 def test_a_missing_dir_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
@@ -253,21 +249,21 @@ def test_log_dir_flag_is_an_unknown_argument(
     assert "unrecognized arguments: --log-dir" in capsys.readouterr().err
 
 
-def test_empty_gate_timeout_is_bad(
+def test_empty_action_timeout_is_bad(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", ""]) == 2
+    assert cli.main(["-d", str(folder), "--dry-run", "--action-timeout", ""]) == 2
     assert f"error: {BAD_DURATION}" in capsys.readouterr().err
 
 
-# gralph checks --dir, then --gate-timeout, then the required flags.
+# gralph checks --dir, then --action-timeout, then the required flags.
 def test_startup_checks_run_in_gralphs_order(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["-d", str(tmp_path), "--gate-timeout", "30"]) == 2
+    assert cli.main(["-d", str(tmp_path), "--action-timeout", "30"]) == 2
     assert capsys.readouterr().err == f"error: --dir: no tasks.yaml in {tmp_path}\n"
 
-    assert cli.main(["--gate-timeout", "30"]) == 2
+    assert cli.main(["--action-timeout", "30"]) == 2
     assert capsys.readouterr().err == f"error: {BAD_DURATION}\n"
 
 
@@ -372,74 +368,28 @@ def test_a_signal_leaves_no_traceback_and_no_change(
         os.kill(claude_pid, 0)
 
 
-# git cleans up after itself on SIGTERM, so a commit is stopped gently: SIGTERM,
-# then SIGKILL after a grace period. An impatient second Ctrl-C during that wait
-# must not end alr early and leave git or its hook running.
-@pytest.mark.usefixtures("fake_claude")
-def test_a_second_signal_does_not_leave_git_running(
-    git_repo: Path, tmp_path: Path
-) -> None:
-    ready = tmp_path / "ready"
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    tasks_yaml = (
-        "shared:\n  prompt: shared\n  gates:\n    - cmd: echo work > one.txt\n"
-        "tasks:\n  - id: 1\n    name: a\n    prompt: p\n"
-    )
-    tasks_file.write_text(tasks_yaml, encoding="utf-8")
-    hook = git_repo / ".git" / "hooks" / "pre-commit"
-    # exec, so the PID in the ready file is the process that ignores SIGTERM.
-    hook.write_text(f"#!/bin/sh\ntrap '' TERM\necho $$ > '{ready}'\nexec sleep 60\n")
-    hook.chmod(0o700)
-
-    process = start_alr("-d", str(tasks_file.parent), "--yolo", "--commit", "task")
-    hook_pid = 0
-    try:
-        hook_pid = int(wait_for_file(ready))
-        process.send_signal(signal.SIGINT)
-        time.sleep(0.2)
-        process.send_signal(signal.SIGINT)
-        _, err = process.communicate(timeout=10)
-        hook_still_runs = not gone_within(hook_pid, proc._GENTLE_GRACE / 2)
-    finally:
-        process.kill()
-        if hook_pid:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(hook_pid, signal.SIGKILL)
-
-    assert not hook_still_runs, "alr exited while the commit hook was still running"
-    assert process.returncode == 130
-    assert err == "error: loop error: task 1: a: stopped during commit\n"
-    assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
-
-
-def _capture_start(
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[list[list[str]], list[CommitMode]]:
-    """Replace the real run with one that records its session flags and commit mode."""
+def _capture_start(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Replace the real run with one that records its session flags."""
     sessions: list[list[str]] = []
-    modes: list[CommitMode] = []
 
     async def fake_start(
         tasks_file: str,
-        gate_timeout: str,
+        action_timeout: str,
         session: list[str],
-        commit: CommitMode,
         reset_failed: bool,
         sandbox_settings: str = "",
         stop: Stop | None = None,
     ) -> None:
         sessions.append(session)
-        modes.append(commit)
 
     monkeypatch.setattr(cli, "start", fake_start)
-    return sessions, modes
+    return sessions
 
 
 @pytest.fixture
 def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Capture the session flags a real run starts with, without running it."""
-    seen, _ = _capture_start(monkeypatch)
-    return seen
+    return _capture_start(monkeypatch)
 
 
 def _add_sandbox(folder: Path, content: str = "{}") -> Path:
@@ -539,117 +489,6 @@ def test_dry_run_names_the_folders_sandbox_json(
 
 
 @pytest.mark.parametrize(
-    ("flags", "want"),
-    [
-        ([], CommitMode.NONE),
-        (["--commit", "none"], CommitMode.NONE),
-        (["--commit", "task"], CommitMode.TASK),
-        (["--commit", "run"], CommitMode.RUN),
-    ],
-)
-def test_commit_flag_maps_to_a_mode(flags: list[str], want: CommitMode) -> None:
-    args = cli._parser().parse_args(flags)
-
-    assert CommitMode(args.commit) is want
-
-
-@pytest.mark.parametrize(
-    "flags",
-    [["--commit-after-all"], ["--commit"], ["--commit", "sometimes"]],
-    ids=["old flag", "bare", "bad value"],
-)
-def test_bad_commit_forms_are_usage_errors(flags: list[str]) -> None:
-    with pytest.raises(SystemExit) as caught:
-        cli.main(["--yolo", *flags])
-
-    assert caught.value.code == 2
-
-
-def test_a_bad_commit_value_lists_the_choices(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit):
-        cli.main(["--commit", "sometimes"])
-
-    assert "(choose from none, task, run)" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize(
-    ("flags", "want"),
-    [
-        ([], CommitMode.NONE),
-        (["--commit", "task"], CommitMode.TASK),
-        (["--commit", "run"], CommitMode.RUN),
-    ],
-)
-def test_plain_start_gets_the_commit_mode(
-    flags: list[str], want: CommitMode, monkeypatch: pytest.MonkeyPatch, folder: Path
-) -> None:
-    _, modes = _capture_start(monkeypatch)
-
-    assert cli.main(["-d", str(folder), "--yolo", "--plain", *flags]) == 0
-    assert modes == [want]
-
-
-def test_dry_run_with_commit_task_reports_the_commit_checks(
-    git_repo: Path, outside: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (outside / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
-
-    assert cli.main(["-d", str(outside), "--dry-run", "--commit", "task"]) == 0
-    assert f"commit: {git_repo}" in capsys.readouterr().out
-
-
-def test_dry_run_commit_run_with_an_invalid_task_file_is_refused_once(
-    git_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    folder = git_repo / "run"
-    (folder / "tasks.yaml").write_text("tasks: not-a-list\n", encoding="utf-8")
-
-    assert cli.main(["-d", str(folder), "--dry-run", "--commit", "run"]) == 3
-
-    err = capsys.readouterr().err
-    assert err.startswith("error: refused: invalid-task-file: ")
-    assert err.count("failed to parse tasks yaml") == 1
-    assert err.count("\n") == 1
-
-
-def test_dry_run_commit_run_on_a_dirty_tree_is_refused(
-    git_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    folder = git_repo / "run"
-    (folder / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
-    (git_repo / "stray.txt").write_text("stray\n", encoding="utf-8")
-
-    assert cli.main(["-d", str(folder), "--dry-run", "--commit", "run"]) == 3
-
-    err = capsys.readouterr().err
-    assert err.startswith(
-        "error: refused: dirty-tree: --commit needs a clean work tree"
-    )
-
-
-def test_dry_run_without_commit_does_not_consult_git(
-    git_repo: Path, outside: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (outside / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
-
-    assert cli.main(["-d", str(outside), "--dry-run"]) == 0
-    assert "commit:" not in capsys.readouterr().out
-
-
-def test_help_shows_commit_and_not_commit_after_all(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-
-    out = capsys.readouterr().out
-    assert "--commit" in out
-    assert "--commit-after-all" not in out
-
-
-@pytest.mark.parametrize(
     ("flags", "tty", "want"),
     [
         ([], True, True),
@@ -686,26 +525,22 @@ def test_the_view_gets_the_resolved_flags(
     seen = _capture_view(monkeypatch)
     _add_sandbox(folder)
 
-    code = cli.main(["-d", str(folder), "--commit", "run", "--gate-timeout", "5m"])
+    code = cli.main(["-d", str(folder), "--action-timeout", "5m"])
 
     assert code == 0
     assert seen[0].tasks_file == str(folder / "tasks.yaml")
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == str(folder / "sandbox.json")
-    assert seen[0].commit_mode is CommitMode.RUN
-    assert seen[0].gate_timeout == "5m"
+    assert seen[0].action_timeout == "5m"
 
 
-def test_the_view_defaults_to_no_commit_and_takes_skip(
-    monkeypatch: pytest.MonkeyPatch, folder: Path
-) -> None:
+def test_the_view_takes_skip(monkeypatch: pytest.MonkeyPatch, folder: Path) -> None:
     seen = _capture_view(monkeypatch)
 
     code = cli.main(["-d", str(folder), "--yolo"])
 
     assert code == 0
     assert seen[0].permissions is Permissions.SKIP
-    assert seen[0].commit_mode is CommitMode.NONE
 
 
 def test_the_view_asks_for_a_missing_dir_flag(
@@ -834,7 +669,7 @@ def test_the_view_gets_the_reset_failed_flag(
     ("placeholder", "usage_token", "help_option"),
     [
         ("DIR", "[-d]", "-d, --dir "),
-        ("GATE_TIMEOUT", "[--gate-timeout]", "--gate-timeout "),
+        ("ACTION_TIMEOUT", "[--action-timeout]", "--action-timeout "),
         ("SANDBOX_SETTINGS", "[--sandbox-settings]", "--sandbox-settings "),
     ],
 )
@@ -850,3 +685,59 @@ def test_value_flags_show_no_placeholder_in_the_help(
     assert placeholder not in help_text
     assert usage_token in usage
     assert help_option in help_text
+
+
+@pytest.mark.parametrize("value", ["5m", ""])
+def test_the_old_gate_timeout_flag_is_refused_naming_its_replacement(
+    folder: Path, capsys: pytest.CaptureFixture[str], value: str
+) -> None:
+    code = cli.main(["-d", str(folder), "--dry-run", "--gate-timeout", value])
+
+    assert code == 2
+    assert (
+        capsys.readouterr().err
+        == "error: --gate-timeout: renamed to --action-timeout\n"
+    )
+
+
+def test_the_old_gate_timeout_flag_is_refused_before_any_other_check(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["--gate-timeout", "5m", "--version"]) == 2
+    assert "renamed to --action-timeout" in capsys.readouterr().err
+
+
+def test_commit_flag_is_refused_with_the_replacement(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["--plain", "-d", str(folder), "--yolo", "--commit", "task"])
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "--commit: removed; a commit is an action now" in err
+    assert "shared.after_task" in err
+
+
+def test_commit_flag_is_refused_before_any_other_check(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["--commit", "run", "--version"]) == 2
+    assert "--commit: removed" in capsys.readouterr().err
+
+
+def test_commit_flag_is_hidden_from_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    assert "--commit" not in capsys.readouterr().out
+
+
+def test_the_old_gate_timeout_flag_is_hidden_from_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    out = capsys.readouterr().out
+    assert "--gate-timeout" not in out
+    assert "--action-timeout" in out

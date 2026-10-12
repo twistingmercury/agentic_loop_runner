@@ -17,17 +17,16 @@ from alr.durations import format_duration
 from alr.errors import LOG_UNWRITABLE, RefusedError, RunLogError
 from alr.record.events import (
     Activity,
-    Committed,
     Event,
-    GateFinished,
+    ActionFinished,
     RunDone,
     SessionFinished,
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Task
+from alr.tasks import RUN_SCOPE, Task
 
-# The record holds Claude's text and whatever a gate or git printed, so it is
+# The record holds Claude's text and whatever an action printed, so it is
 # private to the user.
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
@@ -42,8 +41,7 @@ class Info:
     tasks_file: str
     permissions: str  # "sandbox" or "skip"
     sandbox_settings: str = ""  # the settings file's path, "" when not passed
-    gate_timeout: str = ""  # the --gate-timeout value, "" when not passed
-    commit: str = "none"  # the requested commit mode: "none", "task", or "run"
+    action_timeout: str = ""  # the --action-timeout value, "" when not passed
 
 
 def run_dir(log_dir: Path, start: datetime) -> Path:
@@ -228,10 +226,9 @@ class RunLog:
         if info.sandbox_settings:
             fields["sandbox_settings"] = info.sandbox_settings
 
-        if info.gate_timeout:
-            fields["gate_timeout"] = info.gate_timeout
+        if info.action_timeout:
+            fields["action_timeout"] = info.action_timeout
 
-        fields["commit"] = info.commit
         self._write_ledger("run_started", fields)
 
     def record(self, event: Event) -> None:
@@ -244,12 +241,8 @@ class RunLog:
                 self._activity(event)
             case SessionFinished():
                 self._step_finished("session_finished", event.task, event.seconds)
-            case GateFinished():
-                self._gate_finished(event)
-            case Committed():
-                self._write_ledger(
-                    "committed", {"task": event.task.id, "hash": event.commit_hash}
-                )
+            case ActionFinished():
+                self._action_finished(event)
             case TaskFinished():
                 self._task_finished(event)
             case RunDone():
@@ -305,6 +298,11 @@ class RunLog:
     def _activity(self, event: Activity) -> None:
         clock = self._now().strftime("%H:%M:%S")
         text = f"{clock} {event.line}\n"
+        if event.task.id == RUN_SCOPE.id:
+            # The after_run actions belong to no task, and may run when no task did.
+            self._append_after_finish(self._path / f"task-{RUN_SCOPE.id}.log", text)
+            return
+
         if self._detail is not None or self._detail_path is None:
             _write(self._detail, self._detail_path or self._path, text)
             return
@@ -312,9 +310,10 @@ class RunLog:
         self._append_after_finish(self._detail_path, text)
 
     def _append_after_finish(self, detail_path: Path, text: str) -> None:
-        """Add a line to the file of a task that already finished.
+        """Add a line to a detail file that has no open handle.
 
-        The commit after all tasks reports on the last task once it is done.
+        The after_run actions report under the run scope, which no task
+        owns; a late line for a task that is done lands in its own file.
         """
         if self._ledger is None:
             raise _not_open(self._ledger_path)
@@ -333,14 +332,14 @@ class RunLog:
         fields["duration"] = format_duration(seconds)
         self._write_ledger(event, fields)
 
-    def _gate_finished(self, event: GateFinished) -> None:
+    def _action_finished(self, event: ActionFinished) -> None:
         self._write_ledger(
-            "gate_finished",
+            "action_finished",
             {
                 "task": event.task.id,
                 # First line only, as the engine quotes it; record cannot import the engine.
-                "cmd": event.gate.cmd.split("\n", 1)[0],
-                "result": _gate_result(event),
+                "cmd": event.action.command.split("\n", 1)[0],
+                "result": _action_result(event),
                 "timeout": event.limit,
                 "duration": format_duration(event.seconds),
             },
@@ -361,7 +360,7 @@ class RunLog:
         self._write_ledger("run_finished", fields)
 
 
-def _gate_result(event: GateFinished) -> str:
+def _action_result(event: ActionFinished) -> str:
     if event.timed_out:
         return "timed_out"
 

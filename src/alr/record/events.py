@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from alr.tasks import Gate, RunResult, Task
+from alr.tasks import Action, RunResult, Task
 
 
 @dataclass(frozen=True)
@@ -23,30 +23,19 @@ class SessionFinished:
 
 
 @dataclass(frozen=True)
-class GateStarted:
+class ActionStarted:
     task: Task
-    gate: Gate
+    action: Action
 
 
 @dataclass(frozen=True)
-class GateFinished:
+class ActionFinished:
     task: Task
-    gate: Gate
-    limit: str  # the timeout the gate ran under, as written
-    error: str | None  # None when the gate passed or timed out
+    action: Action
+    limit: str  # the timeout the action ran under, as written
+    error: str | None  # None when the action passed or timed out
     timed_out: bool
     seconds: float
-
-
-@dataclass(frozen=True)
-class CommitStarted:
-    task: Task
-
-
-@dataclass(frozen=True)
-class Committed:
-    task: Task
-    commit_hash: str
 
 
 @dataclass(frozen=True)
@@ -68,10 +57,8 @@ Event = (
     TaskStarted
     | Activity
     | SessionFinished
-    | GateStarted
-    | GateFinished
-    | CommitStarted
-    | Committed
+    | ActionStarted
+    | ActionFinished
     | TaskFinished
     | RunDone
 )

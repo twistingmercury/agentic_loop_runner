@@ -1,7 +1,6 @@
 """Fixtures for the unit tests."""
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -35,47 +34,10 @@ def record(fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.fixture
-def outside(tmp_path: Path) -> Path:
-    """A folder next to the repository, so outside its work tree."""
-    path = tmp_path.resolve() / "outside"
-    path.mkdir()
-    return path
-
-
-@pytest.fixture
-def git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Create a git repository holding one commit, and make it the working directory.
-
-    The commit ignores run/, where tests keep the task file as a --commit run
-    requires, and the folder exists so a run can save the file there.
-    """
-    # Symlinks resolved, so the path compares equal to the one git reports.
-    repo = tmp_path.resolve() / "repo"
-    repo.mkdir()
-    _isolate_git(monkeypatch, repo)
-    monkeypatch.chdir(repo)
-    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
-    (repo / ".gitignore").write_text("run/\n", encoding="utf-8")
-    for args in (
-        ["init", "--quiet", "--initial-branch=main"],
-        ["config", "user.email", "test@example.com"],
-        ["config", "user.name", "Test"],
-        ["config", "commit.gpgsign", "false"],
-        ["add", "seed.txt", ".gitignore"],
-        ["commit", "--quiet", "-m", "init"],
-    ):
-        subprocess.run(["git", *args], cwd=repo, check=True)
-
-    (repo / "run").mkdir()
-    return repo
-
-
-def _isolate_git(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """Keep the developer's git config and any enclosing repository out of the test."""
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "Test")
-    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "test@example.com")
-    monkeypatch.setenv("GIT_COMMITTER_NAME", "Test")
-    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "test@example.com")
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(repo.parent))
+def work_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a folder holding an empty run/ folder for task files, and make it the working directory."""
+    # Symlinks resolved, so the path compares equal to the one a run reports.
+    folder = tmp_path.resolve() / "work"
+    (folder / "run").mkdir(parents=True)
+    monkeypatch.chdir(folder)
+    return folder

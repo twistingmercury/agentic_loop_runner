@@ -85,10 +85,10 @@ def test_dry_run_with_reset_failed_is_refused(tmp_path: Path) -> None:
     assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
 
 
-def test_dry_run_valid_gates_are_not_run(tmp_path: Path, fake_claude: Path) -> None:
-    marker = tmp_path / "gate-ran"
+def test_dry_run_valid_actions_are_not_run(tmp_path: Path, fake_claude: Path) -> None:
+    marker = tmp_path / "action-ran"
     tasks_yaml = (
-        shared_block(gates=[{"cmd": f"touch '{marker}'"}])
+        shared_block(after_task=[{"action": f"touch '{marker}'"}])
         + "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
     )
 
@@ -96,12 +96,12 @@ def test_dry_run_valid_gates_are_not_run(tmp_path: Path, fake_claude: Path) -> N
 
     assert res.code == 0, res
     assert f"{tasks_path} is valid\n" in res.out
-    assert not marker.exists(), "a dry run must never run a gate"
+    assert not marker.exists(), "a dry run must never run an action"
 
 
-def test_dry_run_invalid_gates(tmp_path: Path, fake_claude: Path) -> None:
+def test_dry_run_invalid_actions(tmp_path: Path, fake_claude: Path) -> None:
     tasks_yaml = (
-        shared_block(gates=[{"command": "go test ./..."}])
+        shared_block(after_task=[{"command": "go test ./..."}])
         + "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
     )
 
@@ -109,7 +109,7 @@ def test_dry_run_invalid_gates(tmp_path: Path, fake_claude: Path) -> None:
 
     assert res.code == 3, res
     assert (
-        "failed to parse tasks yaml: shared.gates[0]: command: unknown key; a gate has only cmd"
+        "failed to parse tasks yaml: shared.after_task[0]: command: unknown key; an action has only action and timeout"
         in res.err
     )
     assert f"{tasks_path} is valid" not in res.out

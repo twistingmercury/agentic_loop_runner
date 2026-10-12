@@ -9,15 +9,22 @@ from textual.widgets.data_table import ColumnKey
 
 from alr.record.events import (
     Activity,
-    Committed,
-    GateFinished,
+    ActionFinished,
     RunDone,
     RunResult,
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import COMPLETED, FAILED, PASSED, Gate, Shared, Task, TaskList
-from alr.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, GatesPane, TasksPane
+from alr.tasks import (
+    COMPLETED,
+    FAILED,
+    RUN_SCOPE,
+    Action,
+    Shared,
+    Task,
+    TaskList,
+)
+from alr.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, ActionsPane, TasksPane
 
 FIRST = Task(id=1, name="First", prompt="p")
 SECOND = Task(id=2, name="Second", prompt="p")
@@ -25,7 +32,7 @@ TASK_LIST = TaskList(shared=Shared(prompt="s"), tasks=[FIRST, SECOND])
 
 
 class Host(App[None]):
-    def __init__(self, pane: TasksPane | ActivityPane | GatesPane) -> None:
+    def __init__(self, pane: TasksPane | ActivityPane | ActionsPane) -> None:
         super().__init__()
         self._pane = pane
 
@@ -48,109 +55,73 @@ async def test_tasks_pane_shows_each_task_and_its_state() -> None:
         assert pane.get_row_at(1)[0] == "·"
 
 
-async def test_tasks_pane_shows_a_passed_task_with_its_own_symbol() -> None:
+def _complete_both(pane: TasksPane) -> None:
+    pane.load(TASK_LIST)
+    pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
+    pane.apply(TaskFinished(Task(2, "Second", "p", state=COMPLETED), None, 1.0))
+
+
+async def test_tasks_pane_keeps_rows_completed_when_after_run_fails() -> None:
     pane = TasksPane()
+    async with Host(pane).run_test():
+        _complete_both(pane)
+
+        pane.apply(RunDone("action failed", 1.0, RunResult.RUN_FAILED, 4))
+
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["✔", "✔"]
+
+
+async def test_tasks_pane_has_no_row_for_the_after_run_scope() -> None:
+    pane = TasksPane()
+    action = Action(command="z")
     async with Host(pane).run_test():
         pane.load(TASK_LIST)
 
-        pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
+        pane.apply(Activity(RUN_SCOPE, "z output"))
+        pane.apply(ActionFinished(RUN_SCOPE, action, "10m", None, False, 0.1))
 
-        assert pane.get_row_at(0)[0] == "●"
-
-
-def _pass_both(pane: TasksPane) -> None:
-    pane.load(TASK_LIST)
-    pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
-    pane.apply(TaskFinished(Task(2, "Second", "p", state=PASSED), None, 1.0))
+        assert pane.row_count == 2
 
 
-@pytest.mark.parametrize(
-    ("result", "code"),
-    [(RunResult.FAILED, 1), (RunResult.STOPPED, 130)],
-)
-async def test_tasks_pane_takes_back_passed_rows_when_the_run_does_not_complete(
-    result: RunResult, code: int
-) -> None:
+async def test_activity_pane_shows_the_after_run_lines_as_they_arrive() -> None:
+    pane = ActivityPane()
+    async with Host(pane).run_test() as pilot:
+        pane.show(2, "Second")
+        pane.apply(Activity(SECOND, "→ edit b.py"))
+
+        pane.apply(Activity(RUN_SCOPE, "z output"))
+        await pilot.pause()
+
+        assert shown_text(pane) == ["z output"]
+        assert pane.border_title == "Task: 0 after the run"
+
+
+async def test_actions_pane_shows_an_after_run_action_result() -> None:
+    pane = ActionsPane()
+    async with Host(pane).run_test() as pilot:
+        pane.apply(
+            ActionFinished(RUN_SCOPE, Action(command="z"), "10m", "x", False, 0.2)
+        )
+        await pilot.pause()
+
+        assert shown_text(pane) == ["after run: z failed 0.2s"]
+
+
+async def test_tasks_pane_keeps_completed_rows_once_the_run_completes() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
-        _pass_both(pane)
-
-        pane.apply(RunDone("boom", 1.0, result, code))
-
-        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "·"]
-
-
-async def test_tasks_pane_marks_the_commit_failure_on_the_last_task() -> None:
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-
-        pane.apply(RunDone("commit failed", 1.0, RunResult.COMMIT_FAILED, 4))
-
-        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "✖"]
-
-
-async def test_tasks_pane_keeps_passed_rows_once_the_run_completes() -> None:
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
+        _complete_both(pane)
 
         pane.apply(RunDone(None, 1.0, RunResult.COMPLETED, 0))
 
-        assert [pane.get_row_at(i)[0] for i in range(2)] == ["●", "●"]
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["✔", "✔"]
 
 
 def _rows(pane: TasksPane) -> list[str]:
     return [pane.get_row_at(i)[0] for i in range(2)]
 
 
-async def test_tasks_pane_keeps_run_rows_completed_after_a_stop_past_the_commit() -> (
-    None
-):
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
-
-        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
-
-        assert _rows(pane) == ["✔", "✔"]
-
-
-async def test_tasks_pane_takes_back_run_rows_when_the_save_after_the_commit_fails() -> (
-    None
-):
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
-
-        pane.apply(RunDone("not saved", 1.0, RunResult.COMMIT_FAILED, 4))
-
-        assert _rows(pane) == ["·", "·"], (
-            "the commit landed, so no row is the failed one"
-        )
-
-
-async def test_tasks_pane_keeps_a_task_mode_row_completed_after_a_stop_past_the_commit() -> (
-    None
-):
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        pane.load(TASK_LIST)
-        pane.apply(TaskStarted(FIRST))
-        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
-        pane.apply(TaskStarted(SECOND))
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
-
-        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
-
-        assert _rows(pane) == ["✔", "✔"]
-
-
-async def test_tasks_pane_returns_the_running_task_to_pending_after_a_stop_before_the_commit() -> (
-    None
-):
+async def test_tasks_pane_returns_the_running_task_to_pending_after_a_stop() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
         pane.load(TASK_LIST)
@@ -310,7 +281,7 @@ async def test_activity_pane_shows_only_the_selected_task() -> None:
         assert shown_text(pane) == ["→ edit b.py"]
 
 
-def shown_text(pane: ActivityPane | GatesPane) -> list[str]:
+def shown_text(pane: ActivityPane | ActionsPane) -> list[str]:
     """The rows on screen, without the padding that fills each to the pane's width."""
     return [strip.text.rstrip() for strip in pane.lines]
 
@@ -520,42 +491,41 @@ async def test_tasks_pane_announces_the_highlighted_task_with_its_name() -> None
         assert seen[-1] == (2, "Second")
 
 
-async def test_gates_pane_lists_gate_results_and_commit_hashes() -> None:
-    pane = GatesPane()
-    gate = Gate(cmd="ruff check")
+async def test_actions_pane_lists_action_results() -> None:
+    pane = ActionsPane()
+    action = Action(command="ruff check")
     async with Host(pane).run_test() as pilot:
-        pane.apply(GateFinished(FIRST, gate, "10m", None, False, 0.4))
-        pane.apply(GateFinished(FIRST, gate, "10m", "exit status 1", False, 0.2))
-        pane.apply(GateFinished(FIRST, gate, "1s", None, True, 1.0))
-        pane.apply(Committed(FIRST, "a1b2c3d4e5f6"))
+        pane.apply(ActionFinished(FIRST, action, "10m", None, False, 0.4))
+        pane.apply(ActionFinished(FIRST, action, "10m", "exit status 1", False, 0.2))
+        pane.apply(ActionFinished(FIRST, action, "1s", None, True, 1.0))
         await pilot.pause()
 
         assert shown_text(pane) == [
             "1. ✔ ruff check 0.4s",
             "1. ✖ ruff check 0.2s",
             "1. ⏱ ruff check 1.0s",
-            "1. commit a1b2c3d",
         ]
 
 
-async def test_gates_pane_shows_long_gate_times_in_hours_minutes_seconds() -> None:
-    pane = GatesPane()
-    gate = Gate(cmd="make test")
+async def test_actions_pane_shows_long_action_times_in_hours_minutes_seconds() -> None:
+    pane = ActionsPane()
+    action = Action(command="make test")
     async with Host(pane).run_test() as pilot:
-        pane.apply(GateFinished(FIRST, gate, "2h", None, False, 3725.5))
+        pane.apply(ActionFinished(FIRST, action, "2h", None, False, 3725.5))
         await pilot.pause()
 
         assert shown_text(pane) == ["1. ✔ make test 1h 2m 6s"]
 
 
-LONG_GATE = Gate(
-    cmd="uv run pytest " + " ".join(f"tests/unit/dir{i}/test_x.py" for i in range(8))
+LONG_ACTION = Action(
+    command="uv run pytest "
+    + " ".join(f"tests/unit/dir{i}/test_x.py" for i in range(8))
 )
 
 
-async def test_gates_pane_wraps_a_long_gate_line_without_losing_text() -> None:
-    pane = GatesPane()
-    event = GateFinished(FIRST, LONG_GATE, "10m", None, False, 0.4)
+async def test_actions_pane_wraps_a_long_action_line_without_losing_text() -> None:
+    pane = ActionsPane()
+    event = ActionFinished(FIRST, LONG_ACTION, "10m", None, False, 0.4)
     async with Host(pane).run_test(size=(40, 20)) as pilot:
         pane.apply(event)
         await pilot.pause()
@@ -563,23 +533,23 @@ async def test_gates_pane_wraps_a_long_gate_line_without_losing_text() -> None:
         rows = shown_text(pane)
 
         assert len(rows) > 1
-        assert " ".join(rows).split() == f"1. ✔ {LONG_GATE.cmd} 0.4s".split()
+        assert " ".join(rows).split() == f"1. ✔ {LONG_ACTION.command} 0.4s".split()
         assert pane.max_scroll_x == 0
 
 
-async def test_gates_pane_prints_square_brackets_raw() -> None:
-    pane = GatesPane()
-    gate = Gate(cmd="pytest [x]")
+async def test_actions_pane_prints_square_brackets_raw() -> None:
+    pane = ActionsPane()
+    action = Action(command="pytest [x]")
     async with Host(pane).run_test() as pilot:
-        pane.apply(GateFinished(FIRST, gate, "10m", None, False, 0.4))
+        pane.apply(ActionFinished(FIRST, action, "10m", None, False, 0.4))
         await pilot.pause()
 
         assert shown_text(pane) == ["1. ✔ pytest [x] 0.4s"]
 
 
-async def test_gates_pane_rewraps_when_it_is_resized() -> None:
-    pane = GatesPane()
-    event = GateFinished(FIRST, LONG_GATE, "10m", None, False, 0.4)
+async def test_actions_pane_rewraps_when_it_is_resized() -> None:
+    pane = ActionsPane()
+    event = ActionFinished(FIRST, LONG_ACTION, "10m", None, False, 0.4)
     async with Host(pane).run_test(size=(40, 20)) as pilot:
         pane.apply(event)
         await pilot.pause()
@@ -590,5 +560,6 @@ async def test_gates_pane_rewraps_when_it_is_resized() -> None:
 
         assert len(shown_text(pane)) < narrow
         assert (
-            " ".join(shown_text(pane)).split() == f"1. ✔ {LONG_GATE.cmd} 0.4s".split()
+            " ".join(shown_text(pane)).split()
+            == f"1. ✔ {LONG_ACTION.command} 0.4s".split()
         )

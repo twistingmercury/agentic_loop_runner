@@ -44,7 +44,7 @@ def test_plain_run_leaves_a_log_in_the_run_folder(
         for line in (folder / "run.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert ledger[0]["event"] == "run_started"
-    assert ledger[0]["commit"] == "none"
+    assert "commit" not in ledger[0]
     assert ledger[-1]["event"] == "run_finished"
     assert ledger[-1]["result"] == "completed"
     assert ledger[-1]["exit"] == 0
@@ -62,34 +62,6 @@ def test_plain_run_logs_the_sessions_stderr(tmp_path: Path, fake_claude: Path) -
     assert res.code == 0, res
     assert "session-said-this" in res.err
     assert "session-said-this" in read_task_log(tasks_path, 1)
-
-
-def test_commit_run_with_a_log_folder_git_can_see_is_refused(
-    tmp_path: Path, git_repo: Path, fake_claude: Path
-) -> None:
-    # Only the task file is ignored, so the logs folder beside it stays visible.
-    (git_repo / ".git" / "info" / "exclude").write_text(
-        "work/tasks.yaml\n", encoding="utf-8"
-    )
-    work = git_repo / "work"
-    work.mkdir()
-    tasks_path = write_tasks_yaml(work, VALID_TASKS_YAML)
-    record_file = git_repo / "run" / "record.ndjson"
-
-    res = run_alr(
-        *run_args(tasks_path),
-        "--commit",
-        "task",
-        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
-    )
-
-    assert res.code == 3, res
-    assert (
-        "error: refused: log-folder-visible: --commit needs the log directory "
-        "ignored by git or outside the repository: work/logs\n" in res.err
-    )
-    assert not record_file.exists(), "claude must not run"
-    assert not (work / "logs").exists()
 
 
 def test_dry_run_leaves_no_logs_folder(tmp_path: Path, fake_claude: Path) -> None:
