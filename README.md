@@ -36,7 +36,7 @@ shared:
       timeout: 10m
     - action: >-
         git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
-        git commit -s -m "$ALR_TASK_NAME"
+        (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
   after_run:
     - action: git push --dry-run
 tasks:
@@ -130,7 +130,12 @@ does not promise a task its own commit. The commit action takes whatever is in
 the work tree, so keep `tasks.yaml` and the logs out of it, as the example above
 does. It uses the long `:(exclude)` form because both variables are absolute
 paths and git ignores the short `:!` form for an absolute path, so it would
-exclude nothing. A sandbox settings file inside the repository needs its own
+exclude nothing. The `git diff --cached --quiet ||` part is there because a task
+that changed nothing has nothing to commit; without it a clean tree makes the
+action fail. The run folder (`tasks.yaml` and `logs/`) must be inside the git
+work tree for this action: if it is outside, git refuses the `:(exclude)` paths
+(exit 128), so drop the two entries and use a plain `git add -A`, since git
+cannot see those files anyway. A sandbox settings file inside the repository needs its own
 `.gitignore` line or `:(exclude)` entry. Signing, hooks, the message, and any
 push are the action's job.
 

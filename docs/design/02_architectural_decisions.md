@@ -1381,7 +1381,7 @@ shared:
       timeout: 10m
     - action: >-
         git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
-        git commit -s -m "$ALR_TASK_NAME"
+        (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
   after_run:
     - action: git push --dry-run
 ```
@@ -1407,13 +1407,13 @@ flowchart TD
   timed-out action saves the task as `failed` with that action's text as the reason, and later actions do not run.
   alr does not undo what earlier actions did, so a commit action goes last in the list.
 - `after_run` runs at the end of every run that has no failed task, including a run where every task was already completed, so a rerun after an `after_run` failure retries it. Its failure changes no task's state: the tasks stay `completed`.
-- Each action has a timeout: its own `timeout`, else `--action-timeout`, else 10 minutes (the rule `gates` had).
+- Each action has a timeout: `--action-timeout`, else its own `timeout`, else 10 minutes (the flag wins).
 - alr sets these environment variables on the action's process, so a value is data to the shell and never code:
   `ALR_TASK_ID` and `ALR_TASK_NAME` (`after_task` only), and `ALR_TASK_FILE` and `ALR_LOG_DIR` (both lists).
   Names are single-line (ADR-025), so a commit subject stays one line.
 - alr has no commit concept. It checks nothing about git, takes no lock, and a task is not guaranteed its own commit:
   a commit action takes whatever is in the tree. Keeping `tasks.yaml` and the logs out of a commit is the action's job;
-  the template and the bundled skill show the `git add` above, with the exclusions by variable. It uses the long `:(exclude)` form because both variables are absolute paths, and git silently ignores the short `:!` form when the path is absolute: nothing is excluded, and `tasks.yaml` and the logs would be committed.
+  the template and the bundled skill show the `git add` above, with the exclusions by variable. It uses the long `:(exclude)` form because both variables are absolute paths, and git silently ignores the short `:!` form when the path is absolute: nothing is excluded, and `tasks.yaml` and the logs would be committed. The `git diff --cached --quiet ||` part is there because a task that changed nothing has nothing to commit; without it a clean tree makes the action fail (a verify-only task, or a rerun after a stop between the commit and the save). The run folder must be inside the work tree for this action: if it is outside, git refuses the `:(exclude)` paths (exit 128), so the exclusions are dropped and a plain `git add -A` is used, since git cannot see those files anyway.
 
 *Exit codes.* 0, 1, 2, 3, 130 and 143 are unchanged. **4 now means an `after_run` action failed** (it meant a failed
 commit); the table stays contiguous, and alr's own codes stay below 64, clear of `sysexits` and `timeout(1)`. The log

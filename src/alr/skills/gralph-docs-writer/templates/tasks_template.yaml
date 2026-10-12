@@ -29,13 +29,17 @@ shared:
   # alr sets ALR_TASK_ID, ALR_TASK_NAME, ALR_TASK_FILE, and ALR_LOG_DIR; use
   # them in quotes, as "$ALR_TASK_NAME". Keep tasks.yaml and the logs out of a
   # commit. The long :(exclude) form is needed: git ignores the short :! form
-  # when the path is absolute, as these two are. Delete the commit action if
-  # alr should not commit. Drop these comments from the generated file.
+  # when the path is absolute, as these two are. The diff --cached test is there
+  # because a task that changed nothing has nothing to commit, and without it a
+  # clean tree makes the action fail. The run folder (tasks.yaml and logs/) must
+  # be inside the git work tree for this action; if it is outside, drop the two
+  # :(exclude) entries (plain git add -A), since git cannot see those files.
+  # Delete the commit action if alr should not commit. Drop these comments from the generated file.
   after_task:
     - action: GENERATE_BUILD_AND_TEST_COMMAND_OR_DELETE
     - action: >-
         git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
-        git commit -s -m "$ALR_TASK_NAME"
+        (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
   # after_run runs once at the end, also when every task was already completed.
   # A failure exits 4 and leaves the tasks completed. Use [] or omit it for none.
   after_run: []

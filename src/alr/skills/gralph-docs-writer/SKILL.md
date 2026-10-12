@@ -60,11 +60,17 @@ after_task:
   - action: GENERATE_BUILD_AND_TEST_COMMAND
   - action: >-
       git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
-      git commit -s -m "$ALR_TASK_NAME"
+      (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
 ```
 
 Write the exclusions in the long `:(exclude)` form: both variables are absolute
-paths, and git ignores the short `:!` form when the path is absolute.
+paths, and git ignores the short `:!` form when the path is absolute. The
+`git diff --cached --quiet ||` part is there because a task that changed nothing
+has nothing to commit; without it a clean tree makes the action fail. The run
+folder (`tasks.yaml` and `logs/`) must be inside the git work tree for this
+action. If it is outside, git refuses the `:(exclude)` paths (exit 128), so drop
+the two entries and use a plain `git add -A`, since git cannot see those files
+anyway.
 
 An absent `after_task` means the run's actions are undecided: the full-screen
 view asks for them. `after_task: []` records a decision that there are none.
@@ -137,9 +143,10 @@ authorized.
    Keep the `tasks.yaml` rule and the Finish section as written so the file
    works without this skill installed. Apart from the project's own checks,
    keep generic rules out of task prompts; they live once, in `shared.prompt`.
-8. Validate `tasks.yaml` with `gralph -t <tasks.yaml> --dry-run`: it applies
+8. Validate `tasks.yaml` with `alr -d <run folder> --dry-run` (the run folder
+   holds `tasks.yaml`): it applies
    the same rules a real run does and exits non-zero on an invalid file. If
-   `gralph` is not installed, check YAML syntax and the field rules in step 5
+   `alr` is not installed, check YAML syntax and the field rules in step 5
    by hand. Also check paths, runnable verification commands, safe cleanup
    instructions, and preservation of project policies, and confirm no
    `GENERATE_*` token remains in the file.
