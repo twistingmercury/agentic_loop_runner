@@ -42,7 +42,7 @@ def _version_line() -> str:
 
 
 _GATE_TIMEOUT_RENAMED = "--gate-timeout: renamed to --action-timeout"
-_COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in shared.after_task, see the HOWTO"
+_COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in shared.after_task, see the README (Migrating from commit modes and gates)"
 
 
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:

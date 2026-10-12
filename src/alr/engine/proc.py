@@ -9,7 +9,7 @@ from subprocess import DEVNULL
 # How long a bounded finish keeps draining after its process has exited. Tests
 # patch it to stay fast.
 _DRAIN_GRACE = 2.0
-# What a stop may take beyond the grace period: the SIGKILL and the wait for the exit.
+# What a stop may take beyond the drain grace: the wait for the killed group's exit.
 _KILL_SLACK = 1.0
 # How often to look at the exit code when waiting on the process does not wake
 # up; see _wait_for_exit.
@@ -49,7 +49,8 @@ async def start(
     )
     try:
         # Shielded, because asyncio would otherwise cancel the spawn by killing
-        # only the leader with SIGKILL: no SIGTERM, and its children left alone.
+        # only the leader, and its children would be left running; this way
+        # the whole group is killed.
         return await asyncio.shield(spawn)
     except asyncio.CancelledError:
         await asyncio.shield(_stop_spawned(spawn))
@@ -156,7 +157,10 @@ async def _finish_drain(
 
 
 def stop_deadline() -> float:
-    """Return how long a stop of the group may take: the grace period, then the kill."""
+    """Return how long to wait for a stop of the group: it is killed at once.
+
+    The bound covers draining what the group already wrote and the wait for its exit.
+    """
     return _DRAIN_GRACE + _KILL_SLACK
 
 

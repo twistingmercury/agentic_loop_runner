@@ -49,6 +49,7 @@ def _print_action_limits(out: TextIO, task_list: TaskList, override: str) -> Non
 def _print_list_limits(
     out: TextIO, key: str, actions: list[Action], override: str
 ) -> None:
+    """Print one line per action: its first line, its time limit, and where the limit came from."""
     for action in actions:
         limit, source = action_limit(action, override)
         out.write(f"{key}: {first_line(action.command)}: {limit} ({source})\n")

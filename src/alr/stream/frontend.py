@@ -1,13 +1,12 @@
 """The stream front end: what a full-screen run does with each process."""
 
 import asyncio
-import os
 from asyncio.subprocess import PIPE
 from collections.abc import Callable, Mapping, Sequence
 
 from alr.engine import proc
 from alr.engine.frontend import SessionResult
-from alr.engine.actions import first_line
+from alr.engine.actions import first_line, merged_env
 from alr.record.events import (
     Activity,
     Event,
@@ -96,7 +95,7 @@ class StreamFrontEnd:
                 argv,
                 stdout=PIPE,
                 stderr=PIPE,
-                env=None if env is None else {**os.environ, **env},
+                env=None if env is None else merged_env(env),
             )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)

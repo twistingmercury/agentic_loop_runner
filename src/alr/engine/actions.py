@@ -1,6 +1,7 @@
 """Actions: commands alr runs itself after a session reports completed."""
 
 import asyncio
+import os
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -12,6 +13,9 @@ from alr.tasks import COMPLETED, FAILED, RUN_SCOPE, Action, Task, parse_timeout
 # Applies to every action that neither the flag nor the file gives a timeout;
 # there is deliberately no way to run an action without a limit.
 DEFAULT_ACTION_TIMEOUT = "10m"
+
+
+_TASK_VARIABLES = ("ALR_TASK_ID", "ALR_TASK_NAME")
 
 
 def first_line(text: str) -> str:
@@ -32,6 +36,19 @@ def action_env(task: Task | None, tasks_file: str, log_dir: str) -> dict[str, st
         return env
 
     return {"ALR_TASK_ID": str(task.id), "ALR_TASK_NAME": task.name, **env}
+
+
+def merged_env(env: Mapping[str, str]) -> dict[str, str]:
+    """The environment an action runs in: alr's own, overlaid with env.
+
+    An inherited ALR_TASK_ID or ALR_TASK_NAME (alr started from an action) is
+    dropped first, so an after_run action never sees a task that is not its own.
+    """
+    inherited = {
+        key: value for key, value in os.environ.items() if key not in _TASK_VARIABLES
+    }
+
+    return {**inherited, **env}
 
 
 def action_limit(action: Action, override: str) -> tuple[str, str]:

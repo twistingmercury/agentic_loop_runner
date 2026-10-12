@@ -539,6 +539,23 @@ def test_parse_tasks_task_level_gates_are_an_error(text: str) -> None:
     assert "shared.after_task" in str(exc.value)
 
 
+@pytest.mark.parametrize("key", ["after_task", "after_run"])
+@pytest.mark.parametrize("value", ["[{action: make test}]", "[]"])
+def test_parse_tasks_task_level_actions_are_an_error(key: str, value: str) -> None:
+    # Like a per-task gates: dropping it would silently run the task without
+    # the actions its author expected, and the next save would erase the key.
+    text = (
+        "shared:\n  prompt: shared\ntasks:\n  - id: 3\n    name: First\n"
+        f"    prompt: do it\n    {key}: {value}\n"
+    )
+
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert f"tasks[0] (id 3): {key}" in str(exc.value)
+    assert "once for the whole file, under shared" in str(exc.value)
+
+
 ACTION_ERROR_CASES = [
     ("null after_task", "after_task:", "shared.after_task:"),
     ("string element", "after_task: [go test ./...]", "shared.after_task[0]:"),

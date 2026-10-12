@@ -30,11 +30,12 @@ from test_signal import stopped_at_exit
 WORK = 'echo "$ALR_TASK_NAME" > "task-$ALR_TASK_ID.txt"'
 
 # Copied verbatim from the README and the task file template, so the suite tests
-# the action users copy. The long `:(exclude)` form is needed: with an absolute
-# path, git reads the short `:!` form as a path from the top of the work tree and
-# silently excludes nothing. The diff guard lets a task that changed nothing pass.
+# the action users copy. It adds everything from the repository root, then
+# unstages the run folder's own files, so an ignored run folder works (git exits 1
+# for an `:(exclude)` pathspec that names an ignored path) and a visible one stays
+# out. The diff guard lets a task that changed nothing pass.
 COMMIT = (
-    'git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" '
+    'git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" '
     '&& (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")'
 )
 
@@ -59,10 +60,11 @@ def make_run(
     names: list[str],
     after_task: list[str],
     after_run: list[str] | None = None,
+    folder_name: str = "run",
 ) -> Path:
-    """Write a run folder inside the repository, where git can see it, and return its task file."""
-    folder = repo / "run"
-    folder.mkdir()
+    """Write a run folder inside the repository and return its task file."""
+    folder = repo / folder_name
+    folder.mkdir(parents=True)
     shared = shared_block(
         "Body.",
         actions(*after_task),
@@ -98,6 +100,49 @@ def test_a_commit_action_commits_each_task(git_repo: Path, fake_claude: Path) ->
     files = git_committed_files(git_repo)
     assert "task-1.txt" in files
     assert "task-2.txt" in files
+    assert "run/tasks.yaml" not in files
+    assert not any(name.startswith("run/logs/") for name in files)
+
+
+def test_a_gitignored_run_folder_still_commits(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    (git_repo / ".gitignore").write_text(".local/\n", encoding="utf-8")
+    git_output(git_repo, "add", ".gitignore")
+    git_output(git_repo, "commit", "--quiet", "-m", "ignore the run folder")
+    tasks_path = make_run(
+        git_repo, ["one", "two"], [WORK, COMMIT], folder_name=".local/feature"
+    )
+
+    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+
+    assert res.code == 0, res
+    assert git_subjects(git_repo)[:2] == ["two", "one"]
+    files = git_committed_files(git_repo)
+    assert "task-1.txt" in files
+    assert "task-2.txt" in files
+    assert not any(name.startswith(".local/") for name in files)
+
+
+@pytest.mark.parametrize("relative", [True, False])
+def test_alr_started_in_a_subdirectory_commits_changes_elsewhere(
+    git_repo: Path, fake_claude: Path, relative: bool
+) -> None:
+    subdir = git_repo / "sub"
+    subdir.mkdir()
+    tasks_path = make_run(
+        git_repo,
+        ["one"],
+        ['echo x > "$(git rev-parse --show-toplevel)/top.txt"', COMMIT],
+    )
+    folder = "../run" if relative else str(tasks_path.parent)
+
+    res = run_alr("--yolo", f"--dir={folder}", cwd=subdir)
+
+    assert res.code == 0, res
+    assert git_subjects(git_repo) == ["one"]
+    files = git_committed_files(git_repo)
+    assert "top.txt" in files
     assert "run/tasks.yaml" not in files
     assert not any(name.startswith("run/logs/") for name in files)
 
@@ -201,7 +246,7 @@ OLD_CMD_KEY = "shared:\n  prompt: Body.\n  after_task:\n    - cmd: 'true'\n" + O
             ["--commit", "task"],
             2,
             "error: --commit: removed; a commit is an action now: "
-            "put it in shared.after_task, see the HOWTO\n",
+            "put it in shared.after_task, see the README (Migrating from commit modes and gates)\n",
             id="commit flag",
         ),
         pytest.param(
@@ -233,12 +278,12 @@ def test_old_flags_are_refused_naming_the_replacement(
     [
         pytest.param(
             OLD_SHARED_GATES,
-            "shared.gates: renamed to shared.after_task; see the HOWTO",
+            "shared.gates: renamed to shared.after_task; see the README (Migrating from commit modes and gates)",
             id="shared.gates",
         ),
         pytest.param(
             OLD_CMD_KEY,
-            "shared.after_task[0]: cmd: renamed to action; see the HOWTO",
+            "shared.after_task[0]: cmd: renamed to action; see the README (Migrating from commit modes and gates)",
             id="cmd key",
         ),
     ],

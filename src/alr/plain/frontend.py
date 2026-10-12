@@ -1,7 +1,6 @@
 """The plain front end: what a run without the full-screen view does with each process."""
 
 import asyncio
-import os
 import sys
 from asyncio.subprocess import PIPE
 from collections.abc import Callable, Mapping, Sequence
@@ -9,7 +8,7 @@ from typing import BinaryIO
 
 from alr.engine import proc
 from alr.engine.frontend import SessionResult
-from alr.engine.actions import first_line
+from alr.engine.actions import first_line, merged_env
 from alr.record.events import (
     Activity,
     Event,
@@ -108,7 +107,7 @@ class PlainFrontEnd:
                 argv,
                 stdout=PIPE,
                 stderr=PIPE,
-                env=None if env is None else {**os.environ, **env},
+                env=None if env is None else merged_env(env),
             )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)

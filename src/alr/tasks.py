@@ -212,7 +212,7 @@ def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.Node, yaml.SequenceNode]:
 def _check_root_key(key: str, seen: dict[str, yaml.Node]) -> None:
     if key == "gates":
         raise TaskFileError(
-            "gates: gates are set under shared now, as shared.after_task; see the HOWTO"
+            "gates: gates are set under shared now, as shared.after_task; see the README (Migrating from commit modes and gates)"
         )
 
     if key not in ("shared", "tasks"):
@@ -247,7 +247,9 @@ def _check_shared_keys(fields: dict[str, yaml.Node]) -> None:
     A file with both `gates` and `after_task` is refused too, never half-read.
     """
     if "gates" in fields:
-        raise TaskFileError("shared.gates: renamed to shared.after_task; see the HOWTO")
+        raise TaskFileError(
+            "shared.gates: renamed to shared.after_task; see the README (Migrating from commit modes and gates)"
+        )
 
     for key in fields:
         if key not in ("prompt", "after_task", "after_run"):
@@ -302,8 +304,17 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     if "gates" in fields:
         raise TaskFileError(
             f"{where}: gates: gates are set once for the whole file, "
-            "as shared.after_task; see the HOWTO"
+            "as shared.after_task; see the README (Migrating from commit modes and gates)"
         )
+
+    # The same plausible mistake: dropped silently, it would run the task
+    # without the actions its author expected, and the next save erases it.
+    for key in ("after_task", "after_run"):
+        if key in fields:
+            raise TaskFileError(
+                f"{where}: {key}: actions are set once for the whole file, "
+                f"under shared, not per task"
+            )
 
     return Task(
         id=task_id, name=name, prompt=prompt, state=state or PENDING, error=error
@@ -423,7 +434,9 @@ def _check_action(where: str, el: yaml.Node) -> Action:
 
 def _check_action_key(where: str, key: str) -> None:
     if key == "cmd":
-        raise TaskFileError(f"{where}: cmd: renamed to action; see the HOWTO")
+        raise TaskFileError(
+            f"{where}: cmd: renamed to action; see the README (Migrating from commit modes and gates)"
+        )
 
     if key not in ("action", "timeout"):
         raise TaskFileError(

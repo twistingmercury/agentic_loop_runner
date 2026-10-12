@@ -444,7 +444,7 @@ class AlrApp(App[None]):
             self._worker.cancel()
 
     def _quit_after_stop(self) -> None:
-        """Quit once the stop under way is done, so a hook that traps TERM does not outlive alr."""
+        """Quit once the stop under way is done, so the killed process group is gone before alr exits."""
         if self._quitting:
             return
 

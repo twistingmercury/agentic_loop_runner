@@ -21,7 +21,7 @@ from helpers import (
 
 from alr.engine import actions
 from alr.engine import loop as loop_module
-from alr.engine.actions import action_env
+from alr.engine.actions import action_env, merged_env
 from alr.errors import AfterRunFailedError, RunError
 from alr.tasks import (
     COMPLETED,
@@ -539,6 +539,37 @@ def test_action_env_makes_relative_paths_absolute(
         "ALR_TASK_FILE": str(tmp_path / "tasks.yaml"),
         "ALR_LOG_DIR": str(tmp_path / "logs"),
     }
+
+
+def test_merged_env_drops_inherited_task_variables_for_after_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A nested alr started from an action inherits the outer task's variables.
+    monkeypatch.setenv("ALR_TASK_ID", "9")
+    monkeypatch.setenv("ALR_TASK_NAME", "outer")
+    monkeypatch.setenv("KEEP_ME", "yes")
+    env = action_env(None, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
+
+    merged = merged_env(env)
+
+    assert "ALR_TASK_ID" not in merged
+    assert "ALR_TASK_NAME" not in merged
+    assert merged["KEEP_ME"] == "yes"
+    assert merged["ALR_LOG_DIR"] == str(tmp_path / "logs")
+
+
+def test_merged_env_gives_an_after_task_action_its_own_task_variables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALR_TASK_ID", "9")
+    monkeypatch.setenv("ALR_TASK_NAME", "outer")
+    task = Task(id=7, name="inner", prompt="p")
+    env = action_env(task, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
+
+    merged = merged_env(env)
+
+    assert merged["ALR_TASK_ID"] == "7"
+    assert merged["ALR_TASK_NAME"] == "inner"
 
 
 async def test_the_loop_gives_an_action_the_task_and_the_run_paths(

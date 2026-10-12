@@ -322,7 +322,7 @@ def test_actions_task_level_actions_are_rejected(
 
     assert res.code == 3, res
     assert (
-        "tasks[0] (id 1): gates: gates are set once for the whole file, as shared.after_task; see the HOWTO"
+        "tasks[0] (id 1): gates: gates are set once for the whole file, as shared.after_task; see the README (Migrating from commit modes and gates)"
         in res.err
     )
 
