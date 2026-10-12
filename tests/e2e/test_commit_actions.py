@@ -142,25 +142,32 @@ def test_after_run_failure_exits_4_and_tasks_stay_completed(
 def test_a_rerun_retries_after_run_when_every_task_is_completed(
     tmp_path: Path, fake_claude: Path
 ) -> None:
+    # The append comes first, so every execution leaves a line, failing or not.
+    action = "echo ran >> ran.txt; test -e marker"
     tasks_path = write_tasks_yaml(
-        tmp_path, shared_block("Body.", [], actions("test -e marker")) + ONE_TASK
+        tmp_path, shared_block("Body.", [], actions(action)) + ONE_TASK
     )
-    first = run_alr(*run_args(tasks_path), cwd=tmp_path)
+    ran = tmp_path / "ran.txt"
+    record_file = tmp_path / "record.ndjson"
+    env = {"FAKECLAUDE_RECORD_FILE": str(record_file)}
+
+    first = run_alr(*run_args(tasks_path), cwd=tmp_path, env=env)
+
     assert first.code == 4, first
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
+    assert ran.read_text(encoding="utf-8").splitlines() == ["ran"]
+    # The first run started one session, so a missing record file cannot pass for "none".
+    sessions_before = len(fake_claude_records(record_file))
+    assert sessions_before == 1
 
     (tmp_path / "marker").touch()
-    record_file = tmp_path / "record.ndjson"
 
-    second = run_alr(
-        *run_args(tasks_path),
-        cwd=tmp_path,
-        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
-    )
+    second = run_alr(*run_args(tasks_path), cwd=tmp_path, env=env)
 
     assert second.code == 0, second
-    # Every task was already completed, so only the after_run action ran again.
-    assert fake_claude_records(record_file) == []
+    assert ran.read_text(encoding="utf-8").splitlines() == ["ran", "ran"]
+    # Every task was already completed, so no new session started.
+    assert len(fake_claude_records(record_file)) == sessions_before
 
 
 OLD_SHARED_GATES = "shared:\n  prompt: Body.\n  gates:\n    - cmd: 'true'\n" + ONE_TASK
