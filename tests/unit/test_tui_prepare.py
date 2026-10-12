@@ -7,7 +7,7 @@ import pytest
 from helpers import block_saving, write_file
 
 from alr.engine.stop import Stop
-from alr.errors import RefusedError, RunLogError
+from alr.errors import FailedTasksError, RefusedError, RunLogError
 from alr.record.runlog import RunLog
 from alr.tasks import Action, parse_tasks
 from alr.tui.prepare import prepare
@@ -235,3 +235,18 @@ async def test_prepare_reset_failed_that_cannot_save_refuses_without_a_log(
         await prepare(settings)
 
     assert caught.value.reason == "task-file-unwritable"
+
+
+async def test_prepare_refuses_a_failed_task_and_writes_nothing(
+    work_dir: Path,
+) -> None:
+    # Edited actions too: a refusal must not save them either.
+    settings = _failed_settings(
+        work_dir, logging=True, after_task=[Action(command="true")]
+    )
+
+    with pytest.raises(FailedTasksError):
+        await prepare(settings)
+
+    assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
+    assert not (work_dir / "run" / "logs").exists()
