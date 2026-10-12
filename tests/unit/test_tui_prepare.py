@@ -80,6 +80,15 @@ async def test_prepare_saves_edited_actions_once_every_check_passes(
     assert prepared.task_list.after_task_list() == saved.after_task_list()
 
 
+async def test_prepare_saves_edited_after_run_actions_alone(work_dir: Path) -> None:
+    settings = _settings(work_dir, after_run=[Action(command="make build")])
+
+    await prepare(settings)
+
+    saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
+    assert saved.after_run_list() == [Action(command="make build")]
+
+
 async def test_prepare_save_keeps_a_users_own_tmp_file(work_dir: Path) -> None:
     settings = _settings(work_dir, after_task=[Action(command="true")])
     users = Path(f"{settings.tasks_file}.tmp")

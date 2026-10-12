@@ -7,6 +7,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.events import DescendantFocus
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -280,25 +281,35 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
         self.dismiss(PermissionChoice(Permissions.SANDBOX, path))
 
 
-class ActionsDialog(_Dialog[list[Action]]):
-    """Add and remove the file's shared actions; Done with none is a decision that there are none."""
+class ActionsDialog(_Dialog[tuple[list[Action], list[Action]]]):
+    """Add and remove the file's after_task and after_run actions in two lists.
+
+    Done with both empty is a decision that there are none.
+    """
 
     DEFAULT_CSS = """
     ActionsDialog #dialog { width: 80%; max-width: 90; }
-    ActionsDialog #list { height: auto; max-height: 6; }
+    ActionsDialog ListView { height: auto; max-height: 6; }
     """
 
-    # Typing an action is the first thing to do; the list is reached with Tab.
+    # Typing an action is the first thing to do; the lists are reached with Tab.
     AUTO_FOCUS = "#cmd"
 
-    def __init__(self, actions: list[Action]) -> None:
+    def __init__(self, after_task: list[Action], after_run: list[Action]) -> None:
         super().__init__()
-        self._actions = list(actions)
+        self._lists: dict[str, list[Action]] = {
+            "after-task": list(after_task),
+            "after-run": list(after_run),
+        }
+        # Add and Remove act on the list last focused, since pressing a button moves focus off it.
+        self._focused_list = "after-task"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Label("Actions, run after each task's session")
-            yield ListView(*(self._item(action) for action in self._actions), id="list")
+            yield Label("After each task")
+            yield self._list_view("after-task")
+            yield Label("After the run")
+            yield self._list_view("after-run")
             yield Input(placeholder="command", id="cmd")
             yield Input(placeholder="timeout, such as 5m (optional)", id="timeout")
             yield Static("", id="error")
@@ -308,6 +319,14 @@ class ActionsDialog(_Dialog[list[Action]]):
                 yield Button("Done", id="done")
                 yield Button("Cancel", id="cancel")
 
+    def _list_view(self, list_id: str) -> ListView:
+        items = (self._item(action) for action in self._lists[list_id])
+        return ListView(*items, id=list_id)
+
+    def on_descendant_focus(self, event: DescendantFocus) -> None:
+        if isinstance(event.widget, ListView) and event.widget.id in self._lists:
+            self._focused_list = event.widget.id
+
     async def on_button_pressed(self, message: Button.Pressed) -> None:
         match message.button.id:
             case "add":
@@ -315,7 +334,7 @@ class ActionsDialog(_Dialog[list[Action]]):
             case "remove":
                 await self._remove()
             case "done":
-                self.dismiss(self._actions)
+                self.dismiss((self._lists["after-task"], self._lists["after-run"]))
             case "cancel":
                 self.dismiss(None)
 
@@ -331,18 +350,21 @@ class ActionsDialog(_Dialog[list[Action]]):
             return
 
         action = Action(command=cmd, timeout=timeout)
-        self._actions.append(action)
-        await self.query_one("#list", ListView).append(self._item(action))
+        self._lists[self._focused_list].append(action)
+        await self.query_one(f"#{self._focused_list}", ListView).append(
+            self._item(action)
+        )
         self.query_one("#cmd", Input).value = ""
         self.query_one("#timeout", Input).value = ""
 
     async def _remove(self) -> None:
-        index = self.query_one("#list", ListView).index
+        view = self.query_one(f"#{self._focused_list}", ListView)
+        index = view.index
         if index is None:
             return
 
-        del self._actions[index]
-        await self.query_one("#list", ListView).pop(index)
+        del self._lists[self._focused_list][index]
+        await view.pop(index)
 
     @staticmethod
     def _item(action: Action) -> ListItem:

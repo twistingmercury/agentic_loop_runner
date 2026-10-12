@@ -23,6 +23,7 @@ from textual.widgets import (
     Button,
     DataTable,
     Input,
+    ListView,
     OptionList,
     Select,
     Static,
@@ -758,10 +759,77 @@ async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
     await until(lambda: not isinstance(app.screen, ModalScreen))
 
 
+@pytest.mark.usefixtures("fake_claude")
+async def test_start_saves_both_edited_lists(work_dir: Path) -> None:
+    settings = _settings(
+        work_dir,
+        after_task=[Action(command="true")],
+        after_run=[Action(command="make build")],
+    )
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await _finished(app)
+
+    saved = parse_tasks(Path(settings.tasks_file).read_text(encoding="utf-8"))
+    assert saved.after_task_list() == [Action(command="true")]
+    assert saved.after_run_list() == [Action(command="make build")]
+
+
+async def test_after_run_alone_does_not_open_the_dialog_at_launch(
+    work_dir: Path,
+) -> None:
+    settings = _settings(work_dir, after_run=[Action(command="make build")])
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        assert app.needs_actions() is False
+
+
+async def test_the_actions_dialog_opens_prefilled_with_the_files_after_run(
+    work_dir: Path,
+) -> None:
+    text = TASKS.replace(
+        "after_task: []", "after_task: []\n  after_run:\n    - action: make build"
+    )
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", text)
+    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        await pilot.press("a")
+        await until(lambda: isinstance(app.screen, ActionsDialog))
+
+        assert len(app.screen.query_one("#after-run", ListView)) == 1
+
+
+async def test_done_in_the_actions_dialog_stores_both_lists(work_dir: Path) -> None:
+    settings = _settings(work_dir)
+    app = AlrApp(settings)
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.press("a")
+        await until(lambda: isinstance(app.screen, ActionsDialog))
+        app.screen.query_one("#after-run", ListView).focus()
+        app.screen.query_one("#cmd", Input).value = "make build"
+
+        await pilot.click("#add")
+        await pilot.click("#done")
+        await until(lambda: not isinstance(app.screen, ModalScreen))
+
+        assert settings.after_task == []
+        assert settings.after_run == [Action(command="make build")]
+
+
 async def test_picking_another_folder_drops_the_actions_edited_for_the_first(
     work_dir: Path,
 ) -> None:
-    settings = _settings(work_dir, after_task=[Action(command="true")])
+    settings = _settings(
+        work_dir,
+        after_task=[Action(command="true")],
+        after_run=[Action(command="make build")],
+    )
     other = work_dir / "other"
     other.mkdir()
     write_file(other / "tasks.yaml", TASKS)
@@ -773,6 +841,7 @@ async def test_picking_another_folder_drops_the_actions_edited_for_the_first(
 
         assert settings.tasks_file == str(other / "tasks.yaml")
         assert settings.after_task is None
+        assert settings.after_run is None
 
 
 async def test_picking_the_same_folder_keeps_the_actions(work_dir: Path) -> None:

@@ -91,7 +91,11 @@ def _save_changes(settings: RunSettings, task_list: TaskList, reset_count: int) 
     if settings.after_task is not None:
         task_list.shared.after_task = settings.after_task
 
-    if settings.after_task is None and not reset_count:
+    if settings.after_run is not None:
+        task_list.shared.after_run = settings.after_run
+
+    edited = settings.after_task is not None or settings.after_run is not None
+    if not edited and not reset_count:
         return
 
     save_for_start(settings.tasks_file, task_list)

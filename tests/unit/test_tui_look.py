@@ -27,7 +27,7 @@ SIZES = [(80, 24), (140, 40)]
 DIALOGS: dict[str, Callable[[str], Screen[object]]] = {
     "folder": lambda tasks: FolderDialog(str(Path(tasks).parent)),
     "permissions": lambda tasks: PermissionsDialog(""),
-    "actions": lambda tasks: ActionsDialog([]),
+    "actions": lambda tasks: ActionsDialog([], []),
     "viewer": lambda tasks: FileViewer(tasks),
     "error": lambda tasks: ErrorDialog("something went wrong"),
     "summary": lambda tasks: SummaryDialog("done", 1.0, None),

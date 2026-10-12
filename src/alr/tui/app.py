@@ -223,6 +223,7 @@ class AlrApp(App[None]):
         # Actions edited for another folder must never be saved into this one's file.
         if check.tasks_file != self.settings.tasks_file:
             self.settings.after_task = None
+            self.settings.after_run = None
 
         self.settings.tasks_file = check.tasks_file
         try:
@@ -298,13 +299,21 @@ class AlrApp(App[None]):
 
     async def ask_actions(self) -> None:
         """Show the actions dialog; nothing is saved until Start passes its checks."""
-        current = self.settings.after_task
-        if current is None and self._task_list is not None:
-            current = self._task_list.after_task_list()
+        after_task = self.settings.after_task
+        after_run = self.settings.after_run
+        if self._task_list is not None:
+            after_task = (
+                self._task_list.after_task_list() if after_task is None else after_task
+            )
+            after_run = (
+                self._task_list.after_run_list() if after_run is None else after_run
+            )
 
-        actions = await self.push_screen_wait(ActionsDialog(current or []))
-        if actions is not None:
-            self.settings.after_task = actions
+        answer = await self.push_screen_wait(
+            ActionsDialog(after_task or [], after_run or [])
+        )
+        if answer is not None:
+            self.settings.after_task, self.settings.after_run = answer
 
     def on_unmount(self) -> None:
         # The status line goes with the screen, so no tick may come after it.

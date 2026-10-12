@@ -32,6 +32,9 @@ class RunSettings:
     after_task: list[Action] | None = None
     """Actions edited in the view; None when they were not touched."""
 
+    after_run: list[Action] | None = None
+    """The run's own actions edited in the view; None when they were not touched."""
+
     def missing(self) -> str | None:
         """Say what stops a run from starting, or None when nothing does."""
         if not self.tasks_file:

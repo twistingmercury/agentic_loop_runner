@@ -281,6 +281,10 @@ class ActionsPane(RichLog):
 
 
 def _action_line(event: ActionFinished) -> str:
+    if event.task.id == RUN_SCOPE.id:
+        took = format_elapsed(event.seconds)
+        return f"after run: {event.action.command} {_outcome(event)} {took}"
+
     symbol = "✔"
     if event.timed_out:
         symbol = "⏱"
@@ -288,3 +292,10 @@ def _action_line(event: ActionFinished) -> str:
         symbol = "✖"
 
     return f"{event.task.id}. {symbol} {event.action.command} {format_elapsed(event.seconds)}"
+
+
+def _outcome(event: ActionFinished) -> str:
+    if event.timed_out:
+        return "timed out"
+
+    return "failed" if event.error is not None else "passed"

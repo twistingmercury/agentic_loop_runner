@@ -8,7 +8,7 @@ import pytest
 from helpers import write_nested_file
 from textual.app import App
 from textual.screen import ModalScreen
-from textual.widgets import Input, ListView, TextArea
+from textual.widgets import Input, Label, ListView, TextArea
 
 from alr.tui.checks import FolderCheck
 from alr.tasks import FAILED, Action, Task
@@ -141,7 +141,7 @@ async def test_permissions_dialog_preselects_nothing_without_a_default() -> None
 async def test_actions_dialog_adds_a_action_and_returns_the_list() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([Action(command="ruff check")]), host.record)
+        host.push_screen(ActionsDialog([Action(command="ruff check")], []), host.record)
         await pilot.pause()
         host.screen.query_one("#cmd", Input).value = "pytest"
         host.screen.query_one("#timeout", Input).value = "5m"
@@ -150,16 +150,16 @@ async def test_actions_dialog_adds_a_action_and_returns_the_list() -> None:
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == [
-            Action(command="ruff check"),
-            Action(command="pytest", timeout="5m"),
-        ]
+        assert host.result == (
+            [Action(command="ruff check"), Action(command="pytest", timeout="5m")],
+            [],
+        )
 
 
 async def test_actions_dialog_rejects_a_bad_timeout() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([]), host.record)
+        host.push_screen(ActionsDialog([], []), host.record)
         await pilot.pause()
         host.screen.query_one("#cmd", Input).value = "pytest"
         host.screen.query_one("#timeout", Input).value = "soon"
@@ -170,13 +170,13 @@ async def test_actions_dialog_rejects_a_bad_timeout() -> None:
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == []
+        assert host.result == ([], [])
 
 
 async def test_actions_dialog_rejects_an_empty_command() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([]), host.record)
+        host.push_screen(ActionsDialog([], []), host.record)
         await pilot.pause()
 
         await pilot.click("#add")
@@ -185,41 +185,88 @@ async def test_actions_dialog_rejects_an_empty_command() -> None:
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == []
+        assert host.result == ([], [])
 
 
 async def test_actions_dialog_removes_the_highlighted_action() -> None:
     host = Host()
     async with host.run_test() as pilot:
         host.push_screen(
-            ActionsDialog([Action(command="a"), Action(command="b")]), host.record
+            ActionsDialog([Action(command="a"), Action(command="b")], []), host.record
         )
         await pilot.pause()
-        host.screen.query_one("#list", ListView).index = 0
+        host.screen.query_one("#after-task", ListView).index = 0
 
         await pilot.click("#remove")
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == [Action(command="b")]
+        assert host.result == ([Action(command="b")], [])
 
 
-async def test_actions_dialog_done_with_no_actions_returns_an_empty_list() -> None:
+async def test_actions_dialog_shows_both_lists_prefilled() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([]), host.record)
+        host.push_screen(
+            ActionsDialog([Action(command="a")], [Action(command="b")]), host.record
+        )
+        await pilot.pause()
+
+        labels = [str(label.render()) for label in host.screen.query(Label)]
+        assert "After each task" in labels
+        assert "After the run" in labels
+        assert len(host.screen.query_one("#after-task", ListView)) == 1
+        assert len(host.screen.query_one("#after-run", ListView)) == 1
+
+
+async def test_actions_dialog_adds_to_the_focused_list() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(ActionsDialog([], []), host.record)
+        await pilot.pause()
+        host.screen.query_one("#after-run", ListView).focus()
+        host.screen.query_one("#cmd", Input).value = "make build"
+
+        await pilot.click("#add")
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == ([], [Action(command="make build")])
+
+
+async def test_actions_dialog_removes_from_the_focused_list() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(
+            ActionsDialog([Action(command="a")], [Action(command="b")]), host.record
+        )
+        await pilot.pause()
+        host.screen.query_one("#after-run", ListView).index = 0
+        host.screen.query_one("#after-run", ListView).focus()
+
+        await pilot.click("#remove")
+        await pilot.click("#done")
+        await pilot.pause()
+
+        assert host.result == ([Action(command="a")], [])
+
+
+async def test_actions_dialog_done_with_no_actions_returns_two_empty_lists() -> None:
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(ActionsDialog([], []), host.record)
         await pilot.pause()
 
         await pilot.click("#done")
         await pilot.pause()
 
-        assert host.result == []
+        assert host.result == ([], [])
 
 
 async def test_actions_dialog_cancel_returns_none() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([Action(command="a")]), host.record)
+        host.push_screen(ActionsDialog([Action(command="a")], []), host.record)
         await pilot.pause()
 
         await pilot.click("#cancel")
@@ -267,7 +314,7 @@ async def test_file_viewer_closes(tmp_path: Path) -> None:
     [
         lambda: FolderDialog("."),
         lambda: PermissionsDialog(""),
-        lambda: ActionsDialog([]),
+        lambda: ActionsDialog([], []),
         lambda: FileViewer(""),
         lambda: ErrorDialog("x"),
         lambda: SummaryDialog("done", 1.0, None),
@@ -321,7 +368,7 @@ async def test_enter_in_the_sandbox_field_submits(tmp_path: Path) -> None:
 async def test_enter_in_a_action_field_adds_the_action(field: str) -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([]), host.record)
+        host.push_screen(ActionsDialog([], []), host.record)
         await pilot.pause()
         host.screen.query_one("#cmd", Input).value = "pytest"
         host.screen.query_one(f"#{field}", Input).focus()
@@ -329,13 +376,13 @@ async def test_enter_in_a_action_field_adds_the_action(field: str) -> None:
         await pilot.press("enter")
         await pilot.pause()
 
-        assert len(host.screen.query_one("#list", ListView).children) == 1
+        assert len(host.screen.query_one("#after-task", ListView).children) == 1
 
 
 async def test_the_actions_dialog_starts_in_the_command_field() -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(ActionsDialog([Action(command="x")]), host.record)
+        host.push_screen(ActionsDialog([Action(command="x")], []), host.record)
         await pilot.pause()
 
         assert host.screen.focused is host.screen.query_one("#cmd", Input)

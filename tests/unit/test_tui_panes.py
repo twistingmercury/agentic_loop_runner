@@ -104,7 +104,7 @@ async def test_actions_pane_shows_an_after_run_action_result() -> None:
         )
         await pilot.pause()
 
-        assert shown_text(pane) == ["0. ✖ z 0.2s"]
+        assert shown_text(pane) == ["after run: z failed 0.2s"]
 
 
 async def test_tasks_pane_keeps_completed_rows_once_the_run_completes() -> None:
