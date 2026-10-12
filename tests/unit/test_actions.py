@@ -20,6 +20,7 @@ from helpers import (
 )
 
 from alr.engine import actions
+from alr.engine import loop as loop_module
 from alr.engine.actions import action_env
 from alr.errors import AfterRunFailedError, RunError
 from alr.tasks import (
@@ -548,7 +549,7 @@ async def test_the_loop_gives_an_action_the_task_and_the_run_paths(
     task_list = _with_actions_task(Action(command=f"{command} > '{seen}'"))
     tasks_file = tmp_path / "tasks.yaml"
 
-    await run_loop(task_list, tasks_file, repo=None)
+    await run_loop(task_list, tasks_file)
 
     assert seen.read_text() == f"1|{tasks_file}|{tmp_path / 'logs'}"
 
@@ -665,3 +666,34 @@ async def test_a_stop_during_after_run_is_a_stop_without_a_task_prefix(
     assert str(error).startswith("stopped during action")
     assert [t.state for t in saved_tasks(tasks_file).tasks] == [COMPLETED]
     assert front_end.endings == [(RunResult.STOPPED, 130)]
+
+
+async def test_run_saves_each_task_completed_after_its_actions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    tasks_file.write_text(
+        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1}\n",
+        encoding="utf-8",
+    )
+    states_seen = tmp_path / "states"
+    # The action reads the file as it is while the task's last action runs.
+    peek = Action(
+        command=f"grep -c completed '{tasks_file}' >> '{states_seen}' || true"
+    )
+    saves: list[list[str]] = []
+    real_save = loop_module.save_tasks
+
+    def counting_save(path: str, task_list: TaskList) -> None:
+        saves.append([task.state for task in task_list.tasks])
+        real_save(path, task_list)
+
+    monkeypatch.setattr(loop_module, "save_tasks", counting_save)
+
+    await run_loop(_with_actions_task(peek), tasks_file)
+
+    assert states_seen.read_text().split() == ["0"], (
+        "the task is not saved completed until its actions have passed"
+    )
+    assert saves == [[COMPLETED]], "one save per task, after its actions"
+    assert [task.state for task in saved_tasks(tasks_file).tasks] == [COMPLETED]

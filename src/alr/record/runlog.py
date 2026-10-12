@@ -17,7 +17,6 @@ from alr.durations import format_duration
 from alr.errors import LOG_UNWRITABLE, RefusedError, RunLogError
 from alr.record.events import (
     Activity,
-    Committed,
     Event,
     ActionFinished,
     RunDone,
@@ -27,7 +26,7 @@ from alr.record.events import (
 )
 from alr.tasks import RUN_SCOPE, Task
 
-# The record holds Claude's text and whatever an action or git printed, so it is
+# The record holds Claude's text and whatever an action printed, so it is
 # private to the user.
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
@@ -43,7 +42,6 @@ class Info:
     permissions: str  # "sandbox" or "skip"
     sandbox_settings: str = ""  # the settings file's path, "" when not passed
     action_timeout: str = ""  # the --action-timeout value, "" when not passed
-    commit: str = "none"  # the requested commit mode: "none", "task", or "run"
 
 
 def run_dir(log_dir: Path, start: datetime) -> Path:
@@ -231,7 +229,6 @@ class RunLog:
         if info.action_timeout:
             fields["action_timeout"] = info.action_timeout
 
-        fields["commit"] = info.commit
         self._write_ledger("run_started", fields)
 
     def record(self, event: Event) -> None:
@@ -246,10 +243,6 @@ class RunLog:
                 self._step_finished("session_finished", event.task, event.seconds)
             case ActionFinished():
                 self._action_finished(event)
-            case Committed():
-                self._write_ledger(
-                    "committed", {"task": event.task.id, "hash": event.commit_hash}
-                )
             case TaskFinished():
                 self._task_finished(event)
             case RunDone():
@@ -317,9 +310,10 @@ class RunLog:
         self._append_after_finish(self._detail_path, text)
 
     def _append_after_finish(self, detail_path: Path, text: str) -> None:
-        """Add a line to the file of a task that already finished.
+        """Add a line to a detail file that has no open handle.
 
-        The commit after all tasks reports on the last task once it is done.
+        The after_run actions report under the run scope, which no task
+        owns; a late line for a task that is done lands in its own file.
         """
         if self._ledger is None:
             raise _not_open(self._ledger_path)

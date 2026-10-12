@@ -12,16 +12,11 @@ FAILED_TASKS_MESSAGE = (
     "fix the failed tasks and set their state to pending before running"
 )
 
-DIRTY_TREE = "dirty-tree"
-TASK_FILE_VISIBLE = "task-file-visible"
-LOG_FOLDER_VISIBLE = "log-folder-visible"
 FAILED_TASKS = "failed-tasks"
 INVALID_TASK_FILE = "invalid-task-file"
 INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"
 LOG_UNWRITABLE = "log-unwritable"
 TASK_FILE_UNWRITABLE = "task-file-unwritable"
-GIT_ERROR = "git-error"
-LOCKED = "locked"
 
 
 def quote(text: str) -> str:
@@ -70,12 +65,6 @@ class RunLogError(AlrError):
 
 class RunError(AlrError):
     """A task failed, or its state could not be saved."""
-
-
-class CommitFailedError(RunError):
-    """A task's work passed its actions but git would not commit it."""
-
-    exit_code = 4
 
 
 class AfterRunFailedError(RunError):

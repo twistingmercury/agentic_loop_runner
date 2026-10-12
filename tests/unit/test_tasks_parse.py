@@ -699,7 +699,7 @@ def test_a_task_name_with_a_line_break_is_rejected(brk: str) -> None:
     ["\0", "\x01", "\x07", "\x08", "\x1b", "\x1f", "\x7f", "\x80", "\x9f"],
 )
 def test_a_task_name_with_a_control_character_is_rejected(char: str) -> None:
-    # A NUL in a commit subject crashes git's argv with "embedded null byte".
+    # Control characters would garble the one-line fields of the run log.
     name = json.dumps(f"a{char}b")
     text = (
         f"shared: {{prompt: s}}\ntasks:\n  - id: 7\n    name: {name}\n    prompt: p\n"

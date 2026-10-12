@@ -16,8 +16,6 @@ from alr.errors import RefusedError, RunLogError
 from alr.record import runlog
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     Event,
     ActionFinished,
     ActionStarted,
@@ -40,7 +38,6 @@ INFO = Info(
     tasks_file="run/tasks.yaml",
     permissions="sandbox",
     sandbox_settings="run/sandbox.json",
-    commit="task",
 )
 
 
@@ -88,7 +85,7 @@ def test_open_creates_private_folder_and_run_started(
     want = (
         "{" + STAMP + ',"event":"run_started","version":"v0.10.0",'
         '"tasks_file":"run/tasks.yaml","permissions":"sandbox",'
-        '"sandbox_settings":"run/sandbox.json","commit":"task"}'
+        '"sandbox_settings":"run/sandbox.json"}'
     )
     lines = ledger_lines(path)
     assert lines == [want]
@@ -107,19 +104,9 @@ def test_open_leaves_out_what_was_not_passed(tmp_path: Path) -> None:
 
     want = (
         "{" + STAMP + ',"event":"run_started","version":"dev",'
-        '"tasks_file":"t.yaml","permissions":"skip","action_timeout":"90s",'
-        '"commit":"none"}'
+        '"tasks_file":"t.yaml","permissions":"skip","action_timeout":"90s"}'
     )
     assert ledger_lines(path) == [want]
-
-
-@pytest.mark.parametrize("mode", ["none", "task", "run"])
-def test_open_writes_the_commit_mode_as_a_string(tmp_path: Path, mode: str) -> None:
-    path = tmp_path / "run"
-
-    RunLog.open(path, replace(INFO, commit=mode), now=fixed_now).close()
-
-    assert json.loads(ledger_lines(path)[0])["commit"] == mode
 
 
 @pytest.mark.parametrize(
@@ -127,7 +114,6 @@ def test_open_writes_the_commit_mode_as_a_string(tmp_path: Path, mode: str) -> N
     [
         (RunResult.COMPLETED, 0),
         (RunResult.FAILED, 1),
-        (RunResult.COMMIT_FAILED, 4),
         (RunResult.RUN_FAILED, 4),
         (RunResult.STOPPED, 143),
     ],
@@ -230,8 +216,6 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         SessionFinished(done, 90.0),
         Activity(task, "→ action go test ./..."),
         ActionFinished(task, Action(command="go test ./..."), "10m", None, False, 41.2),
-        Activity(task, "→ commit First"),
-        Committed(task, "3f2a9c1"),
         TaskFinished(done, None, 132.0),
         RunDone(None, 133.0),
     )
@@ -242,7 +226,6 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
         '"state":"completed","duration":"1m30s"}',
         "{" + STAMP + ',"event":"action_finished","task":1,"cmd":"go test ./...",'
         '"result":"passed","timeout":"10m","duration":"41.2s"}',
-        "{" + STAMP + ',"event":"committed","task":1,"hash":"3f2a9c1"}',
         "{" + STAMP + ',"event":"task_finished","task":1,'
         '"state":"completed","duration":"2m12s"}',
         "{" + STAMP + ',"event":"run_finished","result":"completed",'
@@ -255,7 +238,6 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
     assert read_lines(detail) == [
         "14:02:11 working",
         "14:02:11 → action go test ./...",
-        "14:02:11 → commit First",
     ]
 
 
@@ -266,7 +248,7 @@ def test_record_start_events_add_nothing_to_the_log(
     task = Task(id=1, name="First", prompt="p1")
     before = ledger_lines(path)
 
-    record(log, ActionStarted(task, Action(command="check")), CommitStarted(task))
+    record(log, ActionStarted(task, Action(command="check")))
 
     assert ledger_lines(path) == before
     assert not (path / "task-1.log").exists()
@@ -526,19 +508,19 @@ def test_record_after_close_is_an_error_and_opens_no_detail_file(
 def test_record_activity_after_the_task_finished_appends_to_its_detail_file(
     opened: tuple[RunLog, Path],
 ) -> None:
-    # The after-all commit reports its marker on the last task, once that task is done.
+    # A late line for a task that is done still lands in its own file.
     log, path = opened
     record(
         log,
         TaskStarted(FIRST),
         Activity(FIRST, "working"),
         TaskFinished(replace(FIRST, state=COMPLETED), None, 0.0),
-        Activity(FIRST, "→ commit First"),
+        Activity(FIRST, "late line"),
     )
 
     assert read_lines(path / "task-1.log") == [
         "14:02:11 working",
-        "14:02:11 → commit First",
+        "14:02:11 late line",
     ]
 
 

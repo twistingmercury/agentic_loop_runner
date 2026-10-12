@@ -4,8 +4,6 @@ import pytest
 
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     ActionFinished,
     ActionStarted,
     RunDone,
@@ -99,16 +97,6 @@ def test_action_with_several_lines_shows_only_the_first(progress: Progress) -> N
     )
 
 
-def test_commit_shows_commit(progress: Progress, clock: FakeClock) -> None:
-    progress.feed(TaskStarted(FIRST))
-    progress.feed(ActionStarted(FIRST, FORMAT))
-    clock.advance(4)
-    progress.feed(CommitStarted(FIRST))
-    clock.advance(1)
-
-    assert progress.text() == "task 1 of 12 · commit · 1.0s · run 5.0s"
-
-
 def test_step_timer_restarts_on_each_step(progress: Progress, clock: FakeClock) -> None:
     progress.feed(TaskStarted(FIRST))
     clock.advance(20)
@@ -126,8 +114,6 @@ def test_next_task_counts_up_and_restarts_action_numbers(
     progress.feed(TaskStarted(FIRST))
     progress.feed(ActionStarted(FIRST, FORMAT))
     progress.feed(ActionStarted(FIRST, TESTS))
-    progress.feed(CommitStarted(FIRST))
-    progress.feed(Committed(FIRST, "abc123"))
     progress.feed(TaskFinished(FIRST, None, 30.0))
     clock.advance(30)
     progress.feed(TaskStarted(SECOND))
@@ -244,21 +230,13 @@ def test_next_task_start_brings_the_step_back(
     assert progress.text() == "task 2 of 12 · session · 0.0s · run 3.0s"
 
 
-def test_after_all_commit_reads_commit_once_it_starts(
-    clock: FakeClock,
-) -> None:
+def test_no_step_is_shown_once_the_last_task_has_finished(clock: FakeClock) -> None:
     progress = Progress(total_tasks=1, action_count=1, clock=clock)
     progress.feed(TaskStarted(FIRST))
     progress.feed(TaskFinished(FIRST, None, 4.0))
     clock.advance(4)
-    after_finish = progress.text()
-    progress.feed(CommitStarted(FIRST))
-    clock.advance(1)
 
-    assert (after_finish, progress.text()) == (
-        "task 1 of 1 · run 4.0s",
-        "task 1 of 1 · commit · 1.0s · run 5.0s",
-    )
+    assert progress.text() == "task 1 of 1 · run 4.0s"
 
 
 def test_after_run_action_is_labelled_after_the_run_and_leaves_the_task_actions_alone(

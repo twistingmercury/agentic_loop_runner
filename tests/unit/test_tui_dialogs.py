@@ -36,27 +36,27 @@ class Host(App[None]):
         self.result = result
 
 
-async def test_folder_dialog_accepts_a_valid_folder(git_repo: Path) -> None:
-    write_nested_file(git_repo / "run" / "tasks.yaml", TASKS)
+async def test_folder_dialog_accepts_a_valid_folder(work_dir: Path) -> None:
+    write_nested_file(work_dir / "run" / "tasks.yaml", TASKS)
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(FolderDialog(str(git_repo)), host.record)
+        host.push_screen(FolderDialog(str(work_dir)), host.record)
         await pilot.pause()
-        host.screen.query_one("#path", Input).value = str(git_repo / "run")
+        host.screen.query_one("#path", Input).value = str(work_dir / "run")
 
         await pilot.click("#ok")
         await pilot.pause()
 
         assert isinstance(host.result, FolderCheck)
-        assert host.result.tasks_file == str(git_repo / "run" / "tasks.yaml")
+        assert host.result.tasks_file == str(work_dir / "run" / "tasks.yaml")
 
 
-async def test_folder_dialog_keeps_the_user_on_an_error(git_repo: Path) -> None:
+async def test_folder_dialog_keeps_the_user_on_an_error(work_dir: Path) -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(FolderDialog(str(git_repo)), host.record)
+        host.push_screen(FolderDialog(str(work_dir)), host.record)
         await pilot.pause()
-        host.screen.query_one("#path", Input).value = str(git_repo / "run")
+        host.screen.query_one("#path", Input).value = str(work_dir / "run")
 
         await pilot.click("#ok")
         await pilot.pause()
@@ -65,10 +65,10 @@ async def test_folder_dialog_keeps_the_user_on_an_error(git_repo: Path) -> None:
         assert "no tasks.yaml" in str(host.screen.query_one("#error").render())
 
 
-async def test_folder_dialog_cancel_returns_none(git_repo: Path) -> None:
+async def test_folder_dialog_cancel_returns_none(work_dir: Path) -> None:
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(FolderDialog(str(git_repo)), host.record)
+        host.push_screen(FolderDialog(str(work_dir)), host.record)
         await pilot.pause()
 
         await pilot.click("#cancel")
@@ -289,11 +289,11 @@ async def test_escape_closes_every_dialog_with_none(
         assert host.result is None
 
 
-async def test_enter_in_the_folder_field_submits(git_repo: Path) -> None:
-    write_nested_file(git_repo / "run" / "tasks.yaml", TASKS)
+async def test_enter_in_the_folder_field_submits(work_dir: Path) -> None:
+    write_nested_file(work_dir / "run" / "tasks.yaml", TASKS)
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(FolderDialog(str(git_repo / "run")), host.record)
+        host.push_screen(FolderDialog(str(work_dir / "run")), host.record)
         await pilot.pause()
         host.screen.query_one("#path", Input).focus()
 
@@ -342,19 +342,19 @@ async def test_the_actions_dialog_starts_in_the_command_field() -> None:
 
 
 async def test_the_folder_tree_picks_a_folder_with_arrows_and_enter(
-    git_repo: Path,
+    work_dir: Path,
 ) -> None:
-    (git_repo / "run" / "feat").mkdir()
+    (work_dir / "run" / "feat").mkdir()
     host = Host()
     async with host.run_test() as pilot:
-        host.push_screen(FolderDialog(str(git_repo / "run")), host.record)
+        host.push_screen(FolderDialog(str(work_dir / "run")), host.record)
         await pilot.pause(0.5)
 
         await pilot.press("tab", "down", "enter")
         await pilot.pause()
 
         assert host.screen.query_one("#path", Input).value == str(
-            git_repo / "run" / "feat"
+            work_dir / "run" / "feat"
         )
 
 

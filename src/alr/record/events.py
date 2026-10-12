@@ -39,17 +39,6 @@ class ActionFinished:
 
 
 @dataclass(frozen=True)
-class CommitStarted:
-    task: Task
-
-
-@dataclass(frozen=True)
-class Committed:
-    task: Task
-    commit_hash: str
-
-
-@dataclass(frozen=True)
 class TaskFinished:
     task: Task  # carries the final state and error
     error: str | None  # the run's failure text when the task failed
@@ -70,8 +59,6 @@ Event = (
     | SessionFinished
     | ActionStarted
     | ActionFinished
-    | CommitStarted
-    | Committed
     | TaskFinished
     | RunDone
 )

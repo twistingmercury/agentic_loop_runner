@@ -6,12 +6,10 @@ from asyncio.subprocess import PIPE
 from collections.abc import Callable, Mapping, Sequence
 
 from alr.engine import proc
-from alr.engine.frontend import FirstLine, SessionResult
+from alr.engine.frontend import SessionResult
 from alr.engine.actions import first_line
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     Event,
     ActionFinished,
     ActionStarted,
@@ -78,20 +76,6 @@ class StreamFrontEnd:
     ) -> None:
         self._report(ActionFinished(task, action, limit, error, timed_out, seconds))
 
-    def commit_started(self, task: Task) -> None:
-        self._report(Activity(task, "→ commit " + first_line(task.name)))
-        self._report(CommitStarted(task))
-
-    async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        first = FirstLine()
-        error = await self._run_command(
-            task, argv, cwd=cwd, gentle=True, tap=first.take
-        )
-        return first.reason(error)
-
-    def committed(self, task: Task, commit_hash: str) -> None:
-        self._report(Committed(task, commit_hash))
-
     def task_finished(self, task: Task, error: str | None, seconds: float) -> None:
         self._report(TaskFinished(task, error, seconds))
 
@@ -105,42 +89,29 @@ class StreamFrontEnd:
         task: Task,
         argv: Sequence[str],
         *,
-        cwd: str | None = None,
         env: Mapping[str, str] | None = None,
-        gentle: bool = False,
-        tap: Callable[[str], None] | None = None,
     ) -> str | None:
         try:
-            # gentle is true only for git, which gets no controlling terminal
-            # and is stopped by the kernel if alr dies.
             process = await proc.start(
                 argv,
                 stdout=PIPE,
                 stderr=PIPE,
-                cwd=cwd,
                 env=None if env is None else {**os.environ, **env},
-                gentle=gentle,
-                new_session=gentle,
-                die_with_parent=gentle,
             )
         except OSError as exc:
             return proc.start_failed_text(argv[0], exc)
 
-        on_line = self._raw_line(task, tap)
-        # Bounded: an action's or git's own exit is its result, so a descendant
+        on_line = self._raw_line(task)
+        # Bounded: an action's own exit is its result, so a descendant
         # that outlives it and holds the pipes must not hold up the run.
         return await proc.finish(
-            process, _drain(process, on_line, on_line), gentle=gentle, bounded=True
+            process, _drain(process, on_line, on_line), bounded=True
         )
 
-    def _raw_line(
-        self, task: Task, tap: Callable[[str], None] | None = None
-    ) -> Callable[[bytes], None]:
+    def _raw_line(self, task: Task) -> Callable[[bytes], None]:
         def report_line(line: bytes) -> None:
             text = line.decode("utf-8", errors="replace").rstrip("\r\n")
             self._report(Activity(task, text))
-            if tap is not None:
-                tap(text)
 
         return report_line
 

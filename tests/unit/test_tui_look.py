@@ -36,8 +36,8 @@ DIALOGS: dict[str, Callable[[str], Screen[object]]] = {
 
 
 @pytest.fixture
-def app(git_repo: Path) -> AlrApp:
-    tasks_file = write_file(git_repo / "run" / "tasks.yaml", TASKS)
+def app(work_dir: Path) -> AlrApp:
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     return AlrApp(
         RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False)
     )

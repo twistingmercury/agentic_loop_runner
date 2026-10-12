@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args, sandbox_args
 from alr.tasks import Action
 
@@ -24,7 +23,6 @@ class RunSettings:
     tasks_file: str = ""
     sandbox_file: str = ""
     permissions: Permissions = Permissions.UNSET
-    commit_mode: CommitMode = CommitMode.NONE
     logging: bool = True
 
     reset_failed: bool = False

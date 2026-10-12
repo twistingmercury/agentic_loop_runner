@@ -16,9 +16,9 @@ TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 
 
 async def test_check_folder_returns_the_tasks_and_the_folders_sandbox(
-    git_repo: Path,
+    work_dir: Path,
 ) -> None:
-    folder = git_repo / "run" / "feat"
+    folder = work_dir / "run" / "feat"
     write_nested_file(folder / "tasks.yaml", TASKS)
     write_nested_file(folder / "sandbox.json", "{}")
 
@@ -30,46 +30,34 @@ async def test_check_folder_returns_the_tasks_and_the_folders_sandbox(
 
 
 async def test_check_folder_without_a_sandbox_json_has_no_sandbox_file(
-    git_repo: Path,
+    work_dir: Path,
 ) -> None:
-    write_nested_file(git_repo / "run" / "tasks.yaml", TASKS)
+    write_nested_file(work_dir / "run" / "tasks.yaml", TASKS)
 
-    assert (await check_folder(str(git_repo / "run"))).sandbox_file == ""
+    assert (await check_folder(str(work_dir / "run"))).sandbox_file == ""
 
 
-async def test_check_folder_without_tasks_yaml_is_a_usage_error(git_repo: Path) -> None:
+async def test_check_folder_without_tasks_yaml_is_a_usage_error(work_dir: Path) -> None:
     with pytest.raises(UsageError, match="no tasks.yaml"):
-        await check_folder(str(git_repo / "run"))
+        await check_folder(str(work_dir / "run"))
 
 
-async def test_check_folder_with_a_broken_task_file_is_an_error(git_repo: Path) -> None:
-    write_nested_file(git_repo / "run" / "tasks.yaml", "tasks: [")
+async def test_check_folder_with_a_broken_task_file_is_an_error(work_dir: Path) -> None:
+    write_nested_file(work_dir / "run" / "tasks.yaml", "tasks: [")
 
     with pytest.raises(TaskFileError):
-        await check_folder(str(git_repo / "run"))
+        await check_folder(str(work_dir / "run"))
 
 
 async def test_check_folder_accepts_a_failed_task_so_the_view_can_offer_a_reset(
-    git_repo: Path,
+    work_dir: Path,
 ) -> None:
     failed = TASKS + "    state: failed\n    error: x\n"
-    write_nested_file(git_repo / "run" / "tasks.yaml", failed)
+    write_nested_file(work_dir / "run" / "tasks.yaml", failed)
 
-    check = await check_folder(str(git_repo / "run"))
+    check = await check_folder(str(work_dir / "run"))
 
     assert [task.state for task in check.task_list.tasks] == ["failed"]
-
-
-async def test_check_folder_outside_a_repository_is_accepted(
-    outside: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(outside.parent))
-    monkeypatch.chdir(outside)
-    write_nested_file(outside / "tasks.yaml", TASKS)
-
-    check = await check_folder(str(outside))
-
-    assert check.tasks_file == str(outside / "tasks.yaml")
 
 
 def test_check_sandbox_accepts_a_json_object(tmp_path: Path) -> None:

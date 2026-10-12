@@ -10,7 +10,6 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from alr.engine.commit import CommitMode
 from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RunCancelledError, UsageError
@@ -43,12 +42,17 @@ def _version_line() -> str:
 
 
 _GATE_TIMEOUT_RENAMED = "--gate-timeout: renamed to --action-timeout"
+_COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in shared.after_task, see the HOWTO"
 
 
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     """Apply the startup checks in gralph's order, then start the dry run or the real run."""
     if args.gate_timeout is not None:
         print(f"error: {_GATE_TIMEOUT_RENAMED}", file=sys.stderr)
+        return UsageError.exit_code
+
+    if args.commit is not None:
+        print(f"error: {_COMMIT_REMOVED}", file=sys.stderr)
         return UsageError.exit_code
 
     if args.version:
@@ -74,7 +78,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             _report_missing(parser, missing)
             return UsageError.exit_code
 
-        commit_mode = CommitMode(args.commit)
         session = session_args(sandbox_settings, args.yolo, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -89,7 +92,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
                 tasks_file,
                 action_timeout,
                 sandbox_settings,
-                commit_mode is not CommitMode.NONE,
             ),
             stop,
         )
@@ -99,7 +101,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             tasks_file,
             action_timeout,
             session,
-            commit_mode,
             args.reset_failed,
             sandbox_settings=sandbox_settings,
             stop=stop,
@@ -135,7 +136,6 @@ def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> 
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
         permissions=_permissions(sandbox_file, args.yolo),
-        commit_mode=CommitMode(args.commit),
         action_timeout=args.action_timeout or "",
         reset_failed=args.reset_failed,
     )
@@ -216,13 +216,8 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run sessions with no sandbox and no permission checks (claude --dangerously-skip-permissions); what they do is on you",
     )
-    parser.add_argument(
-        "--commit",
-        metavar="",
-        choices=[mode.value for mode in CommitMode],
-        default=CommitMode.NONE.value,
-        help="When to commit with git: none (default) never touches git; task commits each completed task after its actions pass, with the task name as the message, and in a repository the work tree must be clean; run makes one commit after the last task, and a failed or stopped run makes no commit",
-    )
+    # Hidden: only here to refuse the old flag with a message naming the replacement.
+    parser.add_argument("--commit", default=None, help=argparse.SUPPRESS, metavar="")
     return parser
 
 
@@ -345,10 +340,10 @@ def _stop_once(task: asyncio.Task[None], stop: Stop) -> Callable[[int], None]:
     The first signal is also the one recorded in stop, so a later one cannot
     change the exit code.
 
-    A commit is stopped gently: git gets SIGTERM and a grace period before
-    SIGKILL. A second cancel would interrupt that wait and let alr exit with
-    git or one of its hooks still running, so an impatient second Ctrl-C is
-    ignored; the stop already under way is bounded by the grace period.
+    A stop kills each process group at once, but waits for the exit. A second
+    cancel would interrupt that wait and let alr exit with a child still
+    running, so an impatient second Ctrl-C is ignored; the stop already under
+    way is short.
     """
     stopped = False
 

@@ -3,7 +3,6 @@ import pytest
 from alr.errors import (
     FAILED_TASKS,
     AfterRunFailedError,
-    CommitFailedError,
     FailedTasksError,
     RefusedError,
     RunCancelledError,
@@ -32,17 +31,20 @@ def test_a_cancelled_run_is_a_run_error() -> None:
 def test_exit_codes() -> None:
     assert RunError("x").exit_code == 1
     assert UsageError("x").exit_code == 2
-    assert RefusedError("dirty-tree", "x").exit_code == 3
-    assert CommitFailedError("x").exit_code == 4
+    assert RefusedError("failed-tasks", "x").exit_code == 3
     assert AfterRunFailedError("x").exit_code == 4
 
 
-def test_a_refusal_names_its_reason_and_keeps_the_message() -> None:
-    error = RefusedError("dirty-tree", "--commit needs a clean work tree")
+def test_exit_codes_are_contiguous() -> None:
+    assert {RefusedError.exit_code, AfterRunFailedError.exit_code} == {3, 4}
 
-    assert str(error) == "refused: dirty-tree: --commit needs a clean work tree"
-    assert error.reason == "dirty-tree"
-    assert error.message == "--commit needs a clean work tree"
+
+def test_a_refusal_names_its_reason_and_keeps_the_message() -> None:
+    error = RefusedError("log-unwritable", "cannot write the log")
+
+    assert str(error) == "refused: log-unwritable: cannot write the log"
+    assert error.reason == "log-unwritable"
+    assert error.message == "cannot write the log"
 
 
 def test_failed_tasks_is_a_refusal() -> None:
@@ -53,10 +55,5 @@ def test_failed_tasks_is_a_refusal() -> None:
     assert str(error).startswith("refused: failed-tasks: fix the failed tasks")
 
 
-def test_a_commit_failure_is_a_run_error() -> None:
-    assert issubclass(CommitFailedError, RunError)
-
-
-def test_an_after_run_failure_is_a_run_error_but_not_a_commit_failure() -> None:
+def test_an_after_run_failure_is_a_run_error() -> None:
     assert issubclass(AfterRunFailedError, RunError)
-    assert not issubclass(AfterRunFailedError, CommitFailedError)

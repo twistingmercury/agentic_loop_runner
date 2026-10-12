@@ -16,9 +16,6 @@ from alr.errors import TaskFileError, quote
 PENDING = "pending"
 FAILED = "failed"
 COMPLETED = "completed"
-# Only ever logged, never saved: in `run` mode a task whose actions passed is not
-# complete until the one commit lands.
-PASSED = "passed"
 
 
 class RunResult(StrEnum):
@@ -26,7 +23,6 @@ class RunResult(StrEnum):
 
     COMPLETED = "completed"
     FAILED = "failed"
-    COMMIT_FAILED = "commit_failed"
     RUN_FAILED = "run_failed"
     STOPPED = "stopped"
 
@@ -56,8 +52,7 @@ _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 # double-quoted one, which escapes them.
 _UNICODE_BREAKS = frozenset("\x85\u2028\u2029")
 
-# A name becomes a commit subject in git's argv, where a NUL crashes the call and
-# other control characters garble the log; a tab is ordinary spacing.
+# Control characters in a name garble the log; a tab is ordinary spacing.
 _CONTROL = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f]")
 
 
@@ -285,7 +280,7 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     where = _where(i, task_id)
     name = _text(where, fields, "name", required=True)
 
-    # The name becomes a commit subject and a one-line log field; splitlines
+    # The name becomes a one-line log field; splitlines
     # knows every Unicode line break, and drops a trailing one, hence the compare.
     if name.splitlines() != [name]:
         raise TaskFileError(f"{where}: name: must be a single line")

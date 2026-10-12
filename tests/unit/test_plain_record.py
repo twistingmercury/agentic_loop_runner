@@ -7,21 +7,15 @@ from pathlib import Path
 
 import pytest
 from helpers import (
-    git,
     kill_holder_and_let_pipes_close,
     run_loop,
-    spy_on_start,
-    wait_for_text,
 )
 
 from alr.engine import proc
-from alr.engine.commit import CommitMode, open_repo
 from alr.errors import RunError
 from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     Event,
     ActionFinished,
     ActionStarted,
@@ -30,7 +24,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import COMPLETED, PASSED, Action, RunResult, Shared, Task, TaskList
+from alr.tasks import Action, RunResult, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -44,15 +38,11 @@ def _task_list(*task_actions: Action) -> TaskList:
     )
 
 
-async def _run(
-    tasks_file: Path, *task_actions: Action, repo_wanted: bool = False
-) -> list[Event]:
+async def _run(tasks_file: Path, *task_actions: Action) -> list[Event]:
     events: list[Event] = []
-    repo = await open_repo(str(tasks_file)) if repo_wanted else None
     await run_loop(
         _task_list(*task_actions),
         tasks_file,
-        repo=repo,
         front_end=PlainFrontEnd(events.append),
     )
     return events
@@ -87,35 +77,6 @@ async def test_each_step_records_its_event(tmp_path: Path) -> None:
     assert (done.result, done.exit_code) == (RunResult.COMPLETED, 0)
 
 
-async def test_a_run_mode_task_is_passed_until_the_commit_completes_it(
-    git_repo: Path,
-) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    events: list[Event] = []
-
-    await run_loop(
-        _task_list(Action(command="echo work > one.txt")),
-        tasks_file,
-        repo=await open_repo(str(tasks_file)),
-        front_end=PlainFrontEnd(events.append),
-        commit_mode=CommitMode.RUN,
-    )
-
-    [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.task.state == PASSED
-
-
-async def test_a_task_mode_task_is_completed_when_it_finishes(git_repo: Path) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(
-        tasks_file, Action(command="echo work > one.txt"), repo_wanted=True
-    )
-
-    [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.task.state == COMPLETED
-
-
 async def test_action_started_is_reported_once_after_its_marker_and_before_it_finishes(
     tmp_path: Path,
 ) -> None:
@@ -129,22 +90,6 @@ async def test_action_started_is_reported_once_after_its_marker_and_before_it_fi
     assert events.index(started) == marker + 1
     [finished] = [e for e in events if isinstance(e, ActionFinished)]
     assert events.index(started) < events.index(finished)
-
-
-async def test_commit_started_is_reported_once_after_its_marker_and_before_committed(
-    git_repo: Path,
-) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(
-        tasks_file, Action(command="echo work > one.txt"), repo_wanted=True
-    )
-
-    [started] = [e for e in events if isinstance(e, CommitStarted)]
-    marker = events.index(Activity(started.task, "→ commit First"))
-    assert events.index(started) == marker + 1
-    [committed] = [e for e in events if isinstance(e, Committed)]
-    assert events.index(started) < events.index(committed)
 
 
 async def test_claude_stdout_lines_arrive_in_order_with_the_last_unterminated(
@@ -273,87 +218,6 @@ async def test_action_stderr_is_decoded_leniently(tmp_path: Path) -> None:
     assert "bad\ufffd" in _lines(events)
 
 
-def _install_hook(repo: Path, script: str) -> None:
-    hook = repo / ".git" / "hooks" / "pre-commit"
-    hook.write_text(f"#!/bin/sh\n{script}\n", encoding="utf-8")
-    hook.chmod(0o700)
-
-
-async def test_commit_marker_and_hash_are_recorded(git_repo: Path) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(
-        tasks_file, Action(command="echo work > one.txt"), repo_wanted=True
-    )
-
-    assert "→ commit First" in _lines(events)
-    [committed] = [e for e in events if isinstance(e, Committed)]
-    assert committed.commit_hash == git(git_repo, "rev-parse", "HEAD").strip()
-
-
-async def test_git_output_reaches_the_terminal_and_the_record_after_the_commit_marker(
-    git_repo: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    _install_hook(git_repo, "echo hook-out; echo hook-err >&2")
-    tasks_file = git_repo / "run" / "tasks.yaml"
-
-    events = await _run(
-        tasks_file, Action(command="echo work > one.txt"), repo_wanted=True
-    )
-
-    captured = capfd.readouterr()
-    # git itself sends a hook's stdout to stderr; the commit summary is stdout.
-    assert "hook-out\nhook-err\n" in captured.err
-    assert "hook-err" not in captured.out
-    assert "file changed" in captured.out
-    assert "file changed" not in captured.err
-    lines = _lines(events)
-    after_marker = lines[lines.index("→ commit First") + 1 :]
-    assert {"hook-out", "hook-err"} <= set(after_marker)
-    assert any("file changed" in line for line in after_marker)
-
-
-async def test_failing_git_command_records_its_output_and_returns_the_exit_text(
-    git_repo: Path,
-) -> None:
-    _install_hook(git_repo, "echo hook-refused >&2; exit 1")
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    events: list[Event] = []
-
-    with pytest.raises(RunError):
-        await run_loop(
-            _task_list(Action(command="echo work > one.txt")),
-            tasks_file,
-            repo=await open_repo(str(tasks_file)),
-            front_end=PlainFrontEnd(events.append),
-        )
-
-    lines = _lines(events)
-    assert "hook-refused" in lines[lines.index("→ commit First") + 1 :]
-    [finished] = [e for e in events if isinstance(e, TaskFinished)]
-    assert finished.error == "task 1: First failed: commit failed: hook-refused"
-    [done] = [e for e in events if isinstance(e, RunDone)]
-    assert (done.result, done.exit_code) == (RunResult.COMMIT_FAILED, 4)
-
-
-async def test_cancel_during_git_stops_the_group_gently(tmp_path: Path) -> None:
-    ready, stopped = tmp_path / "ready", tmp_path / "stopped"
-    script = f"trap 'echo bye > {stopped}; exit 0' TERM; echo ready > {ready}; sleep 60 & wait"
-    task = Task(id=1, name="First", prompt="p1")
-    run = asyncio.ensure_future(
-        PlainFrontEnd().run_git(task, ["sh", "-c", script], str(tmp_path))
-    )
-    await wait_for_text(ready)
-
-    run.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await run
-
-    assert stopped.read_text(encoding="utf-8") == "bye\n", (
-        "SIGTERM must reach the child before any SIGKILL"
-    )
-
-
 async def test_no_recorder_prints_the_same_output(
     tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
@@ -396,7 +260,7 @@ async def test_one_huge_line_without_a_newline_is_one_activity_and_unchanged_on_
 async def test_a_action_that_exits_while_a_background_process_holds_its_pipes_returns_after_the_grace_period(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
     pid_file = tmp_path / "holder.pid"
     action = Action(command=f"sleep 30 & echo $! > {pid_file}; echo hi")
     started = time.monotonic()
@@ -416,7 +280,7 @@ async def test_a_action_that_exits_while_a_background_process_holds_its_pipes_re
 async def test_a_action_that_exited_in_time_does_not_time_out_on_an_escaped_descendant(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
     pid_file = tmp_path / "escaped.pid"
     # setsid takes the sleeper out of the group a time limit would stop.
     action = Action(
@@ -472,44 +336,3 @@ async def test_a_action_reads_end_of_file_from_stdin(
 
     assert "got=\n" in capfd.readouterr().out
     assert "got=" in _lines(events)
-
-
-async def test_a_git_command_reads_end_of_file_from_stdin(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
-) -> None:
-    task = Task(id=1, name="First", prompt="p1")
-
-    # cat stands in for git: it ends only when stdin does.
-    error = await asyncio.wait_for(
-        PlainFrontEnd().run_git(task, ["sh", "-c", "cat; echo done"], str(tmp_path)),
-        10,
-    )
-
-    assert error is None
-    assert capfd.readouterr().out == "done\n"
-
-
-async def test_git_starts_in_its_own_session_and_dies_with_alr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls = spy_on_start(monkeypatch)
-    task = Task(1, "First", "p1")
-
-    await PlainFrontEnd().run_git(task, ["true"], str(tmp_path))
-
-    [call] = calls
-    assert call["new_session"] is True
-    assert call["die_with_parent"] is True
-
-
-async def test_a_action_starts_without_the_git_guards(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = spy_on_start(monkeypatch)
-    task = Task(1, "First", "p1")
-
-    await PlainFrontEnd().run_action(task, Action(command="true"), {})
-
-    [call] = calls
-    assert not call.get("new_session")
-    assert not call.get("die_with_parent")

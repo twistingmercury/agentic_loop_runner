@@ -9,25 +9,19 @@ import pytest
 from helpers import (
     cancel_run,
     fake_claude_records,
-    git,
     kill_holder_and_let_pipes_close,
     run_loop,
-    spy_on_start,
     wait_for_text,
     write_file,
 )
 
 from alr.engine import loop, proc
 from alr.engine.actions import action_env
-from alr.engine.commit import Repo, open_repo
-from alr.engine.frontend import FirstLine
 from alr.engine.sandbox import bypass_args
 from alr.plain.frontend import PlainFrontEnd
 from alr.errors import RunError
 from alr.record.events import (
     Activity,
-    CommitStarted,
-    Committed,
     Event,
     ActionFinished,
     ActionStarted,
@@ -60,7 +54,6 @@ async def _run(
     *,
     action_timeout: str = "",
     session_args: list[str] | None = None,
-    repo: Repo | None = None,
     events: list[Event] | None = None,
 ) -> list[Event]:
     events = [] if events is None else events
@@ -69,7 +62,6 @@ async def _run(
         tasks_file,
         action_timeout=action_timeout,
         session_args=session_args,
-        repo=repo,
         front_end=StreamFrontEnd(events.append),
     )
     return events
@@ -361,57 +353,6 @@ async def test_cancel_during_a_action_reports_no_action_finished(
     assert _of(events, ActionFinished) == []
 
 
-async def test_commit_arrives_as_activity_and_carries_the_new_hash(
-    git_repo: Path,
-) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    repo = await open_repo(str(tasks_file))
-
-    events = await _run(
-        _task_list(Action(command="echo work > one.txt")), tasks_file, repo=repo
-    )
-
-    assert "→ commit First" in _lines(events)
-    assert "1 file changed" in "\n".join(_lines(events))
-    assert _kinds(events)[-3:] == [Committed, TaskFinished, RunDone]
-    [committed] = _of(events, Committed)
-    assert committed.commit_hash == git(git_repo, "rev-parse", "HEAD").strip()
-    assert committed.task.id == 1
-
-
-async def test_nothing_staged_reports_no_committed(git_repo: Path) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    repo = await open_repo(str(tasks_file))
-
-    events = await _run(_task_list(), tasks_file, repo=repo)
-
-    assert _of(events, Committed) == []
-    assert "→ commit First" not in _lines(events)
-
-
-async def test_a_failed_commit_reports_gits_first_line_as_the_reason(
-    git_repo: Path,
-) -> None:
-    hook = git_repo / ".git" / "hooks" / "pre-commit"
-    hook.parent.mkdir(exist_ok=True)
-    hook.write_text("#!/bin/sh\necho '  hook-says-no  '\necho second\nexit 1\n")
-    hook.chmod(0o700)
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    repo = await open_repo(str(tasks_file))
-    events: list[Event] = []
-
-    with pytest.raises(RunError):
-        await _run(
-            _task_list(Action(command="echo work > one.txt")),
-            tasks_file,
-            repo=repo,
-            events=events,
-        )
-
-    [finished] = _of(events, TaskFinished)
-    assert finished.error == "task 1: First failed: commit failed: hook-says-no"
-
-
 async def test_action_started_is_reported_once_after_its_marker_and_before_it_finishes(
     tmp_path: Path,
 ) -> None:
@@ -427,27 +368,10 @@ async def test_action_started_is_reported_once_after_its_marker_and_before_it_fi
     assert events.index(started) < events.index(_of(events, ActionFinished)[0])
 
 
-async def test_commit_started_is_reported_once_after_its_marker_and_before_committed(
-    git_repo: Path,
-) -> None:
-    tasks_file = git_repo / "run" / "tasks.yaml"
-    repo = await open_repo(str(tasks_file))
-
-    events = await _run(
-        _task_list(Action(command="echo work > one.txt")), tasks_file, repo=repo
-    )
-
-    [started] = _of(events, CommitStarted)
-    assert started.task.id == 1
-    marker = events.index(Activity(started.task, "→ commit First"))
-    assert events.index(started) == marker + 1
-    assert events.index(started) < events.index(_of(events, Committed)[0])
-
-
 async def test_a_action_that_exits_while_a_background_process_holds_its_pipes_returns_after_the_grace_period(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
     pid_file = tmp_path / "holder.pid"
     action = Action(command=f"sleep 30 & echo $! > {pid_file}; echo hi")
     started = time.monotonic()
@@ -469,7 +393,7 @@ async def test_a_action_that_exits_while_a_background_process_holds_its_pipes_re
 async def test_a_action_that_exited_in_time_does_not_time_out_on_an_escaped_descendant(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(proc, "_GENTLE_GRACE", 0.2)
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
     pid_file = tmp_path / "escaped.pid"
     # setsid takes the sleeper out of the group a time limit would stop.
     action = Action(
@@ -504,90 +428,6 @@ async def test_a_action_reads_end_of_file_from_stdin(tmp_path: Path) -> None:
     )
 
     assert "got=" in _lines(events)
-
-
-async def test_a_git_command_reads_end_of_file_from_stdin(tmp_path: Path) -> None:
-    events: list[Event] = []
-    task = Task(1, "First", "p1")
-
-    # cat stands in for git: it ends only when stdin does.
-    error = await asyncio.wait_for(
-        StreamFrontEnd(events.append).run_git(
-            task, ["sh", "-c", "cat; echo done"], str(tmp_path)
-        ),
-        10,
-    )
-
-    assert error is None
-    assert _lines(events) == ["done"]
-
-
-def test_first_line_keeps_the_first_non_empty_line() -> None:
-    first = FirstLine()
-
-    for line in ["", "   ", "  hook-says-no  ", "second line"]:
-        first.take(line)
-
-    assert first.reason("exit status 1") == "hook-says-no"
-
-
-def test_first_line_trims_a_long_line_to_200_characters() -> None:
-    first = FirstLine()
-
-    first.take("x" * 300)
-
-    assert first.reason("exit status 1") == "x" * 200
-
-
-def test_first_line_keeps_the_first_200_characters_of_a_mixed_line() -> None:
-    first = FirstLine()
-
-    first.take("a" * 200 + "b" * 100)
-
-    assert first.reason("exit status 1") == "a" * 200
-
-
-def test_first_line_reason_is_none_for_success() -> None:
-    first = FirstLine()
-    first.take("warning: something")
-
-    assert first.reason(None) is None
-
-
-def test_first_line_reason_falls_back_to_the_exit_text() -> None:
-    first = FirstLine()
-
-    first.take("")
-
-    assert first.reason("exit status 1") == "exit status 1"
-
-
-async def test_git_starts_in_its_own_session_and_dies_with_alr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    events: list[Event] = []
-    calls = spy_on_start(monkeypatch)
-    task = Task(1, "First", "p1")
-
-    await StreamFrontEnd(events.append).run_git(task, ["true"], str(tmp_path))
-
-    [call] = calls
-    assert call["new_session"] is True
-    assert call["die_with_parent"] is True
-
-
-async def test_a_action_starts_without_the_git_guards(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[Event] = []
-    calls = spy_on_start(monkeypatch)
-    task = Task(1, "First", "p1")
-
-    await StreamFrontEnd(events.append).run_action(task, Action(command="true"), {})
-
-    [call] = calls
-    assert not call.get("new_session")
-    assert not call.get("die_with_parent")
 
 
 HOSTILE_NAME = 'fix "auth"; $(touch pwned) `id`'

@@ -6,31 +6,6 @@ from typing import Protocol
 
 from alr.tasks import Action, RunResult, Task
 
-# Long enough to name what went wrong, short enough for one error line; the
-# task's own log keeps the full text.
-_REASON_LIMIT = 200
-
-
-class FirstLine:
-    """The first non-empty line a command printed, kept so a failure can say why."""
-
-    def __init__(self) -> None:
-        self._text = ""
-
-    def take(self, line: str) -> None:
-        """Keep line, trimmed, unless an earlier line was already kept."""
-        if self._text:
-            return
-
-        self._text = line.strip()[:_REASON_LIMIT]
-
-    def reason(self, error: str | None) -> str | None:
-        """Return the failure's reason: None for success, else the first line printed, else the exit text."""
-        if error is None:
-            return None
-
-        return self._text or error
-
 
 @dataclass(frozen=True)
 class SessionResult:
@@ -86,18 +61,6 @@ class FrontEnd(Protocol):
         seconds: float,
     ) -> None:
         """Note an action's result and duration."""
-        ...
-
-    def commit_started(self, task: Task) -> None:
-        """Note that something is staged and a commit follows."""
-        ...
-
-    async def run_git(self, task: Task, argv: Sequence[str], cwd: str) -> str | None:
-        """Run this git command; return the exit."""
-        ...
-
-    def committed(self, task: Task, commit_hash: str) -> None:
-        """Note the new commit hash."""
         ...
 
     def task_finished(self, task: Task, error: str | None, seconds: float) -> None:

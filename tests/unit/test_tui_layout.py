@@ -34,8 +34,8 @@ def _tasks(*names: str) -> str:
     return f"shared:\n  prompt: p\n  after_task: []\ntasks:\n{rows}"
 
 
-def _app(repo: Path, *names: str) -> AlrApp:
-    tasks_file = write_file(repo / "run" / "tasks.yaml", _tasks(*(names or ("A",))))
+def _app(folder: Path, *names: str) -> AlrApp:
+    tasks_file = write_file(folder / "run" / "tasks.yaml", _tasks(*(names or ("A",))))
     return AlrApp(
         RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False)
     )
@@ -50,17 +50,13 @@ def _name_cell(app: AlrApp, row: int = 0) -> str:
     return str(app.query_one(TasksPane).get_cell_at((row, 2)))
 
 
-@pytest.mark.parametrize(
-    ("widget", "text"), [("#commit-label", "Commit:"), ("#logging-label", "Logging:")]
-)
-async def test_the_settings_in_the_strip_are_labelled(
-    git_repo: Path, widget: str, text: str
-) -> None:
-    app = _app(git_repo)
+async def test_the_logging_setting_in_the_strip_is_labelled(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.pause()
 
-        assert str(app.query_one(widget, Static).render()).strip() == text
+        label = app.query_one("#logging-label", Static)
+        assert str(label.render()).strip() == "Logging:"
 
 
 @pytest.mark.parametrize(
@@ -68,32 +64,32 @@ async def test_the_settings_in_the_strip_are_labelled(
     [
         ("#tasks", "Tasks"),
         ("#activity", "Task: 1 A"),
-        ("#actions", "Actions & commits"),
+        ("#actions", "Actions"),
     ],
 )
-async def test_the_panes_have_titles(git_repo: Path, pane: str, title: str) -> None:
-    app = _app(git_repo)
+async def test_the_panes_have_titles(work_dir: Path, pane: str, title: str) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.pause()
 
         assert app.query_one(pane).border_title == title
 
 
-async def test_a_label_lines_up_with_its_widget(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_a_label_lines_up_with_its_widget(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
-        label = app.query_one("#commit-label").region
-        select = app.query_one("#commit", Select).region
+        label = app.query_one("#logging-label").region
+        select = app.query_one("#logging", Select).region
         assert (label.y, label.height) == (select.y, select.height)
 
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
 async def test_the_tasks_pane_is_wider_than_the_actions_pane(
-    git_repo: Path, size: tuple[int, int]
+    work_dir: Path, size: tuple[int, int]
 ) -> None:
-    app = _app(git_repo)
+    app = _app(work_dir)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
 
@@ -106,9 +102,9 @@ async def test_the_tasks_pane_is_wider_than_the_actions_pane(
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
 async def test_tasks_and_actions_share_the_top_row_above_the_activity_pane(
-    git_repo: Path, size: tuple[int, int]
+    work_dir: Path, size: tuple[int, int]
 ) -> None:
-    app = _app(git_repo)
+    app = _app(work_dir)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
 
@@ -122,9 +118,9 @@ async def test_tasks_and_actions_share_the_top_row_above_the_activity_pane(
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
 async def test_the_activity_pane_spans_the_width_and_the_panes_fit_the_screen(
-    git_repo: Path, size: tuple[int, int]
+    work_dir: Path, size: tuple[int, int]
 ) -> None:
-    app = _app(git_repo)
+    app = _app(work_dir)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
 
@@ -136,8 +132,8 @@ async def test_the_activity_pane_spans_the_width_and_the_panes_fit_the_screen(
             assert screen.contains_region(app.query_one(pane).region)
 
 
-async def test_the_actions_title_is_fully_visible_at_80_columns(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_the_actions_title_is_fully_visible_at_80_columns(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
@@ -145,8 +141,8 @@ async def test_the_actions_title_is_fully_visible_at_80_columns(git_repo: Path) 
         assert actions.region.width >= len(actions.border_title) + 4
 
 
-async def test_a_forty_character_name_is_whole_at_110_columns(git_repo: Path) -> None:
-    app = _app(git_repo, FORTY)
+async def test_a_forty_character_name_is_whole_at_110_columns(work_dir: Path) -> None:
+    app = _app(work_dir, FORTY)
     async with app.run_test(size=(110, 32)) as pilot:
         await _loaded(app)
         await pilot.pause()
@@ -155,9 +151,9 @@ async def test_a_forty_character_name_is_whole_at_110_columns(git_repo: Path) ->
 
 
 async def test_a_name_longer_than_the_column_ends_with_an_ellipsis(
-    git_repo: Path,
+    work_dir: Path,
 ) -> None:
-    app = _app(git_repo, SIXTY)
+    app = _app(work_dir, SIXTY)
     async with app.run_test(size=(110, 32)) as pilot:
         await _loaded(app)
         await pilot.pause()
@@ -167,8 +163,8 @@ async def test_a_name_longer_than_the_column_ends_with_an_ellipsis(
         assert SIXTY.startswith(cell.removesuffix("…"))
 
 
-async def test_the_cut_follows_a_narrower_terminal(git_repo: Path) -> None:
-    app = _app(git_repo, FORTY)
+async def test_the_cut_follows_a_narrower_terminal(work_dir: Path) -> None:
+    app = _app(work_dir, FORTY)
     async with app.run_test(size=(80, 24)) as pilot:
         await _loaded(app)
         await pilot.pause()
@@ -176,8 +172,8 @@ async def test_the_cut_follows_a_narrower_terminal(git_repo: Path) -> None:
         assert _name_cell(app).endswith("…")
 
 
-async def test_the_summary_leaves_a_gap_above_its_button(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_the_summary_leaves_a_gap_above_its_button(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.pause()
         app.push_screen(SummaryDialog("done", 1.0, None))
@@ -188,8 +184,8 @@ async def test_the_summary_leaves_a_gap_above_its_button(git_repo: Path) -> None
         assert close.y >= message.bottom + 1
 
 
-async def test_the_menu_is_one_row_inside_an_80_column_screen(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_the_menu_is_one_row_inside_an_80_column_screen(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
@@ -198,8 +194,8 @@ async def test_the_menu_is_one_row_inside_an_80_column_screen(git_repo: Path) ->
         assert max(region.right for region in regions) <= 80
 
 
-async def test_the_strip_keeps_start_on_an_80_column_screen(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_the_strip_keeps_start_on_an_80_column_screen(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
@@ -208,9 +204,9 @@ async def test_the_strip_keeps_start_on_an_80_column_screen(git_repo: Path) -> N
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
 async def test_the_columns_leave_room_for_the_scrollbar(
-    git_repo: Path, size: tuple[int, int]
+    work_dir: Path, size: tuple[int, int]
 ) -> None:
-    app = _app(git_repo, *(f"{SIXTY} {n}" for n in range(30)))
+    app = _app(work_dir, *(f"{SIXTY} {n}" for n in range(30)))
     async with app.run_test(size=size) as pilot:
         await _loaded(app)
         await pilot.pause()
@@ -233,9 +229,9 @@ MENU_LABELS = {
 
 @pytest.mark.parametrize("size", SIZES, ids=SIZE_IDS)
 async def test_the_menu_buttons_carry_their_hotkeys(
-    git_repo: Path, size: tuple[int, int]
+    work_dir: Path, size: tuple[int, int]
 ) -> None:
-    app = _app(git_repo)
+    app = _app(work_dir)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
 
@@ -244,16 +240,16 @@ async def test_the_menu_buttons_carry_their_hotkeys(
         assert str(app.query_one("#start", Button).label) == "(s)tart"
 
 
-async def test_there_is_no_footer(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_there_is_no_footer(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
         assert not app.query(Footer)
 
 
-async def test_the_menu_row_and_start_fit_inside_80_columns(git_repo: Path) -> None:
-    app = _app(git_repo)
+async def test_the_menu_row_and_start_fit_inside_80_columns(work_dir: Path) -> None:
+    app = _app(work_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 

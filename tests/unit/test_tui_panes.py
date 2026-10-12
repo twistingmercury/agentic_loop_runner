@@ -9,7 +9,6 @@ from textual.widgets.data_table import ColumnKey
 
 from alr.record.events import (
     Activity,
-    Committed,
     ActionFinished,
     RunDone,
     RunResult,
@@ -19,7 +18,6 @@ from alr.record.events import (
 from alr.tasks import (
     COMPLETED,
     FAILED,
-    PASSED,
     RUN_SCOPE,
     Action,
     Shared,
@@ -57,53 +55,16 @@ async def test_tasks_pane_shows_each_task_and_its_state() -> None:
         assert pane.get_row_at(1)[0] == "·"
 
 
-async def test_tasks_pane_shows_a_passed_task_with_its_own_symbol() -> None:
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        pane.load(TASK_LIST)
-
-        pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
-
-        assert pane.get_row_at(0)[0] == "●"
-
-
-def _pass_both(pane: TasksPane) -> None:
+def _complete_both(pane: TasksPane) -> None:
     pane.load(TASK_LIST)
-    pane.apply(TaskFinished(Task(1, "First", "p", state=PASSED), None, 1.0))
-    pane.apply(TaskFinished(Task(2, "Second", "p", state=PASSED), None, 1.0))
+    pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
+    pane.apply(TaskFinished(Task(2, "Second", "p", state=COMPLETED), None, 1.0))
 
 
-@pytest.mark.parametrize(
-    ("result", "code"),
-    [(RunResult.FAILED, 1), (RunResult.STOPPED, 130)],
-)
-async def test_tasks_pane_takes_back_passed_rows_when_the_run_does_not_complete(
-    result: RunResult, code: int
-) -> None:
+async def test_tasks_pane_keeps_rows_completed_when_after_run_fails() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
-        _pass_both(pane)
-
-        pane.apply(RunDone("boom", 1.0, result, code))
-
-        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "·"]
-
-
-async def test_tasks_pane_marks_the_commit_failure_on_the_last_task() -> None:
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-
-        pane.apply(RunDone("commit failed", 1.0, RunResult.COMMIT_FAILED, 4))
-
-        assert [pane.get_row_at(i)[0] for i in range(2)] == ["·", "✖"]
-
-
-async def test_tasks_pane_shows_run_mode_rows_completed_when_after_run_fails() -> None:
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
+        _complete_both(pane)
 
         pane.apply(RunDone("action failed", 1.0, RunResult.RUN_FAILED, 4))
 
@@ -146,67 +107,21 @@ async def test_actions_pane_shows_an_after_run_action_result() -> None:
         assert shown_text(pane) == ["0. ✖ z 0.2s"]
 
 
-async def test_tasks_pane_keeps_passed_rows_once_the_run_completes() -> None:
+async def test_tasks_pane_keeps_completed_rows_once_the_run_completes() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
-        _pass_both(pane)
+        _complete_both(pane)
 
         pane.apply(RunDone(None, 1.0, RunResult.COMPLETED, 0))
 
-        assert [pane.get_row_at(i)[0] for i in range(2)] == ["●", "●"]
+        assert [pane.get_row_at(i)[0] for i in range(2)] == ["✔", "✔"]
 
 
 def _rows(pane: TasksPane) -> list[str]:
     return [pane.get_row_at(i)[0] for i in range(2)]
 
 
-async def test_tasks_pane_keeps_run_rows_completed_after_a_stop_past_the_commit() -> (
-    None
-):
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
-
-        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
-
-        assert _rows(pane) == ["✔", "✔"]
-
-
-async def test_tasks_pane_takes_back_run_rows_when_the_save_after_the_commit_fails() -> (
-    None
-):
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        _pass_both(pane)
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
-
-        pane.apply(RunDone("not saved", 1.0, RunResult.COMMIT_FAILED, 4))
-
-        assert _rows(pane) == ["·", "·"], (
-            "the commit landed, so no row is the failed one"
-        )
-
-
-async def test_tasks_pane_keeps_a_task_mode_row_completed_after_a_stop_past_the_commit() -> (
-    None
-):
-    pane = TasksPane()
-    async with Host(pane).run_test():
-        pane.load(TASK_LIST)
-        pane.apply(TaskStarted(FIRST))
-        pane.apply(TaskFinished(Task(1, "First", "p", state=COMPLETED), None, 1.0))
-        pane.apply(TaskStarted(SECOND))
-        pane.apply(Committed(SECOND, "a1b2c3d4e5f6"))
-
-        pane.apply(RunDone("stopped", 1.0, RunResult.STOPPED, 130))
-
-        assert _rows(pane) == ["✔", "✔"]
-
-
-async def test_tasks_pane_returns_the_running_task_to_pending_after_a_stop_before_the_commit() -> (
-    None
-):
+async def test_tasks_pane_returns_the_running_task_to_pending_after_a_stop() -> None:
     pane = TasksPane()
     async with Host(pane).run_test():
         pane.load(TASK_LIST)
@@ -576,21 +491,19 @@ async def test_tasks_pane_announces_the_highlighted_task_with_its_name() -> None
         assert seen[-1] == (2, "Second")
 
 
-async def test_actions_pane_lists_action_results_and_commit_hashes() -> None:
+async def test_actions_pane_lists_action_results() -> None:
     pane = ActionsPane()
     action = Action(command="ruff check")
     async with Host(pane).run_test() as pilot:
         pane.apply(ActionFinished(FIRST, action, "10m", None, False, 0.4))
         pane.apply(ActionFinished(FIRST, action, "10m", "exit status 1", False, 0.2))
         pane.apply(ActionFinished(FIRST, action, "1s", None, True, 1.0))
-        pane.apply(Committed(FIRST, "a1b2c3d4e5f6"))
         await pilot.pause()
 
         assert shown_text(pane) == [
             "1. ✔ ruff check 0.4s",
             "1. ✖ ruff check 0.2s",
             "1. ⏱ ruff check 1.0s",
-            "1. commit a1b2c3d",
         ]
 
 

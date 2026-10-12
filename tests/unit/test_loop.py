@@ -18,10 +18,9 @@ from helpers import (
 
 from alr import tasks
 from alr.engine import loop
-from alr.engine.commit import CommitMode
 from alr.engine.stop import Stop
 from alr.errors import (
-    CommitFailedError,
+    AfterRunFailedError,
     FailedTasksError,
     RefusedError,
     RunError,
@@ -58,10 +57,6 @@ TWO_PENDING_YAML = (
     "  - {id: 1, name: First, prompt: p1, state: pending}\n"
     "  - {id: 2, name: Second, prompt: p2, state: pending}\n"
 )
-
-
-def test_run_options_default_to_never_committing() -> None:
-    assert loop.RunOptions("tasks.yaml", "", [], "logs").commit_mode is CommitMode.NONE
 
 
 async def _wait_until(condition: Callable[[], bool], what: str) -> None:
@@ -667,10 +662,10 @@ class _BrokenLogFrontEnd(_RecordingFrontEnd):
 async def test_a_run_log_error_does_not_hide_the_error_that_ended_the_run(
     record: Path, tmp_path: Path
 ) -> None:
-    crash = CommitFailedError("commit failed: hook said no")
+    crash = AfterRunFailedError("action failed: hook said no")
     front_end = _BrokenLogFrontEnd(crash=crash)
 
-    with pytest.raises(CommitFailedError) as exc:
+    with pytest.raises(AfterRunFailedError) as exc:
         await run_loop(
             tasks.parse_tasks(TWO_PENDING_YAML),
             tmp_path / "tasks.yaml",

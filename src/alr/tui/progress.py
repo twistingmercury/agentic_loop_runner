@@ -6,7 +6,6 @@ from collections.abc import Callable
 from alr.durations import format_elapsed
 from alr.engine.actions import first_line
 from alr.record.events import (
-    CommitStarted,
     Event,
     ActionStarted,
     RunDone,
@@ -55,10 +54,8 @@ class Progress:
                 self._start_step("session", now)
             case ActionStarted(task=task, action=action):
                 self._start_step(self._action_label(task.id, action.command), now)
-            case CommitStarted():
-                self._start_step("commit", now)
             case TaskFinished():
-                # The engine now stages and diffs; no step is running, so none is shown.
+                # No step runs between a task's end and the next one's start, so none is shown.
                 self._step = ""
             case RunDone():
                 self._done = True

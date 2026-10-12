@@ -15,7 +15,6 @@ from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine import proc
-from alr.engine.commit import CommitMode, work_tree_root
 from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
@@ -75,12 +74,9 @@ class AlrApp(App[None]):
     }
     Button:focus { background: $accent; text-style: bold; }
     #start { margin: 1 0; }
-    #commit-box { width: 27; height: auto; }
-    #commit-row, #logging-row { width: auto; height: auto; }
+    #logging-row { width: auto; height: auto; }
     .field { width: auto; height: 3; padding: 0 1; content-align: left middle; }
-    #commit { width: 18; }
     #logging { width: 12; }
-    #commit-note { height: auto; padding: 0 1; }
     #permissions { width: auto; padding: 1 2; }
     #reason { height: auto; padding: 0 1; color: $warning; }
     #panes { height: 1fr; }
@@ -125,30 +121,10 @@ class AlrApp(App[None]):
         self._clock = clock
         self._progress: Progress | None = None
         self._ticker: Timer | None = None
-        self.in_work_tree: bool | None = None
-        """None until the launch check has answered."""
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="strip"):
-            with Vertical(id="commit-box"):
-                with Horizontal(id="commit-row"):
-                    yield Static("Commit:", id="commit-label", classes="field")
-                    yield Select(
-                        [
-                            ("none", CommitMode.NONE),
-                            ("per task", CommitMode.TASK),
-                            ("after all", CommitMode.RUN),
-                        ],
-                        value=self.settings.commit_mode,
-                        allow_blank=False,
-                        id="commit",
-                    )
-                note = Static(
-                    "no git repository: nothing will be committed", id="commit-note"
-                )
-                note.display = False
-                yield note
             yield Static("", id="permissions")
             with Horizontal(id="logging-row"):
                 yield Static("Logging:", id="logging-label", classes="field")
@@ -183,37 +159,6 @@ class AlrApp(App[None]):
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
         self.run_worker(self.launch_sequence(), exit_on_error=False)
-
-    def _look_for_work_tree(self) -> None:
-        """Start the work-tree lookup, but only once a commit mode asks and nothing has answered.
-
-        With `none` git is never touched, so the lookup waits for the user to
-        pick a mode that commits. A failed lookup leaves the answer open; Start
-        opens the repository itself and reports its error.
-        """
-        if (
-            self.settings.commit_mode is CommitMode.NONE
-            or self.in_work_tree is not None
-        ):
-            return
-
-        self.run_worker(self._check_work_tree(), exit_on_error=False)
-
-    async def _check_work_tree(self) -> None:
-        """Learn whether a work tree is around, so the note can say nothing will be committed."""
-        self.in_work_tree = await work_tree_root() is not None
-        self._show_commit_note()
-
-    def _show_commit_note(self) -> None:
-        """Warn only when a commit was asked for and there is no repository to hold it.
-
-        Decided from the current mode and answer, so a lookup that finishes
-        after the user changed the mode still leaves the note right.
-        """
-        asked = self.settings.commit_mode is not CommitMode.NONE
-        self.query_one("#commit-note", Static).display = (
-            asked and self.in_work_tree is False
-        )
 
     def _read_tasks(self) -> None:
         """Load the task file; an unreadable one is reported by the dialogs."""
@@ -369,7 +314,6 @@ class AlrApp(App[None]):
     def _lock_dropdowns(self) -> None:
         """A run copies the settings at Start, so later changes would only mislead."""
         locked = self.state in (AppState.RUNNING, AppState.FINISHED)
-        self.query_one("#commit", Select).disabled = locked
         self.query_one("#logging", Select).disabled = locked
 
     def _refresh(self) -> None:
@@ -457,11 +401,6 @@ class AlrApp(App[None]):
         self.run_worker(action[item](), exit_on_error=False)
 
     def on_select_changed(self, message: Select.Changed) -> None:
-        if message.select.id == "commit" and isinstance(message.value, CommitMode):
-            self.settings.commit_mode = message.value
-            self._look_for_work_tree()
-            self._show_commit_note()
-
         if message.select.id == "logging" and isinstance(message.value, bool):
             self.settings.logging = message.value
 
