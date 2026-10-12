@@ -1,7 +1,7 @@
 ---
-version: 13
-date: 2026-10-08
-notes: "The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+version: 14
+date: 2026-10-11
+notes: "Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -19,11 +19,11 @@ notes: "The view's commit setting offers none (the default), per task, and after
 
 ## Introduction
 
-`alr` (Agentic Loop Runner) runs "Ralph loops" with Claude Code. It reads one YAML task file holding the shared prompt, the gates, and the list of tasks, then works through the list one task at a time, starting a fresh `claude --print` session for each task.
+`alr` (Agentic Loop Runner) runs "Ralph loops" with Claude Code. It reads one YAML task file holding the shared prompt, the actions, and the list of tasks, then works through the list one task at a time, starting a fresh `claude --print` session for each task.
 
 `alr` began as the Python port of [gralph](https://github.com/twistingmercury/gralph), which is written in Go. The port exists because a separate agent, to be built later as its own program, will use `alr` as a tool: it runs `alr --plain` and reads the exit code and the run log (`<dir>/logs/<timestamp>/run.jsonl` and `task-N.log`). `alr` itself will not embed an agent framework (ADR-022). Python still fits the runner: Textual and asyncio are Python libraries.
 
-This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, a commit setting of none (the default), per task, or after all (ADR-024), and `--install-skill`. The first version was built to match gralph v0.12.0's command line, task file, and behavior. `alr` has since evolved beyond gralph and changes flags, formats, and behavior as its own needs require (ADR-022). These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
+This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, an Actions dialog for the commands that run after each task and after the run, and `--install-skill`. The first version was built to match gralph v0.12.0's command line, task file, and behavior. `alr` has since evolved beyond gralph and changes flags, formats, and behavior as its own needs require (ADR-022). These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
 
 ## Core Concept
 
@@ -36,14 +36,13 @@ flowchart TD
     alr["alr"]:::blue
 
     subgraph files["Files"]
-        tasks["tasks.yaml<br/>shared prompt, gates, tasks"]:::green
+        tasks["tasks.yaml<br/>shared prompt, actions, tasks"]:::green
         sandbox["sandbox settings JSON<br/>(--sandbox-settings or the run folder)"]:::green
     end
 
     subgraph programs["Programs alr starts"]
         claude["claude --print"]:::amber
-        gates["gate commands"]:::amber
-        git["git"]:::amber
+        actions["action commands"]:::amber
     end
 
     user -->|flags| alr
@@ -51,8 +50,7 @@ flowchart TD
     alr -->|reads once| sandbox
     alr -->|"one fresh session per task, prompt on stdin"| claude
     claude -->|"output ending in a JSON result line"| alr
-    alr -->|"sh -c, after a completed session"| gates
-    alr -->|"add -A and commit, with --commit task or run"| git
+    alr -->|"sh -c, after a completed session and after the run"| actions
 
     classDef blue fill:#9ec5f4,stroke:#6e7781,color:#333333
     classDef green fill:#9fd8a8,stroke:#6e7781,color:#333333
@@ -62,7 +60,7 @@ flowchart TD
     style programs fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
-For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.gates` run and, with `--commit task`, is committed (`--commit run` makes one commit after the last task). The task file is saved after every task. A failed task stops the run.
+For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.after_task` actions run, in order, and counts as done only if every one exits zero. A commit is just one of those actions (ADR-026). The task file is saved after every task, and a failed task stops the run. After the last task, `shared.after_run` runs once, even when every task was already completed.
 
 ## System Model
 
@@ -70,7 +68,7 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 |--------------------|-------------------------------------------------------------------------------------------------------|
 | `alr.cli`          | Parses flags, runs the startup checks, picks the front end, sets the exit code                        |
 | `alr.tasks`        | Parses, validates, and atomically saves the task file                                                 |
-| `alr.engine`       | The shared run logic: the loop, the outcome rule, gates, commits, session flags, process handling     |
+| `alr.engine`       | The shared run logic: the loop, the outcome rule, actions, session flags, process handling             |
 | `alr.plain`        | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                  |
 | `alr.record`       | The run events and the run log writer, shared by both front ends                                      |
 | `alr.stream`       | Everything only the full-screen path does: stream-json parsing and the stream front end               |
@@ -90,7 +88,7 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | Step | Scope                                                                                                      | Status        |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------- |
 | 1    | Engine, plain mode, dry-run, and the stream path plus run log                                              | Done (v0.0.6) |
-| 2    | Textual full-screen view with setup dialogs, a commit setting, logging in both modes, `--install-skill` | Done          |
+| 2    | Textual full-screen view with setup dialogs, an Actions dialog, logging in both modes, `--install-skill` | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
 | 4    | A separate agent program that uses `alr` as a tool (ADR-022); not part of `alr`                            | Later         |
 

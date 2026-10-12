@@ -13,7 +13,7 @@ shared:
 
     - Context documents: GENERATE_RELEVANT_PROJECT_DOCUMENT_PATHS_OR_NONE
     - Build and test: GENERATE_TOOLCHAIN_BUILD_AND_TEST_COMMANDS
-    - Commits: GENERATE_COMMIT_RULES_OR_DO_NOT_COMMIT
+    - Commits: GENERATE_COMMIT_RULES_OR_DO_NOT_COMMIT_IF_AN_ACTION_COMMITS
     - Never edit or commit `tasks.yaml`.
 
     ## Finish
@@ -24,6 +24,21 @@ shared:
     {"state": "completed", "error": ""}
 
     If the task did not succeed, use `"state": "failed"` and a one-line `error`.
+  # Actions alr runs itself. after_task runs after every task's session; if any
+  # fails, the task fails. Put a commit LAST: alr does not undo earlier actions.
+  # alr sets ALR_TASK_ID, ALR_TASK_NAME, ALR_TASK_FILE, and ALR_LOG_DIR; use
+  # them in quotes, as "$ALR_TASK_NAME". Keep tasks.yaml and the logs out of a
+  # commit. The long :(exclude) form is needed: git ignores the short :! form
+  # when the path is absolute, as these two are. Delete the commit action if
+  # alr should not commit. Drop these comments from the generated file.
+  after_task:
+    - action: GENERATE_BUILD_AND_TEST_COMMAND_OR_DELETE
+    - action: >-
+        git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
+        git commit -s -m "$ALR_TASK_NAME"
+  # after_run runs once at the end, also when every task was already completed.
+  # A failure exits 4 and leaves the tasks completed. Use [] or omit it for none.
+  after_run: []
 tasks:
   - id: 1
     name: "GENERATE_SHORT_TASK_TITLE"

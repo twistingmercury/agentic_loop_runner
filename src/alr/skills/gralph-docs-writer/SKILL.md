@@ -32,19 +32,43 @@ while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand, or runs with
 `--reset-failed`, which sets every failed task back to `pending` at startup.
 
-With `--commit task`, Gralph also commits each task itself: once a task's
-gates pass, it commits what a plain `git add -A` would stage, with the task's
-`name` as the commit message, and marks the task `completed` only after that
-commit succeeds. If the commit fails, the task is `failed`. With `--commit run`,
-it makes one commit after the last task, titled `alr: <n> tasks completed`
-(`alr: 1 task completed` for one task), with the task names listed in the
-body, and marks the tasks `completed` only after that commit succeeds. A failed
-task is not committed; its changes stay
-in the work tree for a person to sort out. For a committing run the task file
-must be ignored by Git or kept outside the repository; Gralph refuses to start
-otherwise. A sandbox settings file should also be ignored or kept outside, so it does
-not show up as an uncommitted change. With
-`--commit none` (the default), alr never touches git.
+Gralph runs two optional lists of actions, shell commands it runs itself
+through `sh -c` in its own working directory. `shared.after_task` runs after
+every task whose session reported success; if any action fails or times out,
+the task is `failed` (exit 1) and the later actions do not run. A task is
+`completed` only when every `after_task` action exited 0. `shared.after_run`
+runs once at the end of every run that has no failed task, including a run
+where every task was already completed, so a rerun after an `after_run`
+failure retries it. An `after_run` failure exits 4 and leaves the tasks
+`completed`. Each entry has `action` (required) and `timeout` (optional, such
+as `90s` or `10m`; the default is 10 minutes). `--action-timeout` overrides
+every action's timeout.
+
+Gralph sets these environment variables on every action: `ALR_TASK_FILE` and
+`ALR_LOG_DIR`, both absolute paths. An `after_task` action also gets
+`ALR_TASK_ID` and `ALR_TASK_NAME`. Use them in double quotes, as
+`"$ALR_TASK_NAME"`, so a value stays data to the shell.
+
+A commit is just an action. Gralph has no commit mode and checks nothing about
+git, so a task is not guaranteed its own commit: a commit action takes whatever
+is in the work tree. Put the commit action LAST in `after_task`, because Gralph
+does not undo what earlier actions did, and keep `tasks.yaml` and the logs out
+of it:
+
+```yaml
+after_task:
+  - action: GENERATE_BUILD_AND_TEST_COMMAND
+  - action: >-
+      git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" &&
+      git commit -s -m "$ALR_TASK_NAME"
+```
+
+Write the exclusions in the long `:(exclude)` form: both variables are absolute
+paths, and git ignores the short `:!` form when the path is absolute.
+
+An absent `after_task` means the run's actions are undecided: the full-screen
+view asks for them. `after_task: []` records a decision that there are none.
+An absent `after_run` and `after_run: []` both mean none.
 
 A `tasks.yaml` that does not match the rules below is invalid and Gralph
 refuses to run it. There is no migration from other formats or older states.
@@ -64,20 +88,21 @@ authorized.
    scope, output destination, actual document paths, and project verification
    and Git policies. Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml).
-3. Ask the user whether the run will use `gralph --commit task` or `--commit run` (the value is
-   required; the default is `none`). If it will, the
-   session must not commit: the `Commits` line in `shared.prompt` reads "Do not
-   commit. Leave your changes in the work tree.", for `--commit task`
-   task names are written as commit subjects (imperative, under about 70 characters), and no task prompt
-   mentions committing.
+3. Ask the user whether Gralph should commit after each task. If it should,
+   `after_task` ends with the commit action above, the `Commits` line in
+   `shared.prompt` reads "Do not commit. Leave your changes in the work tree.",
+   task names are written as commit subjects (imperative, under about 70
+   characters), and no task prompt mentions committing. Ask too what, if
+   anything, should run after the last task (a build, a push), for `after_run`.
 4. Draft the task list and show the user a summary, one line per task:
    `<id>: <name> - <one short sentence>`. Nothing else goes in the summary.
    Ask whether they approve it or want changes. Revise and show the summary
    again until they approve. Write nothing before approval.
 5. Write `tasks.yaml` with two top-level keys, `shared` and `tasks`, and no
    others: Gralph rejects any other top-level key. `shared` is a mapping with a
-   required nonblank block-scalar `prompt` (the shared prompt, step 7) and an
-   optional `gates`, which you never write; a top-level `gates` key is an error.
+   required nonblank block-scalar `prompt` (the shared prompt, step 7) and the
+   optional `after_task` and `after_run` lists of actions (see the template and
+   above); any other key in `shared` or in an action is an error.
    `tasks` is a sequence holding at least one task. Unknown keys inside `shared`
    are rejected too. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
@@ -89,9 +114,9 @@ authorized.
    Gralph reads as `pending`. The optional `error` field is gralph-only: never
    write it; preserve it if present when updating an existing file. Write no
    other task keys: Gralph ignores them when reading and drops them the first
-   time it saves the file. Never write `shared.gates`;
-   Gralph asks for the run's gates itself the first time the file runs in the
-   full-screen view.
+   time it saves the file. Write `after_task` only with actions the user
+   asked for or confirmed; leave it out when the user wants to be asked in the
+   full-screen view, and write `after_task: []` for a decision of none.
 6. Put scope, steps, the project's own checks (tests, linters, the build),
    task-specific verification, and completion criteria inside each task's
    prompt. Preserve project-specific instructions. YAML comments are not
@@ -102,13 +127,13 @@ authorized.
    `--sandbox-settings`, inside its sandbox: a command that sets a variable
    inline (`VAR=value cmd`) can be refused, and Docker, other users' files,
    and hosts outside the sandbox's network list are out of reach. Give the
-   session an equivalent it can run. A check it cannot run belongs only in the
-   run's gates, which Gralph runs itself; tell the user to add it there.
+   session an equivalent it can run. A check it cannot run belongs only in `after_task`,
+   whose actions Gralph runs itself; tell the user to add it there.
 7. Write `shared.prompt` from the template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
-   task. For a `--commit task` or `--commit run` run the `Commits` line tells the session not to
-   commit; otherwise keep commits conditional on the project's authorization.
+   task. When an `after_task` action commits, the `Commits` line tells the session not
+   to commit; otherwise keep commits conditional on the project's authorization.
    Keep the `tasks.yaml` rule and the Finish section as written so the file
    works without this skill installed. Apart from the project's own checks,
    keep generic rules out of task prompts; they live once, in `shared.prompt`.
@@ -120,11 +145,10 @@ authorized.
    `GENERATE_*` token remains in the file.
 9. Report the output path and the checks performed. Do not launch the loop
    merely to validate generated files.
-   For a committing run, also tell the user the `.gitignore` line that keeps
-   the files out of Git (the output directory, or `tasks.yaml`).
-   For a committing run this is required for `tasks.yaml`, not just advice; the
-   same for any sandbox settings file, so it does not show up as an
-   uncommitted change. Do not edit `.gitignore` yourself unless asked.
+   When an action commits, also tell the user that the commit takes whatever
+   is in the work tree, so a sandbox settings file kept inside the repository
+   needs a `.gitignore` line (or an `:(exclude)` entry). Do not edit
+   `.gitignore` yourself unless asked.
 
 ## Task scope
 
@@ -145,12 +169,12 @@ lands, put the prerequisite step first (for example, update test fixtures
 before the change that needs them).
 
 Check each task against every check the run will apply, not only its own
-tests: the project's own checks and any gates the user sets for the run. A
+tests: the project's own checks and any `after_task` actions the user sets for the run. A
 task can be complete and tested and still fail one because of where it sits in
 the sequence: code that nothing calls until a later task fails an unused-code
 linter, and a fixture change can break a suite another task fixes. Reorder or
 merge tasks so each one leaves every check passing.
 
-Honor project policies for source commits unless the run uses `--commit task` or `--commit run`, where
-Gralph does the committing, and never instruct the session to edit or commit
+Honor project policies for source commits unless an `after_task` action does
+the committing, and never instruct the session to edit or commit
 `tasks.yaml`.

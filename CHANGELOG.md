@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `shared.after_task` and `shared.after_run`: lists of actions, each with
+  `action` and an optional `timeout`. `after_task` runs after every task's
+  session and fails the task if any action fails. `after_run` runs once at the
+  end of every run that has no failed task, including a run where every task was
+  already completed, so a rerun after an `after_run` failure retries it.
+- Every action gets `ALR_TASK_FILE` and `ALR_LOG_DIR` (absolute paths);
+  `after_task` actions also get `ALR_TASK_ID` and `ALR_TASK_NAME`.
+- The full-screen view's Actions dialog (`a`) holds both lists, "After each
+  task" and "After the run".
+- The dry run prints an `after_task:` or `after_run:` line for each action.
+
+### Changed
+
+- **Breaking:** a commit is an action now. `--commit` is removed and refused
+  (exit 2); put a commit action last in `shared.after_task` instead. The
+  bundled skill and template show one that keeps `tasks.yaml` and the logs out
+  of the commit with the `:(exclude)` form of `git add`.
+- **Breaking:** `shared.gates` is now `shared.after_task`, and a gate's `cmd` is
+  now `action`. The old names are refused, naming the new ones.
+- **Breaking:** `--gate-timeout` is now `--action-timeout`; the old flag is
+  refused (exit 2).
+- **Breaking:** exit 4 now means an `after_run` action failed (run log result
+  `run_failed`); the tasks stay `completed`. It used to mean a failed commit. A
+  failed or timed-out `after_task` action fails the task and exits 1.
+- **Breaking:** in the run log, the event `gate_finished` is now
+  `action_finished`, and the `run_started` field `gate_timeout` is now
+  `action_timeout`.
+- **Breaking:** a task is no longer guaranteed its own commit. `alr` does not
+  look at git.
+- The view's pane "Gates & commits" is now "Actions", and the `(g)ates` button is
+  `(a)ctions`. The Commit dropdown is gone.
+
+### Removed
+
+- **Breaking:** the commit lock (`alr.lock`), the clean-tree and ignore checks,
+  and the refusal reasons `dirty-tree`, `task-file-visible`,
+  `log-folder-visible`, `git-error`, and `locked`.
+- **Breaking:** the `commit` field of the run log's `run_started`, the result
+  `commit_failed`, and the `committed` event.
+
 ## [0.1.0] - 2026-10-11
 
 ### Changed
