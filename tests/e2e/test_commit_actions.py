@@ -29,13 +29,17 @@ from test_signal import stopped_at_exit
 # The fake claude changes no files, so this action does each task's "work".
 WORK = 'echo "$ALR_TASK_NAME" > "task-$ALR_TASK_ID.txt"'
 
-# The task file and the logs stay out of the commit. The long `:(exclude)` form is
-# needed: with an absolute path, git reads the short `:!` form as a path from the
-# top of the work tree and silently excludes nothing.
+# Copied verbatim from the README and the task file template, so the suite tests
+# the action users copy. The long `:(exclude)` form is needed: with an absolute
+# path, git reads the short `:!` form as a path from the top of the work tree and
+# silently excludes nothing. The diff guard lets a task that changed nothing pass.
 COMMIT = (
     'git add -A -- . ":(exclude)$ALR_TASK_FILE" ":(exclude)$ALR_LOG_DIR" '
-    '&& git commit -s -m "$ALR_TASK_NAME"'
+    '&& (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")'
 )
+
+# Like WORK, but the second task changes nothing.
+WORK_EXCEPT_TASK_2 = '[ "$ALR_TASK_ID" = 2 ] || ' + WORK
 
 
 def actions(*commands: str) -> list[dict[str, str]]:
@@ -79,8 +83,9 @@ def git_subjects(repo: Path) -> list[str]:
     return git_output(repo, "log", "--format=%s")[:-1]
 
 
-def git_files(repo: Path) -> list[str]:
-    return git_output(repo, "ls-files")
+def git_committed_files(repo: Path) -> list[str]:
+    """Every file any commit touched, so a file added and later removed still shows."""
+    return git_output(repo, "log", "--name-only", "--format=")
 
 
 def test_a_commit_action_commits_each_task(git_repo: Path, fake_claude: Path) -> None:
@@ -90,9 +95,24 @@ def test_a_commit_action_commits_each_task(git_repo: Path, fake_claude: Path) ->
 
     assert res.code == 0, res
     assert git_subjects(git_repo) == ["two", "one"]
-    files = git_files(git_repo)
+    files = git_committed_files(git_repo)
     assert "task-1.txt" in files
     assert "task-2.txt" in files
+    assert "run/tasks.yaml" not in files
+    assert not any(name.startswith("run/logs/") for name in files)
+
+
+def test_a_task_that_changes_nothing_still_completes(
+    git_repo: Path, fake_claude: Path
+) -> None:
+    tasks_path = make_run(git_repo, ["one", "two"], [WORK_EXCEPT_TASK_2, COMMIT])
+
+    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+
+    assert res.code == 0, res
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed", 2: "completed"}
+    assert git_subjects(git_repo) == ["one"]
+    files = git_committed_files(git_repo)
     assert "run/tasks.yaml" not in files
     assert not any(name.startswith("run/logs/") for name in files)
 
@@ -256,6 +276,7 @@ def test_sigint_during_after_run_exits_130_and_tasks_stay_completed(
         out, err = process.communicate(timeout=15)
 
         assert process.returncode == 130, (out, err)
+        assert process.returncode != 4
         assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
         last = run_log(tmp_path)[-1]
         assert last["result"] == "stopped"
