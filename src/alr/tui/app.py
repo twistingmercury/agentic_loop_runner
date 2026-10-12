@@ -35,7 +35,7 @@ from alr.tui.dialogs import (
 from alr.tui.panes import ActivityPane, ActionsPane, TasksPane
 from alr.tui.prepare import Prepared, prepare
 from alr.tui.progress import Progress
-from alr.tasks import FAILED, PENDING, Task, TaskList
+from alr.tasks import FAILED, PENDING, Action, Task, TaskList
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -302,12 +302,8 @@ class AlrApp(App[None]):
         after_task = self.settings.after_task
         after_run = self.settings.after_run
         if self._task_list is not None:
-            after_task = (
-                self._task_list.after_task_list() if after_task is None else after_task
-            )
-            after_run = (
-                self._task_list.after_run_list() if after_run is None else after_run
-            )
+            after_task = _edited_or_filed(after_task, self._task_list.after_task_list())
+            after_run = _edited_or_filed(after_run, self._task_list.after_run_list())
 
         answer = await self.push_screen_wait(
             ActionsDialog(after_task or [], after_run or [])
@@ -644,3 +640,8 @@ def run_app(settings: RunSettings) -> int:
     # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
     app.run(mouse=False)
     return app.exit_code
+
+
+def _edited_or_filed(edited: list[Action] | None, filed: list[Action]) -> list[Action]:
+    """The list edited in the view, or the file's own when it was not touched."""
+    return filed if edited is None else edited

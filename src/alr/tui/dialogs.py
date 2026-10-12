@@ -324,8 +324,13 @@ class ActionsDialog(_Dialog[tuple[list[Action], list[Action]]]):
         return ListView(*items, id=list_id)
 
     def on_descendant_focus(self, event: DescendantFocus) -> None:
-        if isinstance(event.widget, ListView) and event.widget.id in self._lists:
-            self._focused_list = event.widget.id
+        """Remember the last list that had focus: a button click moves focus off it, and Add/Remove need it."""
+        if not isinstance(event.widget, ListView):
+            return
+
+        widget_id = event.widget.id
+        if widget_id is not None and widget_id in self._lists:
+            self._focused_list = widget_id
 
     async def on_button_pressed(self, message: Button.Pressed) -> None:
         match message.button.id:
