@@ -21,6 +21,7 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     run_dry_run,
+    shared_block,
     task_states,
     write_tasks_yaml,
 )
@@ -37,6 +38,50 @@ FORCED_SETTINGS = {
         "filesystem": {"denyRead": ["~/"]},
     }
 }
+PRESET_CONFLICT_ERROR = (
+    "error: --sandbox cannot be used with --sandbox-settings or --yolo"
+)
+TIGHT_DOC = {
+    "sandbox": {
+        "allowUnsandboxedCommands": False,
+        "enabled": True,
+        "failIfUnavailable": True,
+        "filesystem": {
+            "denyRead": [
+                "~/.ssh",
+                "~/.aws",
+                "~/.gnupg",
+                "~/.config/gh",
+                "~/.netrc",
+                "~/.claude",
+            ]
+        },
+    }
+}
+LARGE_DOC = {
+    "sandbox": {
+        **TIGHT_DOC["sandbox"],
+        "excludedCommands": ["docker *"],
+        "network": {
+            "allowedDomains": [
+                "github.com",
+                "*.githubusercontent.com",
+                "crates.io",
+                "*.crates.io",
+                "pypi.org",
+                "files.pythonhosted.org",
+                "registry.npmjs.org",
+                "proxy.golang.org",
+                "sum.golang.org",
+                "storage.googleapis.com",
+            ]
+        },
+    }
+}
+FAILED_TASKS_YAML = (
+    shared_block()
+    + "tasks:\n  - {id: 1, name: First, prompt: p1, state: failed, error: boom}\n"
+)
 
 
 @dataclass(frozen=True)
@@ -292,4 +337,75 @@ def test_dir_dry_run_names_the_folders_sandbox_json(
         f"{ONE_TASK_TABLE}sandbox settings: {folder}/sandbox.json\n"
         f"{run.tasks_path} is valid\n"
     )
+    assert run.records == [], "claude must not run"
+
+
+def test_sandbox_tight_writes_the_folder_file_and_passes_it_to_claude(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    run = run_with_flags(tmp_path, "--sandbox", "tight")
+
+    folder_file = run.tasks_path.parent / "sandbox.json"
+    text = folder_file.read_text(encoding="utf-8")
+    assert run.res.code == 0, run.res
+    assert json.loads(text) == TIGHT_DOC
+    assert text.endswith("}\n")
+    assert '\n  "sandbox": {' in text, "indented by two spaces"
+    argv = run.records[0]["argv"]
+    assert argv[:4] == ["--print", "--permission-mode", "acceptEdits", "--settings"]
+    assert json.loads(argv[4]) == TIGHT_DOC
+
+
+def test_sandbox_large_replaces_the_folders_existing_file(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    folder = tmp_path / "run"
+    folder.mkdir()
+    write_sandbox_settings(folder, "{}")
+
+    run = run_with_flags(tmp_path, "--sandbox", "large")
+
+    text = (folder / "sandbox.json").read_text(encoding="utf-8")
+    assert run.res.code == 0, run.res
+    assert json.loads(text) == LARGE_DOC
+    assert text.endswith("}\n")
+    assert json.loads(run.records[0]["argv"][4]) == LARGE_DOC
+
+
+@pytest.mark.parametrize(
+    "other",
+    [["--yolo"], ["--sandbox-settings=unused.json"]],
+    ids=["yolo", "sandbox settings"],
+)
+def test_sandbox_preset_with_another_permission_flag_exits_2(
+    tmp_path: Path, fake_claude: Path, other: list[str]
+) -> None:
+    run = run_with_flags(tmp_path, "--sandbox", "tight", *other)
+
+    assert run.res.code == 2, run.res
+    assert PRESET_CONFLICT_ERROR in run.res.err
+    assert not (run.tasks_path.parent / "sandbox.json").exists()
+    assert run.records == [], "claude must not run"
+
+
+def test_sandbox_preset_dry_run_writes_nothing(tmp_path: Path) -> None:
+    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML, "--sandbox", "tight")
+
+    assert res.code == 0, res
+    assert (
+        f"sandbox settings: {tmp_path}/sandbox.json"
+        " (tight preset; written on a real run)\n"
+    ) in res.out
+    assert not (tasks_path.parent / "sandbox.json").exists()
+
+
+def test_sandbox_preset_refused_run_leaves_no_file(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    run = run_with_flags(tmp_path, "--sandbox", "tight", tasks_yaml=FAILED_TASKS_YAML)
+
+    folder = run.tasks_path.parent
+    assert run.res.code == 3, run.res
+    assert not (folder / "sandbox.json").exists()
+    assert not (folder / "logs").exists()
     assert run.records == [], "claude must not run"
