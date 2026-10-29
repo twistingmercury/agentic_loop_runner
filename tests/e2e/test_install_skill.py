@@ -8,7 +8,7 @@ from e2e_helpers import run_alr
 def test_install_skill_copies_the_skill_under_home(tmp_path: Path) -> None:
     res = run_alr("--install-skill", env={"HOME": str(tmp_path)})
 
-    installed = tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+    installed = tmp_path / ".claude" / "skills" / "alr-task-file"
     assert res.code == 0, res
     assert res.out == f"{installed}\n"
     assert (installed / "SKILL.md").is_file()

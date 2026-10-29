@@ -779,8 +779,8 @@ no longer checks the install afterward (gralph ADR-022). `alr` reads the same `t
 
 **Decision:**
 
-- `alr --install-skill` copies the bundled `gralph-docs-writer` skill folder (taken from gralph v0.12.0) to
-  `~/.claude/skills/gralph-docs-writer/`, replacing any existing copy, prints the path, and exits 0. It runs before the
+- `alr --install-skill` copies the bundled `alr-task-file` skill folder (taken from gralph v0.12.0) to
+  `~/.claude/skills/alr-task-file/`, replacing any existing copy, prints the path, and exits 0. It runs before the
   other startup checks and opens no screen. An error finding the home folder or writing the files exits 1.
 - The skill ships as package data inside the wheel.
 - Nothing compares the installed copy with the bundled one later, so a missing or edited skill never stops a run.

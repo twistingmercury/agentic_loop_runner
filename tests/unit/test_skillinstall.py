@@ -13,7 +13,7 @@ from alr.skillinstall import install
 def test_install_copies_the_skill_under_the_home_folder(tmp_path: Path) -> None:
     path = install(tmp_path)
 
-    assert path == tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+    assert path == tmp_path / ".claude" / "skills" / "alr-task-file"
     assert (path / "SKILL.md").is_file()
 
 
@@ -76,7 +76,7 @@ def test_an_error_without_a_strerror_never_says_none(
 def test_a_symlink_at_the_target_is_refused_and_kept(tmp_path: Path) -> None:
     real = tmp_path / "real"
     real.mkdir()
-    link = tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+    link = tmp_path / ".claude" / "skills" / "alr-task-file"
     link.parent.mkdir(parents=True)
     link.symlink_to(real)
 
@@ -88,7 +88,7 @@ def test_a_symlink_at_the_target_is_refused_and_kept(tmp_path: Path) -> None:
 
 
 def test_a_plain_file_at_the_target_is_refused_and_kept(tmp_path: Path) -> None:
-    target = tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+    target = tmp_path / ".claude" / "skills" / "alr-task-file"
     target.parent.mkdir(parents=True)
     target.write_text("mine", encoding="utf-8")
 

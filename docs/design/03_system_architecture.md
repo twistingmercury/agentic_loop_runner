@@ -99,7 +99,7 @@ src/alr/
   errors.py        AlrError and its subclasses, each with its exit code, and the refusal reasons
   durations.py     parse and format durations such as 90s and 1m30.5s
   skillinstall.py  --install-skill: copy the bundled skill to ~/.claude/skills (ADR-016)
-  skills/          the bundled gralph-docs-writer skill, as package data
+  skills/          the bundled alr-task-file skill, as package data
   tasks.py         task file: the shared block and tasks, parse, validate (a task name is one line), atomic save, timeout parsing, `RunResult` and `PASSED`
   engine/
     frontend.py    the FrontEnd interface
@@ -647,7 +647,7 @@ graph LR
 | alr writes the filesystem   | Task state                    | Atomic: temp file, then rename                                                                                                                                                                            |
 | alr writes the filesystem   | Run log                       | Both modes write `<dir>/logs/<timestamp>/`, a new folder per run: plain mode always, the TUI through its Logging setting; never on a dry run.                                                               |
 | alr writes the filesystem   | Action edits from the TUI     | Only on Start, after the startup checks pass; saved atomically with the task file                                                                                                                         |
-| alr writes the filesystem   | Installed skill               | Only with `--install-skill`: the bundled folder is copied over `~/.claude/skills/gralph-docs-writer/`                                                                                                     |
+| alr writes the filesystem   | Installed skill               | Only with `--install-skill`: the bundled folder is copied over `~/.claude/skills/alr-task-file/`                                                                                                     |
 | alr starts Claude           | Combined prompt on stdin      | Fixed argv: `--print`, the front end's flags, the session flags                                                                                                                                           |
 | alr starts an action        | `action` text from the task file | `sh -c <action>` in alr's working directory, unsandboxed, no stdin, with `ALR_TASK_FILE` and `ALR_LOG_DIR` (and, for `after_task`, `ALR_TASK_ID` and `ALR_TASK_NAME`) set; only the exit code is used. What it does, git included, is the action's own business; alr never pushes, resets, or stashes on its own |
 | Claude returns to alr       | Stdout, stderr, exit code     | Only the last result line and the exit code decide the outcome                                                                                                                                            |

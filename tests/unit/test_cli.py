@@ -596,7 +596,7 @@ def test_install_skill_prints_the_path_and_exits_0(
 
     assert code == 0
     assert capsys.readouterr().out.strip() == str(
-        tmp_path / ".claude" / "skills" / "gralph-docs-writer"
+        tmp_path / ".claude" / "skills" / "alr-task-file"
     )
 
 

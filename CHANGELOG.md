@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the bundled skill `gralph-docs-writer` is now `alr-task-file`; `--install-skill` installs it under that name and leaves an old `gralph-docs-writer` folder in `~/.claude/skills` alone, so remove that folder yourself.
+
 ## [0.1.1] - 2026-10-11
 
 ### Added
