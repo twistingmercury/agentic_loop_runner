@@ -2089,7 +2089,7 @@ async def test_choosing_tight_over_the_folders_file_shows_adjusted_when_a_switch
             logging=False,
         )
     )
-    async with app.run_test(size=(100, 40)) as pilot:
+    async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
         await pilot.press("p")
@@ -2114,3 +2114,29 @@ async def test_start_with_a_preset_writes_the_folder_file(work_dir: Path) -> Non
 
     written = Path(preset_path(tasks_file)).read_text(encoding="utf-8")
     assert written == render(switches_for(Preset.LARGE))
+
+
+async def test_the_permissions_dialog_keeps_ok_on_screen_after_choosing_a_preset(
+    work_dir: Path,
+) -> None:
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    sandbox_file = write_file(work_dir / "run" / "sandbox.json", "{}")
+    app = AlrApp(
+        RunSettings(
+            tasks_file=tasks_file,
+            sandbox_file=sandbox_file,
+            permissions=Permissions.SANDBOX,
+            logging=False,
+        )
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        await pilot.press("p")
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
+        await pilot.click("#tight")
+        await pilot.click("#web")
+
+        ok = app.screen.query_one("#ok").region
+        assert app.screen.region.contains_region(ok)
+        assert app.screen.query_one("#dialog").region.contains_region(ok)

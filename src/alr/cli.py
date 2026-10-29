@@ -153,8 +153,7 @@ def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int
     # Validates a given settings file; no run starts here.
     session_args(answer, dry_run=True)
     preset = Preset(args.sandbox) if args.sandbox else None
-    # Without -d the preset's path would be relative to nowhere; the folder pick settles it.
-    sandbox_file = "" if preset and not args.dir else answer.sandbox_file
+    sandbox_file = answer.sandbox_file
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
@@ -293,7 +292,9 @@ def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> 
         raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
 
     switches = switches_for(Preset(preset))
-    return Answer(preset_path(str(Path(dir) / "tasks.yaml")), False, switches)
+    # Without -d the path would be relative to nowhere; the view's folder pick settles it.
+    path = preset_path(str(Path(dir) / "tasks.yaml")) if dir else ""
+    return Answer(path, False, switches)
 
 
 def check_action_timeout(value: str) -> None:

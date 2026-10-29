@@ -653,7 +653,10 @@ def test_summary_dialog_shows_the_run_time_in_minutes_and_seconds() -> None:
     assert SummaryDialog("done", 1230.0, None)._text == "Run done in 20m 30s"
 
 
-async def test_permissions_dialog_fits_an_80_by_24_terminal(tmp_path: Path) -> None:
+@pytest.mark.parametrize("radio", [None, "tight", "large"])
+async def test_permissions_dialog_fits_an_80_by_24_terminal(
+    tmp_path: Path, radio: str | None
+) -> None:
     sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
     settings = settings_in(
         tmp_path, permissions=Permissions.SANDBOX, sandbox_file=str(sandbox)
@@ -662,11 +665,15 @@ async def test_permissions_dialog_fits_an_80_by_24_terminal(tmp_path: Path) -> N
     async with host.run_test(size=(80, 24)) as pilot:
         host.push_screen(PermissionsDialog(settings), host.record)
         await pilot.pause()
+        if radio:
+            await pilot.click(f"#{radio}")
+            await pilot.pause()
 
         box = host.screen.query_one("#dialog").region
         inner = host.screen.query_one("#dialog").content_region
         ok = host.screen.query_one("#ok").region
         assert box.contains_region(ok), "the buttons lie inside the dialog"
+        assert host.screen.region.contains_region(ok), "the buttons lie on screen"
         for name in ("web", "docker", "hide"):
             checkbox = host.screen.query_one(f"#{name}").region
             assert checkbox.right <= inner.right, f"#{name} is wider than the dialog"

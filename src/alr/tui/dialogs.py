@@ -234,11 +234,15 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
     """Pick Tight or Large and adjust the three switches, use a settings file, or skip permissions."""
 
     DEFAULT_CSS = """
-    PermissionsDialog #dialog { width: 90%; max-width: 110; height: 90%; padding: 0 2; }
+    PermissionsDialog #dialog { width: 90%; max-width: 110; height: 96%; max-height: 96%; padding: 0 2; }
     PermissionsDialog Button { border: none; height: 1; min-height: 1; }
+    PermissionsDialog #ok, PermissionsDialog #cancel { border: none; height: 1; }
     /* The preview takes what is left, so the buttons stay on screen however long the document is. */
     PermissionsDialog #preview { height: 1fr; min-height: 6; overflow-y: auto; }
     PermissionsDialog Checkbox { border: none; height: 1; padding: 0; }
+    /* Borderless radios and a one-row button bar keep OK on an 80x24 screen at the tallest state. */
+    PermissionsDialog RadioSet, PermissionsDialog RadioSet:focus { border: none; padding: 0; }
+    PermissionsDialog Horizontal { height: 1; }
     """
 
     def __init__(self, settings: RunSettings) -> None:
