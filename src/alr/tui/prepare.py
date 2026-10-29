@@ -13,6 +13,7 @@ from alr.engine.loop import (
     reset_in_memory,
     save_for_start,
 )
+from alr.engine.presets import restore_previous, write_preset
 from alr.engine.stop import Stop
 from alr.errors import RefusedError
 from alr.record.events import Event
@@ -87,6 +88,20 @@ def _log_folder(settings: RunSettings) -> Path | None:
 
 
 def _save_changes(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:
+    """Write the preset, then save the actions and the reset; a refused save puts the old preset back."""
+    if settings.switches is None:
+        _save_tasks(settings, task_list, reset_count)
+        return
+
+    previous = write_preset(settings.sandbox_file, settings.switches)
+    try:
+        _save_tasks(settings, task_list, reset_count)
+    except RefusedError:
+        restore_previous(settings.sandbox_file, previous)
+        raise
+
+
+def _save_tasks(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:
     """Save the edited actions and the reset together, once; nothing to save leaves the file alone."""
     if settings.after_task is not None:
         task_list.shared.after_task = settings.after_task

@@ -6,8 +6,14 @@ from pathlib import Path
 import pytest
 from helpers import block_saving, write_file
 
+from alr.engine.presets import Preset, preset_path, render, switches_for
 from alr.engine.stop import Stop
-from alr.errors import FailedTasksError, RefusedError, RunLogError
+from alr.errors import (
+    TASK_FILE_UNWRITABLE,
+    FailedTasksError,
+    RefusedError,
+    RunLogError,
+)
 from alr.record.runlog import RunLog
 from alr.tasks import Action, parse_tasks
 from alr.tui.prepare import prepare
@@ -259,3 +265,108 @@ async def test_prepare_refuses_a_failed_task_and_writes_nothing(
 
     assert Path(settings.tasks_file).read_text(encoding="utf-8") == FAILED_TASKS
     assert not (work_dir / "run" / "logs").exists()
+
+
+def _preset_settings(folder: Path, **changes: object) -> RunSettings:
+    base = _settings(folder, logging=True)
+    return replace(
+        base,
+        permissions=Permissions.SANDBOX,
+        preset=Preset.TIGHT,
+        switches=switches_for(Preset.TIGHT),
+        sandbox_file=preset_path(base.tasks_file),
+        **changes,
+    )
+
+
+def _refuse_the_task_file_save(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(tasks_file: str, task_list: object) -> None:
+        raise RefusedError(TASK_FILE_UNWRITABLE, "failed to save tasks")
+
+    monkeypatch.setattr("alr.tui.prepare.save_for_start", refuse)
+
+
+async def test_prepare_writes_the_preset_then_the_task_file(work_dir: Path) -> None:
+    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    assert Path(settings.sandbox_file).read_text(encoding="utf-8") == render(
+        switches_for(Preset.TIGHT)
+    )
+    assert parse_tasks(
+        Path(settings.tasks_file).read_text(encoding="utf-8")
+    ).shared.after_task
+
+
+async def test_prepare_writes_the_preset_even_when_the_task_file_needs_no_save(
+    work_dir: Path,
+) -> None:
+    settings = _preset_settings(work_dir)
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    assert Path(settings.sandbox_file).exists()
+
+
+async def test_prepare_puts_the_old_sandbox_json_back_when_the_save_fails(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
+    sandbox = Path(settings.sandbox_file)
+    sandbox.write_bytes(b"old")
+    _refuse_the_task_file_save(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert sandbox.read_bytes() == b"old"
+    assert not (work_dir / "run" / "logs").exists()
+
+
+async def test_prepare_removes_the_new_sandbox_json_when_the_save_fails(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
+    _refuse_the_task_file_save(monkeypatch)
+
+    with pytest.raises(RefusedError):
+        await prepare(settings)
+
+    assert not Path(settings.sandbox_file).exists()
+    assert not (work_dir / "run" / "logs").exists()
+
+
+async def test_prepare_refuses_and_removes_the_run_folder_when_the_sandbox_json_cannot_be_written(
+    work_dir: Path,
+) -> None:
+    settings = _preset_settings(work_dir)
+    # A missing folder fails the write for any user, root included.
+    settings = replace(
+        settings, sandbox_file=str(work_dir / "missing" / "sandbox.json")
+    )
+
+    with pytest.raises(RefusedError) as caught:
+        await prepare(settings)
+
+    assert caught.value.reason == "sandbox-file-unwritable"
+    assert not (work_dir / "run" / "logs").exists()
+
+
+async def test_prepare_writes_nothing_for_a_file_answer(work_dir: Path) -> None:
+    sandbox = work_dir / "run" / "sandbox.json"
+    sandbox.write_bytes(b'{"sandbox": {"enabled": true}}')
+    settings = _settings(
+        work_dir,
+        permissions=Permissions.SANDBOX,
+        sandbox_file=str(sandbox),
+        after_task=[Action(command="true")],
+    )
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    assert sandbox.read_bytes() == b'{"sandbox": {"enabled": true}}'
