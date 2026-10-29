@@ -831,3 +831,44 @@ def test_dry_run_with_a_preset_names_the_file_and_writes_nothing(
         in capsys.readouterr().out
     )
     assert not (folder / "sandbox.json").exists()
+
+
+def test_the_view_refuses_a_preset_with_another_permission_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--sandbox", "tight", "--yolo"])
+
+    assert code == 2
+    assert PRESET_CONFLICT in capsys.readouterr().err
+    assert seen == []
+
+
+def test_the_view_gets_the_preset_from_the_flag(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--sandbox", "large"])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].preset is Preset.LARGE
+    assert seen[0].switches == switches_for(Preset.LARGE)
+    assert seen[0].sandbox_file == str(folder / "sandbox.json")
+
+
+def test_the_view_leaves_the_preset_path_empty_until_a_folder_is_chosen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["--sandbox", "tight"])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].preset is Preset.TIGHT
+    assert seen[0].sandbox_file == ""

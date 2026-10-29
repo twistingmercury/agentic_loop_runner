@@ -15,6 +15,7 @@ from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine import proc
+from alr.engine.presets import preset_path
 from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
@@ -237,7 +238,10 @@ class AlrApp(App[None]):
             self.push_screen(ErrorDialog(error_text(exc)))
             return
 
-        if check.sandbox_file and self.settings.permissions is Permissions.UNSET:
+        if self.settings.switches is not None:
+            # A preset answered already; its file goes beside whichever task file was picked.
+            self.settings.sandbox_file = preset_path(check.tasks_file)
+        elif check.sandbox_file and self.settings.permissions is Permissions.UNSET:
             self.settings.permissions = Permissions.SANDBOX
             self.settings.sandbox_file = check.sandbox_file
 
@@ -323,9 +327,7 @@ class AlrApp(App[None]):
 
     def _refresh(self) -> None:
         """Bring the Start button and the reason line in line with the state."""
-        self.query_one("#permissions", Static).update(
-            _permissions_label(self.settings.permissions)
-        )
+        self.query_one("#permissions", Static).update(_permissions_label(self.settings))
         self._lock_dropdowns()
         self._grey_out_menu()
         self._refresh_start()
@@ -604,12 +606,9 @@ def _activity_pane() -> ActivityPane:
     return pane
 
 
-def _permissions_label(permissions: Permissions) -> str:
+def _permissions_label(settings: RunSettings) -> str:
     """Name the current permission choice for the strip's button."""
-    if permissions is Permissions.UNSET:
-        return "Permissions: not chosen"
-
-    return f"Permissions: {permissions.value}"
+    return f"Permissions: {settings.permissions_text()}"
 
 
 def _error_text(exc: BaseException) -> str:

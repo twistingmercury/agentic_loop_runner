@@ -152,22 +152,27 @@ def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int
     """Open the full-screen view with what the flags already answer."""
     # Validates a given settings file; no run starts here.
     session_args(answer, dry_run=True)
-    sandbox_file = answer.sandbox_file
+    preset = Preset(args.sandbox) if args.sandbox else None
+    # Without -d the preset's path would be relative to nowhere; the folder pick settles it.
+    sandbox_file = "" if preset and not args.dir else answer.sandbox_file
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
-        permissions=_permissions(sandbox_file, args.yolo),
+        permissions=_permissions(sandbox_file, args.yolo, preset),
         action_timeout=args.action_timeout or "",
         reset_failed=args.reset_failed,
+        preset=preset,
+        switches=answer.switches,
     )
     return run_app(settings)
 
 
-def _permissions(sandbox_file: str, skip: bool) -> Permissions:
+def _permissions(sandbox_file: str, skip: bool, preset: Preset | None) -> Permissions:
+    """Name the answer the flags give: skip, a sandbox from a preset or file, or none yet."""
     if skip:
         return Permissions.SKIP
 
-    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
+    return Permissions.SANDBOX if preset or sandbox_file else Permissions.UNSET
 
 
 class _BareMetavarFormatter(argparse.HelpFormatter):
