@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import folder_sandbox, sandbox_args
+from alr.engine.sandbox import folder_sandbox, sandbox_args, settings_args
 from alr.errors import RefusedError
 
 FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
@@ -135,3 +135,9 @@ def test_folder_sandbox_keeps_a_relative_dir_relative(
     monkeypatch.chdir(tmp_path.parent)
 
     assert folder_sandbox(tmp_path.name) == f"{tmp_path.name}/sandbox.json"
+
+
+def test_settings_args_equals_sandbox_args_for_the_same_text(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path, PASS_THROUGH_IN)
+
+    assert sandbox_args(str(path)) == settings_args(PASS_THROUGH_IN)
