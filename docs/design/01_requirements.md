@@ -44,7 +44,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 3. Decide a session's outcome from the last non-blank, non-fence line of its output, as gralph does
 4. Run the file's `shared.after_task` actions after a completed session, in order, each with a time limit, with `ALR_TASK_FILE`, `ALR_LOG_DIR`, `ALR_TASK_ID`, and `ALR_TASK_NAME` set, and complete the task only when every action exits zero; run `shared.after_run` once at the end of every run with no failed task, even when every task was already completed (ADR-026)
 5. Treat a commit as an action: alr has no commit mode and does not look at git, so a task is not guaranteed its own commit (ADR-026)
-6. Build the session flags from `--sandbox-settings`, a `sandbox.json` found in the `--dir` run folder, or `--yolo`, with gralph's forced sandbox keys; require one choice on a real run
+6. Build the session flags from `--sandbox-settings`, a `sandbox.json` found in the `--dir` run folder, `--sandbox tight|large` (which writes that file from a preset), or `--yolo`, with gralph's forced sandbox keys; require one choice on a real run (ADR-027)
 7. Save the task file atomically after every task; stop the run on the first failed task; refuse to start when the file already holds a failed task
 8. Stop cleanly on SIGINT or SIGTERM: kill the running process group, leave the interrupted task `pending` and the file untouched, exit 130 for SIGINT and 143 for SIGTERM, in plain mode and in the view (ADR-025)
 9. Support `--dry-run` with gralph's plain-text report, never starting Claude or writing a file; it applies the checks a real run starts with, so it refuses like one (exit 3, including for a `failed` task)
@@ -55,7 +55,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 14. Ask for a missing folder, permission choice, or action lists in modal dialogs over the main window, using gralph's wizard rules, and let any dialog be reopened until Start
 15. Open `tasks.yaml` and `sandbox.json` read-only from the menu
 16. Offer one Actions dialog with two lists, "After each task" and "After the run", starting from the task file (ADR-026)
-17. Offer a permissions setting of the folder's `sandbox.json` (the default when it exists) or skip permissions, never defaulting to unsandboxed
+17. Offer a permissions setting of the settings file (the default when one answered), a Tight or Large preset with three switches and a preview, or skip permissions, never defaulting to unsandboxed; a preset is written to `<folder>/sandbox.json` only when the user presses Start (ADR-027)
 18. Log every real run to `<folder>/logs/<timestamp>/` in both modes: plain mode always, the view through a Logging dropdown that is on by default. If two runs start in the same second, the later run's folder gets a `-1` suffix (then `-2`), and the final name is not reported to the caller
 19. Stop a running view cleanly from a Stop button or Ctrl-C, and install the bundled skill with `--install-skill`
 20. Run the view entirely from the keyboard, without capturing the mouse: every action, including the setup dialogs, has a key
@@ -73,7 +73,7 @@ The gralph decisions that carry over are ADR-001 to ADR-007, ADR-013 to ADR-016,
 
 - Pause, skip, and retry controls in the view. Stop is the only control during a run (ADR-012)
 - A second run in the same view session. A new run means a new launch
-- Editing `tasks.yaml` or `sandbox.json` in the view. The file viewer is read-only
+- Editing `tasks.yaml` or `sandbox.json` in the view. The file viewer is read-only (alr writes `sandbox.json` from a preset; the viewer stays read-only)
 - A default action timeout setting in the view (ADR-015)
 - Checking the installed skill at startup. gralph no longer does (its ADR-022)
 - An agent framework inside `alr`, or any change to behavior aimed at the outside agent. The agent is a separate program that uses `alr` as a tool (ADR-022)
@@ -95,6 +95,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | `--action-timeout <duration>` |     | Duration such as `90s`, `10m`, or `1h30m`; overrides every action's own timeout (renamed from `--gate-timeout`, which is refused) |
 | `--plain`                   |       | Runs plain mode on a terminal. Without it, a terminal run opens the full-screen view   |
 | `--sandbox-settings <path>` |       | Sessions run in Claude's sandbox with this settings file; found by itself as `<folder>/sandbox.json` under `--dir` when neither permission flag is passed |
+| `--sandbox <preset>`        |       | Sandbox sessions with a preset, `tight` or `large` (ADR-027). Writes `<folder>/sandbox.json` at start, replacing any file there; with `--sandbox-settings` or `--yolo` it is a usage error that exits 2; `--dry-run` prints the path and writes nothing |
 | `--yolo`                    |       | New name for gralph's `--skip-permissions` (ADR-021). Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
 | `--commit`                  |       | Removed (ADR-026): a commit is an action in `shared.after_task` now. The flag is refused with exit 2 and a message that says so |
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
@@ -108,7 +109,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | Wire contract          | Stdin text and Claude argv identical to gralph's                                                | Golden test on stdin; argv recorded by the fake `claude`                    |
 | Outcome rule           | Same state and error for every result-line case                                                 | Ported `result_test.go` and `claude_result_test.go` cases                   |
 | Action enforcement     | Completed only when every `after_task` action exits zero; timeouts honored; actions skipped on a failed session; `after_run` runs once at the end, also when every task was already completed | Unit and e2e tests with real shell commands |
-| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; neither or both is a usage error that exits 2; a folder's `sandbox.json` answers the choice, and `--yolo` overrides it | Ported sandbox unit and e2e tests |
+| Session permissions    | Sandboxed argv with the three forced keys, or the bypass flag; none is a usage error on a plain real run and any two exit 2; a folder's `sandbox.json` answers the choice, `--yolo` overrides it, and `--sandbox` replaces it; a preset file that cannot be written is refused as `sandbox-file-unwritable` (exit 3) and leaves the folder as it was | Ported sandbox unit and e2e tests; preset unit and e2e tests |
 | Commits as actions     | A real `git commit` action commits per task and fails the task when it fails; an `after_run` failure exits 4 with the tasks still `completed` | e2e tests with real git repositories in temporary folders |
 | State persistence      | Atomic save after every task; file untouched on cancel | Ported e2e tests check the file after each run                              |
 | Signal handling        | SIGINT and SIGTERM kill the whole process group; exit 130 (SIGINT) or 143 (SIGTERM); no orphans                             | Ported signal e2e tests with the fake `claude` and a descendant process     |

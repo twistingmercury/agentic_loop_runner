@@ -108,6 +108,7 @@ src/alr/
     result.py      last-line JSON result and the outcome rule
     actions.py     run an action list in order, the ALR_* variables, effective timeout, first failure
     sandbox.py     the run folder's sandbox.json, session flags from sandbox settings or --yolo
+    presets.py     the Tight and Large presets: switches, the settings document, the atomic write and its undo (ADR-027)
     proc.py        process groups, kill on cancel
   plain/
     frontend.py    echo the prompt, tee Claude's stdout, pass output through,
@@ -376,6 +377,7 @@ How gralph's packages map onto this:
 - Open a task file that holds failed tasks (`read_tasks`), show them with a cross, keep Start disabled with the reason
   "press r to reset", and reset them to pending (`reset_failed`) after a confirming pop-up (ADR-018)
 - Open `tasks.yaml` and `sandbox.json` in a read-only viewer from the menu
+- Offer the permissions dialog as radios (`Use the settings file <path>` when a file answered, `Tight sandbox`, `Large sandbox`, `Skip permissions (no sandbox)`), three switches (`Sessions may reach the web`, `Sessions may run Docker (outside the sandbox)`, `Hide credential folders`), and a preview of the JSON. The settings strip reads `Permissions: sandbox (tight)`, `sandbox (large)`, `sandbox (tight, adjusted)`, `sandbox`, or `skip`. A preset is written only on Start (ADR-027)
 - Capture no mouse and take every action from the keyboard: `s` starts a run, Ctrl-C stops it, `q` quits, and `f`, `p`, `a`, `t`, `x` open the Folder, Permissions, and Actions dialogs and the `tasks.yaml` and `sandbox.json` viewers; Esc cancels a dialog; the command palette is off (ADR-013)
 
 **Key Characteristics:**
@@ -507,6 +509,9 @@ an action now: put it in shared.after_task, see the README (Migrating from commi
    run log have passed; if that save fails (or, in the view, the save of edited actions does) the run is
    refused as `task-file-unwritable` and the run folder it made is removed, with
    the `logs/` folder too when the run created it and it is empty.
+   With a preset (`--sandbox`, or one chosen in the view), the same step first writes `<folder>/sandbox.json`
+   atomically, keeping the bytes it replaces; a write that fails is refused as `sandbox-file-unwritable`, and a
+   `tasks.yaml` save that fails afterwards puts the previous `sandbox.json` back, or removes the new one (ADR-027).
    The dry run refuses like a real run (exit 3, including `failed-tasks` and `log-unwritable`);
    `--reset-failed` with `--dry-run` is a usage error (exit 2, ADR-018). The view repeats steps 1 to 5 on Start with the dialogs' values
 
@@ -557,7 +562,7 @@ word for word (ADR-007).
 | Error               | Exit       | Raised when                                                                                  |
 |---------------------|------------|----------------------------------------------------------------------------------------------|
 | `UsageError`        | 2          | A flag is missing, conflicts with another, or has a bad value (argparse's own rejections exit 2) |
-| `RefusedError`      | 3          | alr declines to start; carries a reason word (`failed-tasks`, `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`) |
+| `RefusedError`      | 3          | alr declines to start; carries a reason word (`failed-tasks`, `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `sandbox-file-unwritable`) |
 | `FailedTasksError`  | 3          | The task file already holds a failed task; a kind of `RefusedError`                          |
 | `TaskFileError`     | 1          | The task file cannot be read, parsed, validated (including `shared.prompt` and task names without line breaks or other control characters), or saved; at startup it is refused as `invalid-task-file`, or as `task-file-unwritable` when a save at startup fails (the `--reset-failed` reset, or the edited actions in the view) |
 | `RunLogError`       | 1          | The run log cannot be written mid-run; when it cannot be opened at startup it is refused as `log-unwritable` |

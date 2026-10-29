@@ -7,8 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--sandbox tight|large`: sandbox sessions with a preset. It writes
+  `<folder>/sandbox.json` at start, replacing any file there. Tight gives no
+  network, no Docker, and hides the credential folders. Large also allows a
+  fixed list of web hosts and runs `docker *` outside the sandbox. With
+  `--sandbox-settings` or `--yolo` it exits 2. `--dry-run` prints the path and
+  writes nothing.
+- The view's permissions dialog offers Tight and Large, with switches for the
+  web, Docker, and hiding credential folders, and a preview of the file. The
+  settings strip reads `sandbox (tight)`, `sandbox (large)`, or
+  `sandbox (tight, adjusted)`.
+- The refusal reason `sandbox-file-unwritable` (exit 3), for a preset file that
+  cannot be written to the run folder.
+
 ### Changed
 
+- The permissions dialog's path field is gone. A folder's `sandbox.json` is
+  offered as "Use the settings file", and a preset chosen over it replaces it
+  on Start.
 - **Breaking:** the bundled skill `gralph-docs-writer` is now `alr-task-file`; `--install-skill` installs it under that name and leaves an old `gralph-docs-writer` folder in `~/.claude/skills` alone, so remove that folder yourself.
 
 ## [0.1.1] - 2026-10-11
