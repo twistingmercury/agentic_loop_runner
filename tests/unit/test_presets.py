@@ -1,6 +1,9 @@
+import errno
 import json
 import os
+import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -139,8 +142,60 @@ def test_restore_previous_removes_the_file_when_there_was_none(tmp_path: Path) -
 
 
 def test_restore_previous_with_none_and_no_file_is_harmless(tmp_path: Path) -> None:
-    restore_previous(str(tmp_path / "sandbox.json"), None)
+    path = tmp_path / "sandbox.json"
+
+    restore_previous(str(path), None)
+
+    assert not path.exists()
 
 
 def test_preset_path_is_beside_the_task_file() -> None:
     assert preset_path("run dir/tasks.yaml") == "run dir/sandbox.json"
+
+
+_REAL_TEMPORARY_FILE = tempfile.NamedTemporaryFile
+
+
+class _FailingClose:
+    """A temporary file whose flush on close fails, as a full disk does."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self._inner = _REAL_TEMPORARY_FILE(**kwargs)
+        self.name = self._inner.name
+
+    def __enter__(self) -> "_FailingClose":
+        return self
+
+    def write(self, data: bytes) -> int:
+        return self._inner.write(data)
+
+    def __exit__(self, *exc: object) -> None:
+        self._inner.close()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+
+def test_write_preset_removes_the_temporary_when_the_flush_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", _FailingClose)
+
+    with pytest.raises(RefusedError) as excinfo:
+        write_preset(str(tmp_path / "sandbox.json"), switches_for(Preset.TIGHT))
+
+    assert excinfo.value.reason == SANDBOX_FILE_UNWRITABLE
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_preset_removes_the_temporary_when_the_rename_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(self: Path, target: object) -> Path:
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+
+    with pytest.raises(RefusedError) as excinfo:
+        write_preset(str(tmp_path / "sandbox.json"), switches_for(Preset.TIGHT))
+
+    assert excinfo.value.reason == SANDBOX_FILE_UNWRITABLE
+    assert list(tmp_path.iterdir()) == []

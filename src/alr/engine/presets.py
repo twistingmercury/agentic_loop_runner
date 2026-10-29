@@ -107,17 +107,14 @@ def _read_previous(target: Path) -> bytes | None:
 
 def _replace_atomically(target: Path, data: bytes) -> None:
     # The temporary file sits beside the target so the rename stays on one filesystem.
-    with tempfile.NamedTemporaryFile(
+    handle = tempfile.NamedTemporaryFile(
         dir=target.parent, prefix=".sandbox-", suffix=".json", delete=False
-    ) as handle:
-        temp = Path(handle.name)
-        try:
-            handle.write(data)
-        except OSError:
-            temp.unlink(missing_ok=True)
-            raise
-
+    )
+    temp = Path(handle.name)
     try:
+        # A write failure can surface only when the handle closes and flushes.
+        with handle:
+            handle.write(data)
         temp.replace(target)
     except OSError:
         temp.unlink(missing_ok=True)
