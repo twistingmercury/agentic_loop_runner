@@ -1,6 +1,7 @@
 """The plain real run: load, then run the loop."""
 
 import asyncio
+import errno
 import json
 import os
 from datetime import datetime, timezone
@@ -18,6 +19,8 @@ from helpers import (
     write_file,
 )
 
+from alr.engine import presets as presets_module
+from alr.engine.presets import Preset, Switches, render, switches_for
 from alr.engine.sandbox import bypass_args
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
@@ -27,6 +30,7 @@ from alr.errors import (
     RunError,
     RunLogError,
 )
+from alr.plain import start as start_module
 from alr.plain.start import start
 from alr.record.events import Activity, Event
 from alr.record.runlog import RunLog, run_dir
@@ -58,6 +62,7 @@ async def _start(
     tasks_file: str,
     reset_failed: bool = False,
     sandbox_settings: str = "",
+    switches: Switches | None = None,
 ) -> None:
     await start(
         tasks_file,
@@ -65,6 +70,7 @@ async def _start(
         bypass_args(),
         reset_failed,
         sandbox_settings=sandbox_settings,
+        switches=switches,
     )
 
 
@@ -479,3 +485,139 @@ async def test_start_log_write_failure_stops_the_run_and_the_child(
     assert ledger[-1]["result"] == "failed", "a failed log write must not claim success"
     assert ledger[-1]["exit"] == 1
     assert ledger[-1]["error"] == "RunLogError: disk full"
+
+
+TIGHT = switches_for(Preset.TIGHT)
+
+
+def _refuse_task_save(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the task file save alone; block_saving would fail the preset's rename too."""
+
+    def refuse(tasks_file: str, task_list: object) -> None:
+        raise RefusedError(
+            "task-file-unwritable", f"failed to save tasks to {tasks_file}"
+        )
+
+    monkeypatch.setattr(start_module, "save_for_start", refuse)
+
+
+def _preset_file(tasks_file: str) -> Path:
+    return Path(tasks_file).parent / "sandbox.json"
+
+
+async def test_start_writes_the_preset_before_running(
+    record: Path, tmp_path: Path
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
+    path = _preset_file(tasks_file)
+
+    await _start(tasks_file, sandbox_settings=str(path), switches=TIGHT)
+
+    assert path.read_text(encoding="utf-8") == render(TIGHT)
+    assert _calls(record) == 1
+
+
+async def test_start_puts_the_old_sandbox_json_back_when_the_task_file_save_fails(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    path = _preset_file(tasks_file)
+    path.write_bytes(b"old")
+    _refuse_task_save(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(
+            tasks_file,
+            reset_failed=True,
+            sandbox_settings=str(path),
+            switches=TIGHT,
+        )
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert path.read_bytes() == b"old"
+    assert not (tmp_path / "logs").exists()
+    assert _calls(record) == 0
+
+
+async def test_start_removes_the_new_sandbox_json_when_the_task_file_save_fails(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    path = _preset_file(tasks_file)
+    _refuse_task_save(monkeypatch)
+
+    with pytest.raises(RefusedError):
+        await _start(
+            tasks_file,
+            reset_failed=True,
+            sandbox_settings=str(path),
+            switches=TIGHT,
+        )
+
+    assert not path.exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores folder permissions")
+async def test_start_refuses_when_the_sandbox_json_cannot_be_written(
+    record: Path, tmp_path: Path
+) -> None:
+    # A pending reset makes the order observable: the preset goes first, so a
+    # refused preset leaves the task file as it was.
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    path = _preset_file(tasks_file)
+    (tmp_path / "logs").mkdir()
+    tmp_path.chmod(0o555)
+    try:
+        with pytest.raises(RefusedError) as caught:
+            await _start(
+                tasks_file,
+                reset_failed=True,
+                sandbox_settings=str(path),
+                switches=TIGHT,
+            )
+    finally:
+        tmp_path.chmod(0o755)
+
+    assert caught.value.reason == "sandbox-file-unwritable"
+    assert caught.value.exit_code == 3
+    assert Path(tasks_file).read_text(encoding="utf-8") == FAILED_TASK_YAML
+    assert list((tmp_path / "logs").iterdir()) == [], "only the run folder goes"
+    assert _calls(record) == 0
+
+
+async def test_start_still_discards_the_run_folder_when_the_restore_fails(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    path = _preset_file(tasks_file)
+    path.write_bytes(b'{"mine": true}')
+    _refuse_task_save(monkeypatch)
+    _fail_the_second_atomic_write(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(
+            tasks_file,
+            reset_failed=True,
+            sandbox_settings=str(path),
+            switches=TIGHT,
+        )
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert path.read_bytes() == render(TIGHT).encode("utf-8"), "never left empty"
+    assert not (tmp_path / "logs").exists()
+    assert _calls(record) == 0
+
+
+def _fail_the_second_atomic_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let the preset write through and fail the restore that follows it."""
+    real = presets_module._replace_atomically
+    calls: list[Path] = []
+
+    def flaky(target: Path, data: bytes) -> None:
+        calls.append(target)
+        if len(calls) > 1:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        real(target, data)
+
+    monkeypatch.setattr(presets_module, "_replace_atomically", flaky)

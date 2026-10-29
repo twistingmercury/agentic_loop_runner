@@ -50,8 +50,8 @@ tasks:
 # Validate the task file only; launches no agent and changes no files.
 alr -d .local/feature --dry-run
 
-# Run the tasks, with Claude in its sandbox.
-alr -d .local/feature --sandbox-settings ~/sandbox.json
+# Run the tasks, with Claude in a tight sandbox.
+alr -d .local/feature --sandbox tight
 
 # Install the bundled task-file skill into ~/.claude/skills and exit.
 alr --install-skill
@@ -86,6 +86,7 @@ plain output.
 | `--dir <folder>`             | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
 | `--dry-run`                  |       | Validate and report only; prints each action's limit in `after_task:` and `after_run:` lines |
 | `--sandbox-settings <path>`  |       | Run sessions in Claude's sandbox with this settings file                                 |
+| `--sandbox <preset>`         |       | Sandbox sessions with a preset, `tight` or `large`; written to `<folder>/sandbox.json` at start, replacing an existing file |
 | `--yolo`                     |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
 | `--reset-failed`             |       | Set every failed task back to pending before the run, without asking                     |
 | `--install-skill`            |       | Install the bundled `alr-task-file` skill into `~/.claude/skills` and exit                |
@@ -93,8 +94,38 @@ plain output.
 | `--action-timeout <duration>` |      | Limit for every action, such as `90s` or `10m`; overrides each action's own timeout      |
 | `--version`                  | `-v`  | Print the version, the OS, and the architecture                                          |
 
-A real run needs one of `--sandbox-settings` (or a folder's `sandbox.json`) or
-`--yolo`; the full-screen view asks in a dialog when neither is given.
+A real run needs one answer to the permissions question: `--sandbox-settings`
+(or a folder's `sandbox.json`), `--sandbox`, or `--yolo`. Any two of the three
+flags exit 2. The full-screen view asks in a dialog when none is given.
+
+### Sandbox presets
+
+A preset is a fixed answer to "what may sessions touch?" that `alr` turns into a
+settings file, so you do not write one.
+
+- **Tight** gives sessions no network and no Docker, and hides your credential
+  folders.
+- **Large** lets sessions reach a fixed list of package and source hosts, and
+  runs `docker *` outside the sandbox, with your full access. It also hides the
+  credential folders.
+
+The credential folders are `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`,
+`~/.netrc`, and `~/.claude`. The hosts are `github.com`,
+`*.githubusercontent.com`, `crates.io`, `*.crates.io`, `pypi.org`,
+`files.pythonhosted.org`, `registry.npmjs.org`, `proxy.golang.org`,
+`sum.golang.org`, and `storage.googleapis.com`.
+
+The full-screen view adds three switches to the permissions dialog: sessions may
+reach the web, sessions may run Docker (outside the sandbox), and hide
+credential folders. A preview shows the file. The command line has the two
+presets and no switches.
+
+The file is written to `<folder>/sandbox.json` when you press Start (or, in
+plain mode, when the run starts), after every check has passed. Cancel or Quit
+discards it, and a refused run leaves the folder as it was. The file is
+`alr`'s to replace: a preset overwrites whatever `sandbox.json` is there, and a
+later run of the folder picks the file up with no flag. A `--dry-run` prints the
+path and writes nothing.
 
 ### Actions
 
@@ -175,6 +206,7 @@ A refusal's first line on stderr is `error: refused: <reason>: <message>`, such 
 | `invalid-sandbox-settings` | The sandbox settings file is unreadable or invalid                                    |
 | `log-unwritable`           | The run log folder cannot be created or opened                                        |
 | `task-file-unwritable`     | A save at startup failed: the `--reset-failed` reset, or edited actions in the view   |
+| `sandbox-file-unwritable`  | The preset's `sandbox.json` could not be written to the run folder                    |
 
 The run log's `run_finished` line has the `result` (`completed`, `failed`,
 `run_failed`, or `stopped`), the `error`, and the `exit` code. Every action

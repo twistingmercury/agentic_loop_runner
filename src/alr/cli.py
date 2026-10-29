@@ -7,10 +7,17 @@ import signal
 import sys
 from collections.abc import Callable, Coroutine
 from importlib import metadata
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from alr.engine.sandbox import bypass_args, folder_sandbox, sandbox_args
+from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
+from alr.engine.sandbox import (
+    bypass_args,
+    folder_sandbox,
+    sandbox_args,
+    settings_args,
+)
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RunCancelledError, UsageError
 from alr.plain.dryrun import dry_run
@@ -45,6 +52,15 @@ _GATE_TIMEOUT_RENAMED = "--gate-timeout: renamed to --action-timeout"
 _COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in shared.after_task, see the README (Migrating from commit modes and gates)"
 
 
+@dataclass(frozen=True)
+class Answer:
+    """What the permission flags settle: a settings file, the skip choice, or a preset's switches."""
+
+    sandbox_file: str
+    skip: bool
+    switches: Switches | None
+
+
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     """Apply the startup checks in gralph's order, then start the dry run or the real run."""
     if args.gate_timeout is not None:
@@ -64,21 +80,23 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 
     try:
         tasks_file = resolve_dir(args.dir)
-        sandbox_settings = resolve_sandbox(args.dir, args.sandbox_settings, args.yolo)
+        answer = resolve_permissions(
+            args.dir, args.sandbox_settings, args.yolo, args.sandbox
+        )
         # An explicitly empty value counts as passed, and is bad.
         if args.action_timeout is not None:
             check_action_timeout(args.action_timeout)
 
         check_reset_flag(args.reset_failed, args.dry_run)
         if wants_tui(args):
-            return _open_view(args, tasks_file, sandbox_settings)
+            return _open_view(args, tasks_file, answer)
 
         missing = _missing_flags(tasks_file)
         if missing:
             _report_missing(parser, missing)
             return UsageError.exit_code
 
-        session = session_args(sandbox_settings, args.yolo, args.dry_run)
+        session = session_args(answer, args.dry_run)
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code
@@ -91,7 +109,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
                 sys.stdout,
                 tasks_file,
                 action_timeout,
-                sandbox_settings,
+                answer.sandbox_file,
+                Preset(args.sandbox) if args.sandbox else None,
             ),
             stop,
         )
@@ -102,8 +121,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             action_timeout,
             session,
             args.reset_failed,
-            sandbox_settings=sandbox_settings,
+            sandbox_settings=answer.sandbox_file,
             stop=stop,
+            switches=answer.switches,
         ),
         stop,
     )
@@ -128,25 +148,30 @@ def wants_tui(args: argparse.Namespace) -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _open_view(args: argparse.Namespace, tasks_file: str, sandbox_file: str) -> int:
+def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int:
     """Open the full-screen view with what the flags already answer."""
     # Validates a given settings file; no run starts here.
-    session_args(sandbox_file, args.yolo, dry_run=True)
+    session_args(answer, dry_run=True)
+    preset = Preset(args.sandbox) if args.sandbox else None
+    sandbox_file = answer.sandbox_file
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
-        permissions=_permissions(sandbox_file, args.yolo),
+        permissions=_permissions(sandbox_file, args.yolo, preset),
         action_timeout=args.action_timeout or "",
         reset_failed=args.reset_failed,
+        preset=preset,
+        switches=answer.switches,
     )
     return run_app(settings)
 
 
-def _permissions(sandbox_file: str, skip: bool) -> Permissions:
+def _permissions(sandbox_file: str, skip: bool, preset: Preset | None) -> Permissions:
+    """Name the answer the flags give: skip, a sandbox from a preset or file, or none yet."""
     if skip:
         return Permissions.SKIP
 
-    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
+    return Permissions.SANDBOX if preset or sandbox_file else Permissions.UNSET
 
 
 class _BareMetavarFormatter(argparse.HelpFormatter):
@@ -212,6 +237,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --yolo",
     )
     parser.add_argument(
+        "--sandbox",
+        choices=["tight", "large"],
+        default=None,
+        metavar="<preset>",
+        help="Sandbox sessions with a preset, tight or large, written to <folder>/sandbox.json at start; replaces an existing file there",
+    )
+    parser.add_argument(
         "--yolo",
         action="store_true",
         help="Run sessions with no sandbox and no permission checks (claude --dangerously-skip-permissions); what they do is on you",
@@ -236,16 +268,33 @@ def resolve_dir(dir: str) -> str:
     return str(path)
 
 
-def resolve_sandbox(dir: str, sandbox_settings: str, skip: bool) -> str:
-    """Return the sandbox settings path, taking the run folder's sandbox.json when no flag chose.
+def resolve_permissions(
+    dir: str, sandbox_settings: str, skip: bool, preset: str | None
+) -> Answer:
+    """Return the permissions the flags choose, taking the run folder's sandbox.json when no flag chose.
 
-    The folder only ever supplies the sandboxed choice: either explicit
-    permission flag wins, and --yolo is how a run opts out.
+    The folder only ever supplies the sandboxed choice: any permission flag
+    wins, and --yolo is how a run opts out. A preset is written to the
+    folder's sandbox.json at start, so that is the file it names.
     """
-    if not dir or sandbox_settings or skip:
-        return sandbox_settings
+    if preset is not None:
+        return _preset_answer(dir, sandbox_settings, skip, preset)
 
-    return folder_sandbox(dir) or ""
+    if not dir or sandbox_settings or skip:
+        return Answer(sandbox_settings, skip, None)
+
+    return Answer(folder_sandbox(dir) or "", skip, None)
+
+
+def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> Answer:
+    """Return the answer for --sandbox, refusing it beside another permission flag."""
+    if sandbox_settings or skip:
+        raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
+
+    switches = switches_for(Preset(preset))
+    # Without -d the path would be relative to nowhere; the view's folder pick settles it.
+    path = preset_path(str(Path(dir) / "tasks.yaml")) if dir else ""
+    return Answer(path, False, switches)
 
 
 def check_action_timeout(value: str) -> None:
@@ -264,20 +313,23 @@ def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:
         )
 
 
-def session_args(sandbox_file: str, skip: bool, dry_run: bool) -> list[str]:
+def session_args(answer: Answer, dry_run: bool) -> list[str]:
     """Return the claude flags that set what a session may do.
 
     A run must choose a sandbox or ask by name to go without one: there is no
     default, so nobody runs unsandboxed by accident. A dry run starts no
     session and needs neither, but its sandbox file is still checked.
     """
-    if sandbox_file and skip:
+    if answer.switches is not None:
+        return settings_args(render(answer.switches))
+
+    if answer.sandbox_file and answer.skip:
         raise UsageError("--sandbox-settings and --yolo cannot be used together")
 
-    if sandbox_file:
-        return sandbox_args(sandbox_file)
+    if answer.sandbox_file:
+        return sandbox_args(answer.sandbox_file)
 
-    if skip:
+    if answer.skip:
         return bypass_args()
 
     if dry_run:

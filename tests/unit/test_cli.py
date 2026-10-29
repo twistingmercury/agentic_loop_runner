@@ -1,6 +1,7 @@
 """The command line: flags, startup checks in gralph's order, routing, and stopping on a signal."""
 
 import asyncio
+import json
 import os
 import platform
 import re
@@ -13,6 +14,8 @@ import pytest
 from helpers import start_alr, wait_for_file
 
 from alr import cli
+from alr.engine.presets import Preset, Switches, render, switches_for
+from alr.engine.sandbox import settings_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
 from alr.tui.settings import Permissions, RunSettings
@@ -27,6 +30,7 @@ SANDBOXED = [
     '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true}}',
 ]
 BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
+PRESET_CONFLICT = "--sandbox cannot be used with --sandbox-settings or --yolo"
 NO_PERMISSIONS = "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
 BAD_DURATION = "--action-timeout: must be a duration string such as 90s or 10m"
 ACTION_TIMEOUT_FLAG = "--action-timeout"
@@ -48,7 +52,7 @@ def settings(tmp_path: Path) -> str:
 def test_session_args_sandbox_file(
     settings: str, skip: bool, dry_run: bool, want: list[str]
 ) -> None:
-    assert cli.session_args(settings, skip, dry_run) == want
+    assert cli.session_args(cli.Answer(settings, skip, None), dry_run) == want
 
 
 @pytest.mark.parametrize(
@@ -78,7 +82,7 @@ def test_session_args_errors(
     path = str(tmp_path / file) if file else ""
 
     with pytest.raises(error) as caught:
-        cli.session_args(path, skip, dry_run)
+        cli.session_args(cli.Answer(path, skip, None), dry_run)
 
     assert want in str(caught.value)
 
@@ -379,6 +383,7 @@ def _capture_start(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         reset_failed: bool,
         sandbox_settings: str = "",
         stop: Stop | None = None,
+        switches: Switches | None = None,
     ) -> None:
         sessions.append(session)
 
@@ -741,3 +746,129 @@ def test_the_old_gate_timeout_flag_is_hidden_from_help(
     out = capsys.readouterr().out
     assert "--gate-timeout" not in out
     assert "--action-timeout" in out
+
+
+@pytest.mark.parametrize("other", ["--sandbox-settings=x.json", "--yolo"])
+def test_sandbox_preset_with_another_permission_flag_exits_2(
+    other: str, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["-d", str(folder), "--sandbox", "tight", other]) == 2
+    assert capsys.readouterr().err == f"error: {PRESET_CONFLICT}\n"
+
+
+def test_sandbox_preset_rejects_an_unknown_value(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["-d", str(folder), "--sandbox", "huge"])
+
+    assert caught.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def _argv(record: Path) -> list[str]:
+    """The flags the fake claude was started with, on its first call."""
+    line = record.read_text(encoding="utf-8").splitlines()[0]
+    return json.loads(line)["argv"]
+
+
+@pytest.mark.parametrize(
+    ("flag", "preset"), [("tight", Preset.TIGHT), ("large", Preset.LARGE)]
+)
+def test_sandbox_preset_writes_the_folder_file_and_sandboxes_the_run(
+    flag: str, preset: Preset, folder: Path, record: Path
+) -> None:
+    want = render(switches_for(preset))
+
+    assert cli.main(["-d", str(folder), "--plain", "--sandbox", flag]) == 0
+    assert (folder / "sandbox.json").read_text(encoding="utf-8") == want
+    assert settings_args(want) == _argv(record)[1 : 1 + len(settings_args(want))]
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_sandbox_large_replaces_an_existing_folder_file(folder: Path) -> None:
+    _add_sandbox(folder, "{}")
+
+    assert cli.main(["-d", str(folder), "--sandbox", "large"]) == 0
+    assert (folder / "sandbox.json").read_text(encoding="utf-8") == render(
+        switches_for(Preset.LARGE)
+    )
+
+
+def test_sandbox_preset_wins_over_the_folders_file_for_the_session_flags(
+    folder: Path, record: Path
+) -> None:
+    _add_sandbox(folder, '{"sandbox":{"filesystem":{"denyRead":["~/"]}}}')
+    want = settings_args(render(switches_for(Preset.TIGHT)))
+
+    assert cli.main(["-d", str(folder), "--sandbox", "tight"]) == 0
+    assert want == _argv(record)[1 : 1 + len(want)]
+    assert '"~/"' not in " ".join(_argv(record))
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_relative_folder_with_spaces_gets_its_sandbox_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = tmp_path / "run dir"
+    run.mkdir()
+    (run / "tasks.yaml").write_text(ONE_TASK_YAML, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["-d", "run dir", "--sandbox", "tight"]) == 0
+    assert (run / "sandbox.json").exists()
+    (log,) = (run / "logs").glob("*/run.jsonl")
+    first = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+    assert first["sandbox_settings"] == "run dir/sandbox.json"
+
+
+def test_dry_run_with_a_preset_names_the_file_and_writes_nothing(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["-d", str(folder), "--dry-run", "--sandbox", "tight"]) == 0
+    assert (
+        f"sandbox settings: {folder}/sandbox.json (tight preset; written on a real run)"
+        in capsys.readouterr().out
+    )
+    assert not (folder / "sandbox.json").exists()
+
+
+def test_the_view_refuses_a_preset_with_another_permission_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--sandbox", "tight", "--yolo"])
+
+    assert code == 2
+    assert PRESET_CONFLICT in capsys.readouterr().err
+    assert seen == []
+
+
+def test_the_view_gets_the_preset_from_the_flag(
+    monkeypatch: pytest.MonkeyPatch, folder: Path
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--sandbox", "large"])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].preset is Preset.LARGE
+    assert seen[0].switches == switches_for(Preset.LARGE)
+    assert seen[0].sandbox_file == str(folder / "sandbox.json")
+
+
+def test_the_view_leaves_the_preset_path_empty_until_a_folder_is_chosen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(["--sandbox", "tight"])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].preset is Preset.TIGHT
+    assert seen[0].sandbox_file == ""

@@ -11,6 +11,7 @@ from textual.events import DescendantFocus
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     DirectoryTree,
     Input,
     Label,
@@ -26,7 +27,9 @@ from alr.durations import format_elapsed
 from alr.errors import AlrError, RefusedError
 from alr.tasks import Action, Task, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
-from alr.tui.settings import Permissions
+from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
+from alr.engine.sandbox import folder_sandbox
+from alr.tui.settings import Permissions, RunSettings
 
 
 def error_text(exc: AlrError) -> str:
@@ -219,38 +222,165 @@ class FolderDialog(_Dialog[FolderCheck]):
 
 @dataclass(frozen=True)
 class PermissionChoice:
-    """How sessions run, and the settings file when sandboxed."""
+    """How sessions run: a preset with its switches, a settings file as it is, or skip."""
 
     permissions: Permissions
     sandbox_file: str
+    preset: Preset | None
+    switches: Switches | None
 
 
 class PermissionsDialog(_Dialog[PermissionChoice]):
-    """Sandbox settings file, or skip permissions; nothing is pre-selected without a folder file."""
+    """Pick Tight or Large and adjust the three switches, use a settings file, or skip permissions."""
 
     DEFAULT_CSS = """
-    PermissionsDialog #dialog { width: 80%; max-width: 90; }
+    PermissionsDialog #dialog { width: 90%; max-width: 110; height: 96%; max-height: 96%; padding: 0 2; }
+    PermissionsDialog Button { border: none; height: 1; min-height: 1; }
+    PermissionsDialog #ok, PermissionsDialog #cancel { border: none; height: 1; }
+    /* The preview takes what is left, so the buttons stay on screen however long the document is. */
+    PermissionsDialog #preview { height: 1fr; min-height: 6; overflow-y: auto; }
+    PermissionsDialog Checkbox { border: none; height: 1; padding: 0; }
+    /* Borderless radios and a one-row button bar keep OK on an 80x24 screen at the tallest state. */
+    PermissionsDialog RadioSet, PermissionsDialog RadioSet:focus { border: none; padding: 0; }
+    PermissionsDialog Horizontal { height: 1; }
     """
 
-    def __init__(self, default_file: str) -> None:
+    def __init__(self, settings: RunSettings) -> None:
         super().__init__()
-        self._default_file = default_file
+        self._settings = settings
+        self._folder_file = _folder_file(settings)
+        self._answered = _answered_file(settings)
+        self._file = self._answered or self._folder_file or ""
+        self._start = self._first_radio()
+
+    def _first_radio(self) -> str:
+        """The id of the radio that starts pressed."""
+        if self._answered:
+            return "file"
+
+        if self._settings.preset is not None:
+            return self._settings.preset.value
+
+        if self._settings.permissions is Permissions.SKIP:
+            return "skip"
+
+        return Preset.TIGHT.value
+
+    def _first_switches(self) -> Switches:
+        """The switch positions that start shown: the ones already chosen, else Tight's."""
+        if self._settings.switches is not None:
+            return self._settings.switches
+
+        return switches_for(self._settings.preset or Preset.TIGHT)
 
     def compose(self) -> ComposeResult:
+        switches = self._first_switches()
+        off = self._start not in _PRESET_IDS
         with Vertical(id="dialog"):
             yield Label("How should sessions run?")
             with RadioSet():
-                yield RadioButton(
-                    "Sandbox, with a settings file",
-                    id="sandbox",
-                    value=bool(self._default_file),
+                if self._file:
+                    yield self._radio("file", f"Use the settings file {self._file}")
+
+                yield self._radio(
+                    "tight", "Tight sandbox   no web, no Docker, keys hidden"
                 )
-                yield RadioButton("Skip permissions (no sandbox)", id="skip")
-            yield Input(value=self._default_file, placeholder="sandbox.json", id="file")
+                yield self._radio("large", "Large sandbox   web and Docker allowed")
+                yield self._radio("skip", "Skip permissions (no sandbox)")
+
+            yield Checkbox(
+                "Sessions may reach the web", switches.web, id="web", disabled=off
+            )
+            yield Checkbox(
+                "Sessions may run Docker (outside the sandbox)",
+                switches.docker,
+                id="docker",
+                disabled=off,
+            )
+            yield Checkbox(
+                "Hide credential folders",
+                switches.hide_credentials,
+                id="hide",
+                disabled=off,
+            )
+            yield Static("", id="preview", markup=False)
+            yield Static("", id="note", markup=False)
             yield Static("", id="error")
             with Horizontal():
                 yield Button("OK", id="ok")
                 yield Button("Cancel", id="cancel")
+
+    def _radio(self, radio_id: str, label: str) -> RadioButton:
+        return RadioButton(label, id=radio_id, value=radio_id == self._start)
+
+    def on_mount(self) -> None:
+        self._refresh_preview()
+
+    def on_radio_set_changed(self, message: RadioSet.Changed) -> None:
+        radio_id = message.pressed.id or ""
+        for box in self.query(Checkbox):
+            box.disabled = radio_id not in _PRESET_IDS
+
+        if radio_id in _PRESET_IDS:
+            self._show_switches(switches_for(Preset(radio_id)))
+
+        self._refresh_preview()
+
+    def on_checkbox_changed(self) -> None:
+        self._refresh_preview()
+
+    def _show_switches(self, switches: Switches) -> None:
+        """Set the three checkboxes; the caller refreshes the preview once."""
+        with self.prevent(Checkbox.Changed):
+            self.query_one("#web", Checkbox).value = switches.web
+            self.query_one("#docker", Checkbox).value = switches.docker
+            self.query_one("#hide", Checkbox).value = switches.hide_credentials
+
+    def _pressed(self) -> str:
+        """The id of the pressed radio."""
+        button = self.query_one(RadioSet).pressed_button
+        return button.id or "" if button else ""
+
+    def _switches(self) -> Switches:
+        """The switch positions the checkboxes show now."""
+        return Switches(
+            web=self.query_one("#web", Checkbox).value,
+            docker=self.query_one("#docker", Checkbox).value,
+            hide_credentials=self.query_one("#hide", Checkbox).value,
+        )
+
+    def _refresh_preview(self) -> None:
+        """Show the document the chosen radio stands for, and what Start does with it."""
+        pressed = self._pressed()
+        preview = ""
+        note = ""
+        if pressed in _PRESET_IDS:
+            preview = render(self._switches())
+            note = self._written_note()
+        elif pressed == "file":
+            preview = _file_preview(self._file)
+            note = "Nothing is written. Pick a preset to replace it."
+
+        self.query_one("#preview", Static).update(preview)
+        self.query_one("#note", Static).update(note)
+
+    def _written_note(self) -> str:
+        """Say where a preset is written, and that a folder file is replaced."""
+        note = (
+            f"Written to {self._preset_file()} when you press Start."
+            " Cancel or Quit discards it."
+        )
+        if self._folder_file:
+            note += " Replaces the file there."
+
+        return note
+
+    def _preset_file(self) -> str:
+        """Where a preset goes: beside the task file, or a stand-in before a folder is chosen."""
+        if self._settings.tasks_file:
+            return preset_path(self._settings.tasks_file)
+
+        return "<folder>/sandbox.json"
 
     def on_button_pressed(self, message: Button.Pressed) -> None:
         if message.button.id == "cancel":
@@ -259,26 +389,65 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
 
         self._accept()
 
-    def on_input_submitted(self) -> None:
-        self._accept()
-
     def _accept(self) -> None:
-        if self.query_one("#skip", RadioButton).value:
-            self.dismiss(PermissionChoice(Permissions.SKIP, ""))
+        pressed = self._pressed()
+        if pressed == "skip":
+            self.dismiss(PermissionChoice(Permissions.SKIP, "", None, None))
             return
 
-        if not self.query_one("#sandbox", RadioButton).value:
-            self.query_one("#error", Static).update("choose sandbox or skip")
+        if pressed == "file":
+            self._accept_file()
             return
 
-        path = self.query_one("#file", Input).value
+        self.dismiss(
+            PermissionChoice(
+                Permissions.SANDBOX,
+                preset_path(self._settings.tasks_file)
+                if self._settings.tasks_file
+                else "",
+                Preset(pressed),
+                self._switches(),
+            )
+        )
+
+    def _accept_file(self) -> None:
+        """Check the settings file as the run will read it; an error keeps the user here."""
         try:
-            check_sandbox(path)
+            check_sandbox(self._file)
         except AlrError as exc:
             self.query_one("#error", Static).update(error_text(exc))
             return
 
-        self.dismiss(PermissionChoice(Permissions.SANDBOX, path))
+        self.dismiss(PermissionChoice(Permissions.SANDBOX, self._file, None, None))
+
+
+_PRESET_IDS = frozenset(preset.value for preset in Preset)
+
+
+def _answered_file(settings: RunSettings) -> str:
+    """The settings file already answering the question, or an empty string."""
+    if settings.permissions is Permissions.SANDBOX and settings.switches is None:
+        return settings.sandbox_file
+
+    return ""
+
+
+def _folder_file(settings: RunSettings) -> str | None:
+    """The run folder's sandbox.json when it has one."""
+    if not settings.tasks_file:
+        return None
+
+    return folder_sandbox(str(Path(settings.tasks_file).parent))
+
+
+def _file_preview(path: str) -> str:
+    """The settings file as it is on disk under a header, or why it cannot be read."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"{path} is not accessible: {exc.strerror}"
+
+    return f"{path} (as it is)\n{text}"
 
 
 class ActionsDialog(_Dialog[tuple[list[Action], list[Action]]]):

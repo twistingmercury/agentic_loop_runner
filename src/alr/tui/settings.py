@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from alr.engine.sandbox import bypass_args, sandbox_args
+from alr.engine.presets import Preset, Switches, render, switches_for
+from alr.engine.sandbox import bypass_args, sandbox_args, settings_args
 from alr.tasks import Action
 
 
@@ -25,6 +26,12 @@ class RunSettings:
     permissions: Permissions = Permissions.UNSET
     logging: bool = True
 
+    preset: Preset | None = None
+    """The radio chosen in the permissions dialog; None for skip and for a settings file."""
+
+    switches: Switches | None = None
+    """The switch positions to write to sandbox_file on Start; None for a settings file answer."""
+
     reset_failed: bool = False
     """--reset-failed: failed tasks go back to pending when the file is first read."""
 
@@ -44,7 +51,12 @@ class RunSettings:
             return "choose how sessions run"
 
         if self.permissions is Permissions.SANDBOX and not self.sandbox_file:
-            return "choose a sandbox settings file"
+            # A preset's file path comes from the folder, so the folder is what is missing.
+            return (
+                "choose a run folder"
+                if self.switches is not None
+                else "choose a sandbox settings file"
+            )
 
         return None
 
@@ -53,7 +65,24 @@ class RunSettings:
         if self.permissions is Permissions.SKIP:
             return bypass_args()
 
+        if self.switches is not None:
+            return settings_args(render(self.switches))
+
         return sandbox_args(self.sandbox_file)
+
+    def permissions_text(self) -> str:
+        """Say how sessions run, for the strip: not chosen, skip, or sandbox with its preset."""
+        if self.permissions is Permissions.UNSET:
+            return "not chosen"
+
+        if self.permissions is Permissions.SKIP:
+            return "skip"
+
+        if self.preset is None or self.switches is None:
+            return "sandbox"
+
+        adjusted = self.switches != switches_for(self.preset)
+        return f"sandbox ({self.preset}{', adjusted' if adjusted else ''})"
 
     def log_folder(self) -> Path:
         """Where the run's log folder goes: beside the task file."""

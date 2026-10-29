@@ -28,7 +28,12 @@ def sandbox_args(path: str) -> list[str]:
     The settings travel inline, so there is no temporary file to clean up, and
     the file at path is never written.
     """
-    settings = _force_sandbox(_read_settings(path))
+    return settings_args(_read_settings(path))
+
+
+def settings_args(text: str) -> list[str]:
+    """Return the flags for a sandboxed session, from Claude Code settings held in text."""
+    settings = _force_sandbox(text)
     return ["--permission-mode", "acceptEdits", "--settings", settings]
 
 

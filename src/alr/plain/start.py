@@ -13,6 +13,7 @@ from alr.engine.loop import (
     run,
     save_for_start,
 )
+from alr.engine.presets import Switches, restore_after_refusal, write_preset
 from alr.engine.stop import Stop
 from alr.errors import (
     INVALID_TASK_FILE,
@@ -35,12 +36,15 @@ async def start(
     reset: bool = False,
     sandbox_settings: str = "",
     stop: Stop | None = None,
+    switches: Switches | None = None,
 ) -> None:
     """Run the loop in plain mode: load, then run every pending task.
 
     With reset, failed tasks go back to pending, without a word. The reset
     reaches the disk only after the run log has opened, so a refused run
     changes nothing on disk.
+    With switches, the preset is written to sandbox_settings after the log
+    opens; a refused save of the reset puts the old file back.
     Every run is logged in a new folder under logs/ beside the task file.
     """
     task_list = _read_for_start(tasks_file)
@@ -50,8 +54,9 @@ async def start(
     info = _info(tasks_file, action_timeout, sandbox_settings)
     log = RunLog.open(path, info)
     try:
-        if reset_count:
-            _save_reset(tasks_file, task_list, log)
+        _prepare_disk(
+            tasks_file, task_list, log, reset_count, sandbox_settings, switches
+        )
 
         await _run_logged(
             task_list,
@@ -75,13 +80,46 @@ def _read_for_start(tasks_file: str) -> TaskList:
         ) from exc
 
 
-def _save_reset(tasks_file: str, task_list: TaskList, log: RunLog) -> None:
-    """Save the reset; a refused save takes the run folder it just made with it."""
+def _prepare_disk(
+    tasks_file: str,
+    task_list: TaskList,
+    log: RunLog,
+    reset_count: int,
+    sandbox_settings: str,
+    switches: Switches | None,
+) -> None:
+    """Write the preset, then save the reset; a refusal of either takes the run folder with it."""
     try:
-        save_for_start(tasks_file, task_list)
+        _write_then_save(tasks_file, task_list, reset_count, sandbox_settings, switches)
     except RefusedError:
         log.discard()
         raise
+
+
+def _write_then_save(
+    tasks_file: str,
+    task_list: TaskList,
+    reset_count: int,
+    sandbox_settings: str,
+    switches: Switches | None,
+) -> None:
+    """Write the preset and save the reset; a refused save puts the old preset back."""
+    if switches is None:
+        _save_reset(tasks_file, task_list, reset_count)
+        return
+
+    previous = write_preset(sandbox_settings, switches)
+    try:
+        _save_reset(tasks_file, task_list, reset_count)
+    except RefusedError as refusal:
+        restore_after_refusal(sandbox_settings, previous, refusal)
+        raise
+
+
+def _save_reset(tasks_file: str, task_list: TaskList, reset_count: int) -> None:
+    """Save the reset, when there is one."""
+    if reset_count:
+        save_for_start(tasks_file, task_list)
 
 
 def _info(tasks_file: str, action_timeout: str, sandbox_settings: str) -> Info:

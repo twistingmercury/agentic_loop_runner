@@ -1,7 +1,7 @@
 ---
-version: 38
-date: 2026-10-11
-notes: "The Inherited Decisions rows for gralph ADR-019 and ADR-020 name ADR-026 as well as ADR-008, since the gate list is now the after_task list. Earlier: ADR-026 amended after the final whole-branch review: the documented commit action is now git add -A -- :/ followed by git reset of the run folder's files, because the :(exclude) form exits 1 for a gitignored run folder and `-- .` misses changes outside the current directory; ADR-009, ADR-013, ADR-020, and ADR-023 carry Amended by notes, the two inherited gralph rows (ADR-013, ADR-015) name ADR-026, and its status line lists every amended and superseded ADR. Earlier: ADR-026 is Accepted: commits are actions, built and documented. It supersedes ADR-014 and ADR-024 (their status lines and the Decision Summary say so) and carries Amended by notes on ADR-008, ADR-015, ADR-019, and ADR-025 (its exit table row 4 and its commit parts). Its git example uses the long :(exclude) form, because git silently ignores the short :! form when the path is absolute, as ALR_TASK_FILE and ALR_LOG_DIR are, and its lifecycle says after_run runs at the end of every run with no failed task, even when every task was already completed, so a rerun after an after_run failure retries it. Earlier: adds ADR-026 (Proposed): commits become actions; the task file gets after_task and after_run lists of actions, --commit goes, exit 4 now means an after_run action failed, and the TUI's Commit dropdown becomes an actions dialog with two lists; it supersedes ADR-014 and ADR-024 on acceptance. Earlier: ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons are named (task file visible, log folder visible naming the logs directory, and git's message when git cannot answer), a check-ignore failure during a run is a commit failure, the signing-program claim is narrowed to a program that prompts on /dev/tty, the re-check's log test covers the whole logs directory, a SIGKILL during a post-commit hook is a stated limit, and the Positive line no longer claims no duplicate commit. Earlier: ADR-025 is Accepted: stage 2, commit safety, is built, and its text now says what the code does. The lock is a flock on alr.lock in the git directory (a linked worktree has its own), taken after the task file check and before the log folder and clean tree checks, and a dry run with a commit mode only looks at it; a lock file alr cannot open or lock is git-error; only the git add and git commit alr starts get their own session and, on Linux, the kernel stop; the pre-add re-check runs before every task commit and once before the run commit, and its reasons are task file visible and log folder visible, exit 4. Earlier: ADR-025 after a wording check against the code: the dry run applies its failed-task and log-unwritable checks with or without --commit, and only --commit task or run adds the repository checks, log-folder-visible among them. Earlier: ADR-025 after the stage 1c re-review: a save that fails after a landed commit exits 4 and names the commit in every mode, including after a stop, where it replaces the stop's 130 or 143; task-file-unwritable also covers the save of edited gates when the view starts, not only the --reset-failed save. Earlier: ADR-025 after the stage 1b re-review: a name with a line break or any other control character except tab is rejected; a refusal leaves nothing behind, not even a `logs/` it created, and the two refusals decided as the log opens (`log-unwritable`, `task-file-unwritable`) remove what they made, which ends the contradiction with \"refusals are raised before the run log opens\"; the dry run also refuses an unwritable log folder; the save of the task file uses a uniquely named temporary file. Earlier: ADR-025 after the stage 1 review: adds the refusal reason task-file-unwritable; the dry run exits 3 on a failed task like a real run; a refusal leaves nothing on disk in plain mode and the view; a stop after a commit landed saves the tasks completed; a stop in run mode before the commit leaves tasks.yaml untouched; the view carries the stop signal. Earlier: Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+version: 40
+date: 2026-10-29
+notes: "ADR-027 is Accepted: sandbox presets are built and documented, and the web switch writes the fixed domain list, not a bare *; the README, CHANGELOG, requirements, and system architecture describe them. Earlier: Adds ADR-027 (Proposed): sandbox presets; the permissions dialog offers Tight and Large with three switches and a preview, writes <folder>/sandbox.json on Start, offers the folder's file when one exists, and plain mode gets --sandbox tight|large; a new refusal reason sandbox-file-unwritable. Earlier: The Inherited Decisions rows for gralph ADR-019 and ADR-020 name ADR-026 as well as ADR-008, since the gate list is now the after_task list. Earlier: ADR-026 amended after the final whole-branch review: the documented commit action is now git add -A -- :/ followed by git reset of the run folder's files, because the :(exclude) form exits 1 for a gitignored run folder and `-- .` misses changes outside the current directory; ADR-009, ADR-013, ADR-020, and ADR-023 carry Amended by notes, the two inherited gralph rows (ADR-013, ADR-015) name ADR-026, and its status line lists every amended and superseded ADR. Earlier: ADR-026 is Accepted: commits are actions, built and documented. It supersedes ADR-014 and ADR-024 (their status lines and the Decision Summary say so) and carries Amended by notes on ADR-008, ADR-015, ADR-019, and ADR-025 (its exit table row 4 and its commit parts). Its git example uses the long :(exclude) form, because git silently ignores the short :! form when the path is absolute, as ALR_TASK_FILE and ALR_LOG_DIR are, and its lifecycle says after_run runs at the end of every run with no failed task, even when every task was already completed, so a rerun after an after_run failure retries it. Earlier: adds ADR-026 (Proposed): commits become actions; the task file gets after_task and after_run lists of actions, --commit goes, exit 4 now means an after_run action failed, and the TUI's Commit dropdown becomes an actions dialog with two lists; it supersedes ADR-014 and ADR-024 on acceptance. Earlier: ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons are named (task file visible, log folder visible naming the logs directory, and git's message when git cannot answer), a check-ignore failure during a run is a commit failure, the signing-program claim is narrowed to a program that prompts on /dev/tty, the re-check's log test covers the whole logs directory, a SIGKILL during a post-commit hook is a stated limit, and the Positive line no longer claims no duplicate commit. Earlier: ADR-025 is Accepted: stage 2, commit safety, is built, and its text now says what the code does. The lock is a flock on alr.lock in the git directory (a linked worktree has its own), taken after the task file check and before the log folder and clean tree checks, and a dry run with a commit mode only looks at it; a lock file alr cannot open or lock is git-error; only the git add and git commit alr starts get their own session and, on Linux, the kernel stop; the pre-add re-check runs before every task commit and once before the run commit, and its reasons are task file visible and log folder visible, exit 4. Earlier: ADR-025 after a wording check against the code: the dry run applies its failed-task and log-unwritable checks with or without --commit, and only --commit task or run adds the repository checks, log-folder-visible among them. Earlier: ADR-025 after the stage 1c re-review: a save that fails after a landed commit exits 4 and names the commit in every mode, including after a stop, where it replaces the stop's 130 or 143; task-file-unwritable also covers the save of edited gates when the view starts, not only the --reset-failed save. Earlier: ADR-025 after the stage 1b re-review: a name with a line break or any other control character except tab is rejected; a refusal leaves nothing behind, not even a `logs/` it created, and the two refusals decided as the log opens (`log-unwritable`, `task-file-unwritable`) remove what they made, which ends the contradiction with \"refusals are raised before the run log opens\"; the dry run also refuses an unwritable log folder; the save of the task file uses a uniquely named temporary file. Earlier: ADR-025 after the stage 1 review: adds the refusal reason task-file-unwritable; the dry run exits 3 on a failed task like a real run; a refusal leaves nothing on disk in plain mode and the view; a stop after a commit landed saves the tasks completed; a stop in run mode before the commit leaves tasks.yaml untouched; the view carries the stop signal. Earlier: Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -55,6 +55,7 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [024](#adr-024-one---commit-flag-with-three-modes-none-task-and-run) | One `--commit` flag with three modes: none, task, and run | Superseded by ADR-026 | 2026-10-08 |
 | [025](#adr-025-every-outcome-has-an-exit-code-and-a-reason) | Every outcome has an exit code and a reason | Accepted | 2026-10-08 |
 | [026](#adr-026-commits-are-actions-the-task-file-has-after_task-and-after_run) | Commits are actions: the task file has `after_task` and `after_run` | Accepted | 2026-10-11 |
+| [027](#adr-027-sandbox-presets-alr-writes-the-run-folders-sandboxjson) | Sandbox presets: alr writes the run folder's `sandbox.json` | Accepted | 2026-10-29 |
 
 ## Inherited Decisions
 
@@ -1466,5 +1467,142 @@ before the PR.
 - A careless `git add -A` commits `tasks.yaml` and the logs; only the template and the skill prevent it
 - An earlier action's side effects stay when a later one fails, so order is the user's to get right
 - The safety ADR-025 added around committing (the lock, the ignore re-check, `PR_SET_PDEATHSIG`, the commit session) is gone; two runs in one work tree can commit at once, and a SIGKILL of alr can leave an action still running
+
+### ADR-027: Sandbox presets: alr writes the run folder's `sandbox.json`
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Accepted. It amends ADR-009 (alr now writes the file ADR-009 reads) and ADR-021 (a third answer to the permissions question).
+
+**Context:**
+
+A sandboxed run needs a Claude Code settings file, and alr forces three keys on it (ADR-009, the wiki's Permissions page).
+The rest of the file is the user's. In practice nobody writes one: the owner reports never getting past the sandbox docs
+and running every loop with `--yolo` (issue #14; both voyager runs on 2026-10-29 logged `"permissions":"skip"`). The
+pain is not JSON. It is granularity: the sandbox settings reference asks for paths, domains, and socket rules, when
+the question the user can answer is "may sessions reach the web?". A tool whose design says a run never ends up
+unsandboxed by accident has, in effect, a sandbox nobody turns on.
+
+Three places could ask the questions: the `alr-task-file` skill while it writes `tasks.yaml`, a wiki page of files to
+copy, or alr's own permissions dialog. The owner wants to answer them in alr's screen, before Start.
+
+**Decision:**
+
+*Vocabulary.* A **preset** is a named, fixed answer to the permissions question that alr turns into a settings file.
+There are two: **Tight** and **Large**. A **switch** is one of three yes/no adjustments to a preset. The same preset and
+switches always produce the same bytes.
+
+*The presets and switches.*
+
+| Switch                  | Tight | Large | What it sets in `sandbox`                                   |
+|-------------------------|-------|-------|-------------------------------------------------------------|
+| Reach the web           | off   | on    | `network.allowedDomains`: the fixed list below               |
+| Run Docker              | off   | on    | `excludedCommands: ["docker *"]`                             |
+| Hide credential folders | on    | on    | `filesystem.denyRead`: the fixed list below                  |
+
+- The credential list is `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.netrc`, and `~/.claude`.
+- The web list is `github.com`, `*.githubusercontent.com`, `crates.io`, `*.crates.io`, `pypi.org`,
+  `files.pythonhosted.org`, `registry.npmjs.org`, `proxy.golang.org`, `sum.golang.org`, and `storage.googleapis.com`.
+  Decided at build: the web switch writes this fixed list, not a bare `*`. Either way the switch is one deterministic
+  value.
+- "Run Docker" is the only switch that weakens the sandbox: an excluded command runs with the user's full access, and
+  `docker *` covers everything Docker can do, including a compose file the session just wrote. The dialog says so next
+  to the switch. It is off in Tight for that reason.
+- The file alr writes also carries the three forced keys (`enabled`, `allowUnsandboxedCommands`, `failIfUnavailable`),
+  so the file alone describes the box; `sandbox_args` still forces them at run time, so a hand edit cannot weaken them.
+- Serialization is `json.dumps(settings, indent=2, sort_keys=True)` plus a newline. A key a switch turns off is absent,
+  not `false` or `[]`.
+
+The Tight preset, with no switch moved, is therefore:
+
+```json
+{
+  "sandbox": {
+    "allowUnsandboxedCommands": false,
+    "enabled": true,
+    "failIfUnavailable": true,
+    "filesystem": {
+      "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gh", "~/.netrc", "~/.claude"]
+    }
+  }
+}
+```
+
+*The file.* A preset is written to `<folder>/sandbox.json`, the path ADR-009 already reads, so the next run of that
+folder needs no flag and the folder still reproduces the run. alr owns this file: a preset replaces whatever is there.
+There is no round-trip from file to preset, no marker key, and no attempt to tell alr's file from a hand-written one.
+
+*When it is written.* On Start, in the same startup step as the `tasks.yaml` save (the `--reset-failed` reset and the
+view's action edits): after every check has passed and the run log has opened, where `task-file-unwritable` is raised
+today. The order inside the step is: write `sandbox.json` atomically (temporary file, then rename, as `save_for_start`
+does), then save `tasks.yaml`. If that save fails, alr puts the previous `sandbox.json` back from the bytes it read
+before writing, or removes the new file when there was none, then raises `task-file-unwritable` as today. A
+`sandbox.json` alr cannot write is a new refusal reason, `sandbox-file-unwritable`, exit 3, and like every refusal
+decided after the log opens it removes the log folder it created. So a refused run still leaves the folder as it was
+(ADR-025), and nothing is written when the user cancels the dialog or quits. The dialog says this in words under its
+preview: "Written to `<folder>/sandbox.json` when you press Start. Cancel or Quit discards it."
+
+*Plain mode: `--sandbox tight|large`.* The flag is the third answer to the permissions question, beside
+`--sandbox-settings` and `--yolo`. With either of those it is a usage error, exit 2, like `--sandbox-settings` with
+`--yolo`. It writes the preset to `<folder>/sandbox.json` at Start, as the view does, then runs with it. It wins over an
+existing `<folder>/sandbox.json`, which it replaces. The command line has the two presets and no switches: an outer
+agent driving `alr --plain` picks Tight or Large. The flag does not change the plain `sandbox settings:` line's format.
+
+*Dry run.* `--dry-run --sandbox tight` validates as a real run would, prints
+`sandbox settings: <folder>/sandbox.json (tight preset; written on a real run)`, and writes nothing.
+
+*The view.* The permissions dialog becomes one screen:
+
+- Radio choices, in this order: **Use the settings file `<path>`** (present only when a file answered the question:
+  the folder's `sandbox.json`, or the `--sandbox-settings` file, whose path it shows), **Tight sandbox**, **Large
+  sandbox**, **Skip permissions (no sandbox)**. The old path field goes.
+- Pre-selection follows whatever answered the question: the file radio when a file did, Large or Tight when `--sandbox`
+  did, Skip when `--yolo` did, and Tight when nothing did.
+- Launch behavior is unchanged: when a flag or the folder's file answers the question, the dialog does not open at
+  launch and Start is available at once. `p` opens it any time before Start, as today, and the user may change the
+  answer there; a preset chosen over a folder file replaces that file on Start.
+- An unreadable or invalid folder `sandbox.json` is refused before the view opens, exit 3 with `invalid-sandbox-settings`,
+  as today. The file is alr's own output, so this means someone edited it; the fix is to delete it or pass `--sandbox`.
+- The three switches sit under the radios. Choosing a preset sets them; moving one departs from the preset. They are
+  greyed when the folder's file or Skip is chosen.
+- A read-only preview shows the JSON a preset would write, or the folder's file as it is. Under it, the note above for a
+  preset, or "Nothing is written. Pick a preset to replace it." for the folder's file.
+- The strip reads `Permissions: sandbox (tight)`, `sandbox (large)`, `sandbox` (the folder's file), or `skip`. A preset
+  with a moved switch reads `sandbox (tight, adjusted)`.
+- OK stores the choice in the view's settings; Start writes the file. Esc and Cancel leave the choice unset as today.
+
+*Precedence (replaces the wiki's list).* `--sandbox-settings`, `--yolo`, and `--sandbox` are each one answer; any two
+together exit 2. One flag answers the question and the dialog does not open at launch. With no flag,
+`<folder>/sandbox.json` answers it in both front ends. With neither, plain mode exits 2 and the view asks. The view has
+to keep "a file answered" apart from "a preset answered" in its settings, which `resolve_sandbox` does not today.
+
+*Run log.* Unchanged: `"permissions":"sandbox"` or `"skip"`. The file in the folder is the record of which preset ran.
+
+*Out of scope.* Presets beyond two, per-project domain lists, editing the folder's file in the view (the viewer stays
+read-only), recognizing alr's own file, and any change to `sandbox_args` or the forced keys.
+
+*Testing.* A unit test per rule: each preset and switch combination produces the stated bytes; the conflicts exit 2;
+the dry run writes nothing; a refusal leaves no file; `sandbox-file-unwritable` removes its log folder; a failed
+`tasks.yaml` save puts the previous `sandbox.json` back or removes the new one; the dialog's pre-selection for each
+answer; `p` after a flag; greyed switches; the strip text. The e2e tests (black-box, against the wheel) cover `--sandbox tight`
+writing the exact file and the fake claude receiving the forced keys, `--sandbox large` replacing an existing file,
+and the two flag conflicts.
+
+**Consequences:**
+
+*Positive:*
+
+- A sandboxed run is two keystrokes from the dialog, with nothing to read first; `--yolo` stops being the easy path
+- The same answers give the same file, so a preset run is as reproducible as any other
+- The folder keeps working as ADR-009 designed: the second run needs no flag
+- Plain mode and the view answer the question the same way, with the same file
+
+*Negative:*
+
+- alr now writes a file it did not before, which the view's "nothing is written until Start" promise has to carry
+- alr owns `<folder>/sandbox.json`: a hand edit survives only until someone picks a preset again
+- The web list is an opinion that will need updating as toolchains change
+- "Run Docker" punches a hole the rest of the sandbox cannot close; the dialog can only say so
+- The command line gets the presets but not the switches
 
 **Next:** [System Architecture](03_system_architecture.md)
