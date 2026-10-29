@@ -14,6 +14,7 @@ from alr.engine.presets import (
     Switches,
     preset_path,
     render,
+    restore_after_refusal,
     restore_previous,
     switches_for,
     write_preset,
@@ -199,3 +200,71 @@ def test_write_preset_removes_the_temporary_when_the_rename_fails(
 
     assert excinfo.value.reason == SANDBOX_FILE_UNWRITABLE
     assert list(tmp_path.iterdir()) == []
+
+
+def test_restore_previous_failing_leaves_the_current_file_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_bytes(b"new")
+
+    def refuse(self: Path, target: object) -> Path:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+
+    with pytest.raises(RefusedError) as excinfo:
+        restore_previous(str(path), b"old")
+
+    assert excinfo.value.reason == SANDBOX_FILE_UNWRITABLE
+    assert str(path) in excinfo.value.message
+    assert path.read_bytes() == b"new"
+    assert [p.name for p in tmp_path.iterdir()] == ["sandbox.json"]
+
+
+def test_restore_previous_refuses_when_the_new_file_cannot_be_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_bytes(b"new")
+
+    def refuse(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+
+    with pytest.raises(RefusedError) as excinfo:
+        restore_previous(str(path), None)
+
+    assert excinfo.value.reason == SANDBOX_FILE_UNWRITABLE
+
+
+def test_restore_after_refusal_keeps_the_original_refusal_when_the_restore_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_bytes(b"new")
+    original = RefusedError("task-file-unwritable", "failed to save tasks")
+
+    def refuse(self: Path, target: object) -> Path:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+
+    with pytest.raises(RefusedError) as excinfo:
+        restore_after_refusal(str(path), b"old", original)
+
+    assert excinfo.value is original
+    assert isinstance(excinfo.value.__cause__, RefusedError)
+    assert excinfo.value.__cause__.reason == SANDBOX_FILE_UNWRITABLE
+
+
+def test_restore_after_refusal_puts_the_bytes_back_and_raises_nothing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_bytes(b"new")
+
+    restore_after_refusal(str(path), b"old", RefusedError("x", "y"))
+
+    assert path.read_bytes() == b"old"

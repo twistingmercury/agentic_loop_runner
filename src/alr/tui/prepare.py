@@ -13,7 +13,7 @@ from alr.engine.loop import (
     reset_in_memory,
     save_for_start,
 )
-from alr.engine.presets import restore_previous, write_preset
+from alr.engine.presets import restore_after_refusal, write_preset
 from alr.engine.stop import Stop
 from alr.errors import RefusedError
 from alr.record.events import Event
@@ -96,8 +96,8 @@ def _save_changes(settings: RunSettings, task_list: TaskList, reset_count: int) 
     previous = write_preset(settings.sandbox_file, settings.switches)
     try:
         _save_tasks(settings, task_list, reset_count)
-    except RefusedError:
-        restore_previous(settings.sandbox_file, previous)
+    except RefusedError as refusal:
+        restore_after_refusal(settings.sandbox_file, previous, refusal)
         raise
 
 

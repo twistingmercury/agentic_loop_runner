@@ -13,7 +13,7 @@ from alr.engine.loop import (
     run,
     save_for_start,
 )
-from alr.engine.presets import Switches, restore_previous, write_preset
+from alr.engine.presets import Switches, restore_after_refusal, write_preset
 from alr.engine.stop import Stop
 from alr.errors import (
     INVALID_TASK_FILE,
@@ -111,8 +111,8 @@ def _write_then_save(
     previous = write_preset(sandbox_settings, switches)
     try:
         _save_reset(tasks_file, task_list, reset_count)
-    except RefusedError:
-        restore_previous(sandbox_settings, previous)
+    except RefusedError as refusal:
+        restore_after_refusal(sandbox_settings, previous, refusal)
         raise
 
 

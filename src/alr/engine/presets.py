@@ -90,12 +90,34 @@ def write_preset(path: str, switches: Switches) -> bytes | None:
 
 
 def restore_previous(path: str, previous: bytes | None) -> None:
-    """Put back what write_preset replaced: the old bytes, or no file when there were none."""
-    if previous is None:
-        Path(path).unlink(missing_ok=True)
-        return
+    """Put back what write_preset replaced: the old bytes, or no file when there were none.
 
-    Path(path).write_bytes(previous)
+    The old bytes go back atomically, so a restore that fails leaves the
+    current file whole instead of truncated.
+    """
+    target = Path(path)
+    try:
+        if previous is None:
+            target.unlink(missing_ok=True)
+            return
+
+        _replace_atomically(target, previous)
+    except OSError as exc:
+        raise RefusedError(SANDBOX_FILE_UNWRITABLE, f"{path}: {exc.strerror}") from exc
+
+
+def restore_after_refusal(
+    path: str, previous: bytes | None, refusal: RefusedError
+) -> None:
+    """Restore the preset for a refused run; when that fails too, raise the original refusal.
+
+    The user needs the reason the run was refused, so the failed restore
+    rides along as its cause instead of replacing it.
+    """
+    try:
+        restore_previous(path, previous)
+    except RefusedError as restore_failure:
+        raise refusal from restore_failure
 
 
 def _read_previous(target: Path) -> bytes | None:
