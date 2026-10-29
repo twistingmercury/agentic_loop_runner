@@ -1301,9 +1301,9 @@ async def test_the_whole_setup_runs_from_the_keyboard_alone(work_dir: Path) -> N
         await until(lambda: isinstance(app.screen, FolderDialog))
         await pilot.press("end", *"/run", "enter")
 
-        # Down to "skip", Enter picks it, Tab goes through the file field to OK.
+        # Down twice to "skip", Enter picks it, Tab skips the disabled switches to OK.
         await until(lambda: isinstance(app.screen, PermissionsDialog))
-        await pilot.press("down", "enter", "tab", "tab", "enter")
+        await pilot.press("down", "down", "enter", "tab", "enter")
 
         # The command field has focus; Enter adds, then Tab to Done.
         await until(lambda: isinstance(app.screen, ActionsDialog))

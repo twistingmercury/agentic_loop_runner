@@ -2,13 +2,22 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from helpers import write_nested_file
 from textual.app import App
-from textual.screen import ModalScreen
-from textual.widgets import Input, Label, ListView, TextArea
+from textual.screen import ModalScreen, Screen
+from textual.widgets import (
+    Checkbox,
+    Input,
+    Label,
+    ListView,
+    RadioButton,
+    RadioSet,
+    TextArea,
+)
 
 from alr.tui.checks import FolderCheck
 from alr.tasks import FAILED, Action, Task
@@ -22,7 +31,8 @@ from alr.tui.dialogs import (
     PermissionChoice,
     PermissionsDialog,
 )
-from alr.tui.settings import Permissions
+from alr.engine.presets import Preset, Switches, render, switches_for
+from alr.tui.settings import Permissions, RunSettings
 
 TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 
@@ -77,45 +87,214 @@ async def test_folder_dialog_cancel_returns_none(work_dir: Path) -> None:
         assert host.result is None
 
 
-async def test_permissions_dialog_skip_returns_skip() -> None:
+BIG = (120, 60)
+"""A terminal tall enough that every control in the permissions dialog can be clicked."""
+
+
+def settings_in(folder: Path, **fields: Any) -> RunSettings:
+    """Settings for a run folder, with the task file named as the app would."""
+    return RunSettings(tasks_file=str(folder / "tasks.yaml"), **fields)
+
+
+def selected(screen: Screen[Any]) -> str | None:
+    """The id of the pressed radio."""
+    button = screen.query_one(RadioSet).pressed_button
+    return button.id if button else None
+
+
+def preview(screen: Screen[Any]) -> str:
+    return str(screen.query_one("#preview").render())
+
+
+def note(screen: Screen[Any]) -> str:
+    return str(screen.query_one("#note").render())
+
+
+def switches_shown(screen: Screen[Any]) -> Switches:
+    return Switches(
+        web=screen.query_one("#web", Checkbox).value,
+        docker=screen.query_one("#docker", Checkbox).value,
+        hide_credentials=screen.query_one("#hide", Checkbox).value,
+    )
+
+
+async def test_permissions_dialog_preselects_tight_without_a_file(
+    tmp_path: Path,
+) -> None:
     host = Host()
-    async with host.run_test() as pilot:
-        host.push_screen(PermissionsDialog(""), host.record)
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
         await pilot.pause()
 
-        await pilot.click("#skip")
+        assert selected(host.screen) == "tight"
+        assert switches_shown(host.screen) == switches_for(Preset.TIGHT)
+        assert preview(host.screen) == render(switches_for(Preset.TIGHT))
+
+
+async def test_permissions_dialog_preselects_the_file_when_the_folder_has_one(
+    tmp_path: Path,
+) -> None:
+    sandbox = write_nested_file(tmp_path / "sandbox.json", '{"sandbox": {}}')
+    settings = settings_in(
+        tmp_path, permissions=Permissions.SANDBOX, sandbox_file=str(sandbox)
+    )
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
+        await pilot.pause()
+
+        assert selected(host.screen) == "file"
+        assert str(sandbox) in str(host.screen.query_one("#file", RadioButton).label)
+        assert all(
+            host.screen.query_one(f"#{name}", Checkbox).disabled
+            for name in ("web", "docker", "hide")
+        )
+        assert f"{sandbox} (as it is)" in preview(host.screen)
+        assert '{"sandbox": {}}' in preview(host.screen)
+
+
+async def test_permissions_dialog_hides_the_file_radio_without_a_file(
+    tmp_path: Path,
+) -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
+        await pilot.pause()
+
+        assert not host.screen.query("#file")
+
+
+async def test_permissions_dialog_preselects_the_flags_preset(tmp_path: Path) -> None:
+    settings = settings_in(
+        tmp_path,
+        permissions=Permissions.SANDBOX,
+        preset=Preset.LARGE,
+        switches=switches_for(Preset.LARGE),
+    )
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
+        await pilot.pause()
+
+        assert selected(host.screen) == "large"
+        assert switches_shown(host.screen) == Switches(True, True, True)
+
+
+async def test_permissions_dialog_preselects_skip_after_yolo(tmp_path: Path) -> None:
+    settings = settings_in(tmp_path, permissions=Permissions.SKIP)
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
+        await pilot.pause()
+
+        assert selected(host.screen) == "skip"
+        assert preview(host.screen) == ""
+        assert note(host.screen) == ""
+        assert host.screen.query_one("#web", Checkbox).disabled
+
+
+async def test_choosing_large_sets_every_switch_on_and_shows_its_document(
+    tmp_path: Path,
+) -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
+        await pilot.pause()
+
+        await pilot.click("#large")
+        await pilot.pause()
+
+        assert switches_shown(host.screen) == Switches(True, True, True)
+        assert preview(host.screen) == render(switches_for(Preset.LARGE))
+
+
+async def test_moving_a_switch_changes_the_preview_and_the_result(
+    tmp_path: Path,
+) -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
+        await pilot.pause()
+
+        await pilot.click("#web")
+        await pilot.pause()
+        assert '"allowedDomains"' in preview(host.screen)
         await pilot.click("#ok")
         await pilot.pause()
 
-        assert host.result == PermissionChoice(Permissions.SKIP, "")
+        assert isinstance(host.result, PermissionChoice)
+        assert host.result.preset is Preset.TIGHT
+        assert host.result.switches == Switches(True, False, True)
 
 
-async def test_permissions_dialog_sandbox_returns_the_file(tmp_path: Path) -> None:
+async def test_ok_with_a_preset_returns_the_folder_path_and_switches(
+    tmp_path: Path,
+) -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
+        await pilot.pause()
+
+        await pilot.click("#large")
+        await pilot.click("#ok")
+        await pilot.pause()
+
+        assert host.result == PermissionChoice(
+            Permissions.SANDBOX,
+            str(tmp_path / "sandbox.json"),
+            Preset.LARGE,
+            switches_for(Preset.LARGE),
+        )
+
+
+async def test_ok_with_a_preset_and_no_folder_returns_no_path() -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(RunSettings()), host.record)
+        await pilot.pause()
+
+        assert "<folder>/sandbox.json" in note(host.screen)
+        await pilot.click("#ok")
+        await pilot.pause()
+
+        assert host.result == PermissionChoice(
+            Permissions.SANDBOX, "", Preset.TIGHT, switches_for(Preset.TIGHT)
+        )
+
+
+async def test_ok_with_the_file_returns_the_file_and_no_switches(
+    tmp_path: Path,
+) -> None:
     sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
+    settings = settings_in(
+        tmp_path, permissions=Permissions.SANDBOX, sandbox_file=str(sandbox)
+    )
     host = Host()
-    async with host.run_test() as pilot:
-        host.push_screen(PermissionsDialog(""), host.record)
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
         await pilot.pause()
-        host.screen.query_one("#file", Input).value = str(sandbox)
 
-        await pilot.click("#sandbox")
+        assert note(host.screen) == "Nothing is written. Pick a preset to replace it."
         await pilot.click("#ok")
         await pilot.pause()
 
-        assert host.result == PermissionChoice(Permissions.SANDBOX, str(sandbox))
+        assert host.result == PermissionChoice(
+            Permissions.SANDBOX, str(sandbox), None, None
+        )
 
 
-async def test_permissions_dialog_bad_settings_file_keeps_the_user_on_the_step(
+async def test_ok_with_the_file_keeps_the_user_on_the_step_when_it_is_invalid(
     tmp_path: Path,
 ) -> None:
     bad = write_nested_file(tmp_path / "sandbox.json", "not json")
+    settings = settings_in(
+        tmp_path, permissions=Permissions.SANDBOX, sandbox_file=str(bad)
+    )
     host = Host()
-    async with host.run_test() as pilot:
-        host.push_screen(PermissionsDialog(""), host.record)
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
         await pilot.pause()
-        host.screen.query_one("#file", Input).value = str(bad)
 
-        await pilot.click("#sandbox")
         await pilot.click("#ok")
         await pilot.pause()
 
@@ -125,17 +304,54 @@ async def test_permissions_dialog_bad_settings_file_keeps_the_user_on_the_step(
         assert "refused" not in shown, "the dialog shows the message, not the reason"
 
 
-async def test_permissions_dialog_preselects_nothing_without_a_default() -> None:
+async def test_the_note_says_the_file_is_written_on_start_and_replaced(
+    tmp_path: Path,
+) -> None:
+    sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
+    settings = settings_in(
+        tmp_path,
+        permissions=Permissions.SANDBOX,
+        preset=Preset.LARGE,
+        switches=switches_for(Preset.LARGE),
+    )
     host = Host()
-    async with host.run_test() as pilot:
-        host.push_screen(PermissionsDialog(""), host.record)
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
         await pilot.pause()
 
+        assert selected(host.screen) == "large"
+        assert note(host.screen) == (
+            f"Written to {sandbox} when you press Start. Cancel or Quit discards it."
+            " Replaces the file there."
+        )
+        assert str(sandbox) in str(host.screen.query_one("#file", RadioButton).label)
+
+
+async def test_the_note_has_no_replace_sentence_without_a_folder_file(
+    tmp_path: Path,
+) -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
+        await pilot.pause()
+
+        assert note(host.screen) == (
+            f"Written to {tmp_path / 'sandbox.json'} when you press Start."
+            " Cancel or Quit discards it."
+        )
+
+
+async def test_permissions_dialog_skip_returns_skip(tmp_path: Path) -> None:
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
+        await pilot.pause()
+
+        await pilot.click("#skip")
         await pilot.click("#ok")
         await pilot.pause()
 
-        assert host.result == "unset"
-        assert str(host.screen.query_one("#error").render()) != ""
+        assert host.result == PermissionChoice(Permissions.SKIP, "", None, None)
 
 
 async def test_actions_dialog_adds_a_action_and_returns_the_list() -> None:
@@ -313,7 +529,7 @@ async def test_file_viewer_closes(tmp_path: Path) -> None:
     "make",
     [
         lambda: FolderDialog("."),
-        lambda: PermissionsDialog(""),
+        lambda: PermissionsDialog(RunSettings()),
         lambda: ActionsDialog([], []),
         lambda: FileViewer(""),
         lambda: ErrorDialog("x"),
@@ -348,20 +564,6 @@ async def test_enter_in_the_folder_field_submits(work_dir: Path) -> None:
         await pilot.pause()
 
         assert isinstance(host.result, FolderCheck)
-
-
-async def test_enter_in_the_sandbox_field_submits(tmp_path: Path) -> None:
-    sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
-    host = Host()
-    async with host.run_test() as pilot:
-        host.push_screen(PermissionsDialog(str(sandbox)), host.record)
-        await pilot.pause()
-        host.screen.query_one("#file", Input).focus()
-
-        await pilot.press("enter")
-        await pilot.pause()
-
-        assert host.result == PermissionChoice(Permissions.SANDBOX, str(sandbox))
 
 
 @pytest.mark.parametrize("field", ["cmd", "timeout"])

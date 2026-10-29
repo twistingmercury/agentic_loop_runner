@@ -246,14 +246,14 @@ class AlrApp(App[None]):
 
     async def ask_permissions(self) -> None:
         """Show the permissions dialog and apply an accepted answer to the settings."""
-        choice = await self.push_screen_wait(
-            PermissionsDialog(self.settings.sandbox_file)
-        )
+        choice = await self.push_screen_wait(PermissionsDialog(self.settings))
         if choice is None:
             return
 
         self.settings.permissions = choice.permissions
         self.settings.sandbox_file = choice.sandbox_file
+        self.settings.preset = choice.preset
+        self.settings.switches = choice.switches
         self._refresh()
 
     async def ask_reset(self) -> None:
