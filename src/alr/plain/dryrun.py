@@ -6,6 +6,7 @@ from typing import TextIO
 
 from alr.engine.actions import first_line, action_limit
 from alr.engine.loop import read_tasks
+from alr.engine.presets import Preset
 from alr.errors import INVALID_TASK_FILE, RefusedError, TaskFileError
 from alr.plain.report import print_tasks, refuse_failed_report
 from alr.record.runlog import check_writable, run_dir
@@ -13,7 +14,11 @@ from alr.tasks import Action, TaskList
 
 
 async def dry_run(
-    out: TextIO, tasks_file: str, action_timeout: str, sandbox_file: str
+    out: TextIO,
+    tasks_file: str,
+    action_timeout: str,
+    sandbox_file: str,
+    preset: Preset | None = None,
 ) -> None:
     """Apply the checks a real run starts with, in its order, and write what it would run under."""
     task_list = _read_for_dry_run(tasks_file)
@@ -22,10 +27,20 @@ async def dry_run(
     check_writable(path)
     print_tasks(out, task_list)
     _print_action_limits(out, task_list, action_timeout)
+    _print_sandbox(out, sandbox_file, preset)
+    out.write(f"{tasks_file} is valid\n")
+
+
+def _print_sandbox(out: TextIO, sandbox_file: str, preset: Preset | None) -> None:
+    """Name the sandbox settings file; a preset's file is only written on a real run."""
+    if preset is not None:
+        out.write(
+            f"sandbox settings: {sandbox_file} ({preset.value} preset; written on a real run)\n"
+        )
+        return
+
     if sandbox_file:
         out.write(f"sandbox settings: {sandbox_file}\n")
-
-    out.write(f"{tasks_file} is valid\n")
 
 
 def _read_for_dry_run(tasks_file: str) -> TaskList:

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from helpers import write_file
 
+from alr.engine.presets import Preset
 from alr.errors import FailedTasksError, RefusedError
 from alr.plain.dryrun import dry_run
 
@@ -46,9 +47,10 @@ async def _dry_run(
     tasks_file: str,
     action_timeout: str = "",
     sandbox_file: str = "",
+    preset: Preset | None = None,
 ) -> str:
     out = io.StringIO()
-    await dry_run(out, tasks_file, action_timeout, sandbox_file)
+    await dry_run(out, tasks_file, action_timeout, sandbox_file, preset)
     return out.getvalue()
 
 
@@ -259,3 +261,15 @@ async def test_dry_run_creates_no_log_folder(tmp_path: Path) -> None:
     await _dry_run(tasks_file)
 
     assert not (tmp_path / "logs").exists()
+
+
+async def test_dry_run_with_a_preset_names_the_file_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    path = str(tmp_path / "sandbox.json")
+
+    got = await _dry_run(tasks_file, sandbox_file=path, preset=Preset.LARGE)
+
+    assert f"sandbox settings: {path} (large preset; written on a real run)\n" in got
+    assert not (tmp_path / "sandbox.json").exists()
