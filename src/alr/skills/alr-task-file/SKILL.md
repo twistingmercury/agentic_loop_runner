@@ -1,20 +1,20 @@
 ---
-name: gralph-docs-writer
+name: alr-task-file
 description: >-
   Use when creating or updating the tasks.yaml task list, with its shared
-  prompt, that Gralph feeds to Claude Code, or when breaking a build plan or
-  PRD into Gralph loop tasks.
+  prompt, that alr feeds to Claude Code, or when breaking a build plan or
+  PRD into alr loop tasks.
 ---
 
-# Ralph Loop Docs
+# alr Task File
 
-Generate the one file a Gralph run needs: `tasks.yaml`, holding a `shared`
+Generate the one file an alr run needs: `tasks.yaml`, holding a `shared`
 block (the shared prompt) and an ordered task list. Respect the user's destination, project
 scope, verification, and commit policies.
 
-## How Gralph uses the file
+## How alr uses the file
 
-Gralph works through `tasks.yaml` in file order. It skips `completed` tasks; for
+alr works through `tasks.yaml` in file order. It skips `completed` tasks; for
 each `pending` task it combines `shared.prompt` with that task's
 `prompt` and hands the result to a new Claude Code session. Every session starts
 with no memory of earlier tasks, so the file must carry everything the session
@@ -23,16 +23,16 @@ needs.
 Each task gets one session. There is no retry and no `--iterations` flag, so
 scope every task to what a single session can finish and verify.
 
-Gralph owns `state` and writes it back to `tasks.yaml`. The session never edits
+alr owns `state` and writes it back to `tasks.yaml`. The session never edits
 the file. To remove a task without running it, delete it from the file; there is
-no `abandoned` state. Gralph decides the outcome from the JSON result line the
+no `abandoned` state. alr decides the outcome from the JSON result line the
 shared prompt asks for at the end of the session's output. A missing or invalid
-result line, or a non-zero exit, marks the task `failed`. Gralph refuses to run
+result line, or a non-zero exit, marks the task `failed`. alr refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand, or runs with
 `--reset-failed`, which sets every failed task back to `pending` at startup.
 
-Gralph runs two optional lists of actions, shell commands it runs itself
+alr runs two optional lists of actions, shell commands it runs itself
 through `sh -c` in its own working directory. `shared.after_task` runs after
 every task whose session reported success; if any action fails or times out,
 the task is `failed` (exit 1) and the later actions do not run. A task is
@@ -44,14 +44,14 @@ failure retries it. An `after_run` failure exits 4 and leaves the tasks
 as `90s` or `10m`; the default is 10 minutes). `--action-timeout` overrides
 every action's timeout.
 
-Gralph sets these environment variables on every action: `ALR_TASK_FILE` and
+alr sets these environment variables on every action: `ALR_TASK_FILE` and
 `ALR_LOG_DIR`, both absolute paths. An `after_task` action also gets
 `ALR_TASK_ID` and `ALR_TASK_NAME`. Use them in double quotes, as
 `"$ALR_TASK_NAME"`, so a value stays data to the shell.
 
-A commit is just an action. Gralph has no commit mode and checks nothing about
+A commit is just an action. alr has no commit mode and checks nothing about
 git, so a task is not guaranteed its own commit: a commit action takes whatever
-is in the work tree. Put the commit action LAST in `after_task`, because Gralph
+is in the work tree. Put the commit action LAST in `after_task`, because alr
 does not undo what earlier actions did, and keep `tasks.yaml` and the logs out
 of it:
 
@@ -64,7 +64,7 @@ after_task:
 ```
 
 The action adds everything from the repository root, then unstages the run
-folder's own files, so an ignored run folder (the layout Gralph has always asked
+folder's own files, so an ignored run folder (the layout alr has always asked
 for) works and a visible one is still kept out. The
 `git diff --cached --quiet ||` part is there because a task that changed
 nothing has nothing to commit; without it a clean tree makes the action fail.
@@ -76,7 +76,7 @@ An absent `after_task` means the run's actions are undecided: the full-screen
 view asks for them. `after_task: []` records a decision that there are none.
 An absent `after_run` and `after_run: []` both mean none.
 
-A `tasks.yaml` that does not match the rules below is invalid and Gralph
+A `tasks.yaml` that does not match the rules below is invalid and alr
 refuses to run it. There is no migration from other formats or older states.
 
 ## Published-document preservation
@@ -94,7 +94,7 @@ authorized.
    scope, output destination, actual document paths, and project verification
    and Git policies. Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml).
-3. Ask the user whether Gralph should commit after each task. If it should,
+3. Ask the user whether alr should commit after each task. If it should,
    `after_task` ends with the commit action above, the `Commits` line in
    `shared.prompt` reads "Do not commit. Leave your changes in the work tree.",
    task names are written as commit subjects (imperative, under about 70
@@ -105,28 +105,28 @@ authorized.
    Ask whether they approve it or want changes. Revise and show the summary
    again until they approve. Write nothing before approval.
 5. Write `tasks.yaml` with two top-level keys, `shared` and `tasks`, and no
-   others: Gralph rejects any other top-level key. `shared` is a mapping with a
+   others: alr rejects any other top-level key. `shared` is a mapping with a
    required nonblank block-scalar `prompt` (the shared prompt, step 7) and the
    optional `after_task` and `after_run` lists of actions (see the template and
    above); any other key in `shared` or in an action is an error.
    `tasks` is a sequence holding at least one task. Unknown keys inside `shared`
    are rejected too. Each task has a stable positive integer `id` (at most 32767), a
    nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
-   IDs are unique and independent of order; Gralph runs tasks in file order.
+   IDs are unique and independent of order; alr runs tasks in file order.
    Names are unique ignoring case and surrounding whitespace, and each name is
    a single line: a line break, or any other control character except a tab, in
    a name is an error. `state` is
    `pending`, `completed`, or `failed`; leave it empty for new work, which
-   Gralph reads as `pending`. The optional `error` field is gralph-only: never
+   alr reads as `pending`. The optional `error` field is alr-only: never
    write it; preserve it if present when updating an existing file. Write no
-   other task keys: Gralph ignores them when reading and drops them the first
+   other task keys: alr ignores them when reading and drops them the first
    time it saves the file. Write `after_task` only with actions the user
    asked for or confirmed; leave it out when the user wants to be asked in the
    full-screen view, and write `after_task: []` for a decision of none.
 6. Put scope, steps, the project's own checks (tests, linters, the build),
    task-specific verification, and completion criteria inside each task's
    prompt. Preserve project-specific instructions. YAML comments are not
-   durable task instructions: they never reach the session. Gralph rewrites
+   durable task instructions: they never reach the session. alr rewrites
    the task file with every state change, so comments and custom formatting
    are not preserved. Every verification command must be one the session can
    run. The session runs under Claude Code's permissions and, with
@@ -134,7 +134,7 @@ authorized.
    inline (`VAR=value cmd`) can be refused, and Docker, other users' files,
    and hosts outside the sandbox's network list are out of reach. Give the
    session an equivalent it can run. A check it cannot run belongs only in `after_task`,
-   whose actions Gralph runs itself; tell the user to add it there.
+   whose actions alr runs itself; tell the user to add it there.
 7. Write `shared.prompt` from the template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one

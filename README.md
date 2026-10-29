@@ -88,7 +88,7 @@ plain output.
 | `--sandbox-settings <path>`  |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--yolo`                     |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
 | `--reset-failed`             |       | Set every failed task back to pending before the run, without asking                     |
-| `--install-skill`            |       | Install the bundled `gralph-docs-writer` skill into `~/.claude/skills` and exit          |
+| `--install-skill`            |       | Install the bundled `alr-task-file` skill into `~/.claude/skills` and exit                |
 | `--plain`                    |       | Use plain output instead of the full-screen view                                         |
 | `--action-timeout <duration>` |      | Limit for every action, such as `90s` or `10m`; overrides each action's own timeout      |
 | `--version`                  | `-v`  | Print the version, the OS, and the architecture                                          |
@@ -252,7 +252,6 @@ uv run alr -d path/to/run-folder --dry-run
 ```sh
 make test      # format, lint, and run the unit tests
 make build     # build the wheel, then run the e2e tests in a container
-make e2e       # run the e2e tests against the wheel already in dist/
 make analyze   # format and auto-fix lint findings
 make help      # list available targets
 ```

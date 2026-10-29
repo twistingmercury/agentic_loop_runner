@@ -4,7 +4,7 @@
 # - Replace every GENERATE_* token. Copy the task entry once per task.
 # - The shared prompt below covers the project, the task-file rule, and the
 #   result line contract; put only task-specific content in each task's `prompt`.
-# - Leave `state` empty; Gralph reads an empty state as pending.
+# - Leave `state` empty; alr reads an empty state as pending.
 # - Comments are not passed to the agent, so drop this header from the
 #   generated file.
 shared:

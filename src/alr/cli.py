@@ -170,7 +170,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--install-skill",
         action="store_true",
-        help="Install the bundled gralph-docs-writer skill into ~/.claude/skills and exit",
+        help="Install the bundled alr-task-file skill into ~/.claude/skills and exit",
     )
     parser.add_argument(
         "-d",

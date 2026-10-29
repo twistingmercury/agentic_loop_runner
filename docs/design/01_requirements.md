@@ -98,7 +98,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | `--yolo`                    |       | New name for gralph's `--skip-permissions` (ADR-021). Sessions run with `--dangerously-skip-permissions`; wins over a folder's `sandbox.json` with no error |
 | `--commit`                  |       | Removed (ADR-026): a commit is an action in `shared.after_task` now. The flag is refused with exit 2 and a message that says so |
 | `--reset-failed`            |       | New in alr. Sets every failed task back to pending before the run, silently, in plain mode and in the view; with `--dry-run` is a usage error |
-| `--install-skill`           |       | Copies the bundled `gralph-docs-writer` skill to `~/.claude/skills/` and exits 0         |
+| `--install-skill`           |       | Copies the bundled `alr-task-file` skill to `~/.claude/skills/` and exits 0         |
 
 ## Success Criteria
 
@@ -121,7 +121,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 | Removed flags          | `--commit` and `--gate-timeout` are refused with exit 2 and a message naming the replacement; `shared.gates` and `cmd` are refused naming `shared.after_task` and `action` | Unit and e2e tests |
 | Stop                   | Stop and Ctrl-C end the run and report `stopped`; no orphan processes                          | TUI unit tests; one pseudo-terminal e2e test                                |
 | View happy path        | A run in a pseudo-terminal reaches Finished and a clean exit                                    | One pseudo-terminal e2e test in the container                               |
-| Skill install          | The bundled skill lands in `~/.claude/skills/gralph-docs-writer/`, replacing any copy           | Unit test with a temporary home; e2e                                        |
+| Skill install          | The bundled skill lands in `~/.claude/skills/alr-task-file/`, replacing any copy           | Unit test with a temporary home; e2e                                        |
 | Keyboard only          | The mouse is not captured; the whole setup and a run can be done with keys alone                | TUI unit test of the keyboard-only flow                                     |
 | Build                  | `make test` (analyze and unit tests) and `make build` (wheel, then e2e in a container) pass     | CI                                                                          |
 
@@ -140,7 +140,7 @@ The flags below are accepted. The CHANGELOG records each change from gralph's fl
 ### Business Constraints
 
 - **Emerging maturity**: breaking changes are expected, and the CHANGELOG records each one (ADR-022)
-- **The gralph-docs-writer skill** keeps producing the one task file, shared prompt included; the task field rules must stay in sync with it
+- **The alr-task-file skill** keeps producing the one task file, shared prompt included; the task field rules must stay in sync with it
 
 ### Organizational Constraints
 

@@ -1,4 +1,4 @@
-"""--install-skill: copy the bundled gralph-docs-writer skill into the user's skills folder."""
+"""--install-skill: copy the bundled alr-task-file skill into the user's skills folder."""
 
 import shutil
 import tempfile
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from alr.errors import SkillInstallError
 
-_NAME = "gralph-docs-writer"
+_NAME = "alr-task-file"
 
 
 def install(home: Path | None = None) -> Path:
