@@ -234,10 +234,10 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
     """Pick Tight or Large and adjust the three switches, use a settings file, or skip permissions."""
 
     DEFAULT_CSS = """
-    PermissionsDialog #dialog { width: 90%; max-width: 110; height: 90%; }
+    PermissionsDialog #dialog { width: 90%; max-width: 110; height: 90%; padding: 0 2; }
+    PermissionsDialog Button { border: none; height: 1; min-height: 1; }
     /* The preview takes what is left, so the buttons stay on screen however long the document is. */
-    PermissionsDialog #preview { margin-top: 1; height: 1fr; min-height: 3; overflow-y: auto; }
-    PermissionsDialog #note { margin-bottom: 1; }
+    PermissionsDialog #preview { height: 1fr; min-height: 6; overflow-y: auto; }
     PermissionsDialog Checkbox { border: none; height: 1; padding: 0; }
     """
 
@@ -288,13 +288,13 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
                 "Sessions may reach the web", switches.web, id="web", disabled=off
             )
             yield Checkbox(
-                "Sessions may run Docker  (runs outside the sandbox with your full access)",
+                "Sessions may run Docker (outside the sandbox)",
                 switches.docker,
                 id="docker",
                 disabled=off,
             )
             yield Checkbox(
-                "Hide credential folders (~/.ssh, ~/.aws, ~/.gnupg, ~/.config/gh, ~/.netrc, ~/.claude)",
+                "Hide credential folders",
                 switches.hide_credentials,
                 id="hide",
                 disabled=off,
@@ -422,7 +422,7 @@ _PRESET_IDS = frozenset(preset.value for preset in Preset)
 
 def _answered_file(settings: RunSettings) -> str:
     """The settings file already answering the question, or an empty string."""
-    if settings.switches is None:
+    if settings.permissions is Permissions.SANDBOX and settings.switches is None:
         return settings.sandbox_file
 
     return ""

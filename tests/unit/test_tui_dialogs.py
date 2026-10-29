@@ -651,3 +651,33 @@ async def test_enter_confirms_the_reset() -> None:
 
 def test_summary_dialog_shows_the_run_time_in_minutes_and_seconds() -> None:
     assert SummaryDialog("done", 1230.0, None)._text == "Run done in 20m 30s"
+
+
+async def test_permissions_dialog_fits_an_80_by_24_terminal(tmp_path: Path) -> None:
+    sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
+    settings = settings_in(
+        tmp_path, permissions=Permissions.SANDBOX, sandbox_file=str(sandbox)
+    )
+    host = Host()
+    async with host.run_test(size=(80, 24)) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
+        await pilot.pause()
+
+        box = host.screen.query_one("#dialog").region
+        inner = host.screen.query_one("#dialog").content_region
+        ok = host.screen.query_one("#ok").region
+        assert box.contains_region(ok), "the buttons lie inside the dialog"
+        for name in ("web", "docker", "hide"):
+            checkbox = host.screen.query_one(f"#{name}").region
+            assert checkbox.right <= inner.right, f"#{name} is wider than the dialog"
+        assert host.screen.query_one("#preview").region.height >= 6
+
+
+async def test_permissions_dialog_preselects_skip_over_a_stale_settings_file() -> None:
+    settings = RunSettings(permissions=Permissions.SKIP, sandbox_file="x.json")
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(settings), host.record)
+        await pilot.pause()
+
+        assert selected(host.screen) == "skip"
