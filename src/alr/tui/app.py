@@ -531,6 +531,10 @@ class AlrApp(App[None]):
 
     def on_worker_state_changed(self, message: Worker.StateChanged) -> None:
         """The safety net: a run worker that ends without a RunDone must not leave RUNNING."""
+        # An exit cancels the worker after the screens are gone; nothing is left to finish on.
+        if not self.is_running:
+            return
+
         if message.worker is not self._worker:
             return
 

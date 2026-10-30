@@ -19,6 +19,7 @@ from helpers import (
 from textual.pilot import Pilot
 from textual.screen import ModalScreen
 from textual.coordinate import Coordinate
+from textual.worker import Worker, WorkerState
 from textual.widgets import (
     Button,
     DataTable,
@@ -1996,6 +1997,22 @@ async def test_the_main_screen_is_operable_by_focus_and_keys(work_dir: Path) -> 
         await _tab_to(app, pilot, "start")
         await pilot.press("enter")
         await until(lambda: app.state is not AppState.READY)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_worker_ending_after_the_app_exits_is_ignored(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Textual takes the screens down before it cancels the run worker on exit."""
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.state is AppState.RUNNING)
+
+    assert not app.is_running
+    app.on_worker_state_changed(Worker.StateChanged(app._worker, WorkerState.CANCELLED))
+    assert app.state is AppState.RUNNING
 
 
 def _preset_settings(tasks_file: str, preset: Preset) -> RunSettings:
