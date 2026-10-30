@@ -49,28 +49,33 @@ alr sets these environment variables on every action: `ALR_TASK_FILE` and
 `ALR_TASK_ID` and `ALR_TASK_NAME`. Use them in double quotes, as
 `"$ALR_TASK_NAME"`, so a value stays data to the shell.
 
+Give each command its own `action` entry. Never join commands with `&&`:
+alr already runs the list in order and stops at the first failure, and with
+one command per action the failure reason names the exact command.
+
 A commit is just an action. alr has no commit mode and checks nothing about
-git, so a task is not guaranteed its own commit: a commit action takes whatever
-is in the work tree. Put the commit action LAST in `after_task`, because alr
-does not undo what earlier actions did, and keep `tasks.yaml` and the logs out
-of it:
+git, so a task is not guaranteed its own commit: the commit actions take
+whatever is in the work tree. Put the three commit actions LAST in
+`after_task`, because alr does not undo what earlier actions did, and keep
+`tasks.yaml` and the logs out of the commit:
 
 ```yaml
 after_task:
   - action: GENERATE_BUILD_AND_TEST_COMMAND
-  - action: >-
-      git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" &&
-      (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
+  - action: git add -A -- :/
+  - action: git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR"
+  - action: git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME"
 ```
 
-The action adds everything from the repository root, then unstages the run
-folder's own files, so an ignored run folder (the layout alr has always asked
-for) works and a visible one is still kept out. The
-`git diff --cached --quiet ||` part is there because a task that changed
-nothing has nothing to commit; without it a clean tree makes the action fail.
-The run folder (`tasks.yaml` and `logs/`) must be inside the git work tree for
-this action. If it is outside, git refuses the `git reset` paths (exit 128), so
-drop that step and keep the run folder out of the repository.
+The first action adds everything from the repository root. The second
+unstages the run folder's own files, so an ignored run folder (the layout alr
+has always asked for) works and a visible one is still kept out. The third
+commits only when something is staged; its `||` is one step, not a chain,
+because a task that changed nothing has nothing to commit and without the test
+a clean tree makes the action fail. The run folder (`tasks.yaml` and `logs/`)
+must be inside the git work tree for the `git reset` action. If it is outside,
+git refuses the paths (exit 128), so drop that action and keep the run folder
+out of the repository.
 
 An absent `after_task` means the run's actions are undecided: the full-screen
 view asks for them. `after_task: []` records a decision that there are none.
