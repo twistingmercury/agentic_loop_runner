@@ -34,9 +34,9 @@ shared:
   after_task:
     - action: uv run pytest
       timeout: 10m
-    - action: >-
-        git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" &&
-        (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
+    - action: git add -A -- :/
+    - action: git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR"
+    - action: git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME"
   after_run:
     - action: git push --dry-run
 tasks:
@@ -178,8 +178,8 @@ its replacement:
 
 | Before                      | Now                                                      |
 | --------------------------- | -------------------------------------------------------- |
-| `--commit task`             | A commit action last in `shared.after_task`; `--commit` exits 2 |
-| `--commit run`              | A commit action in `shared.after_run` with a fixed message, such as `git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" && (git diff --cached --quiet \|\| git commit -s -m "alr: tasks completed")`; `after_run` actions have no `ALR_TASK_ID` or `ALR_TASK_NAME`, and it runs after every task has already been saved `completed` |
+| `--commit task`             | The commit actions last in `shared.after_task`; `--commit` exits 2 |
+| `--commit run`              | The same commit actions in `shared.after_run`, with a fixed message such as `alr: tasks completed`; `after_run` actions have no `ALR_TASK_ID` or `ALR_TASK_NAME`, and they run after every task has already been saved `completed` |
 | `shared.gates`              | `shared.after_task`                                      |
 | `cmd:` in a gate            | `action:`                                                |
 | `--gate-timeout`            | `--action-timeout`                                       |

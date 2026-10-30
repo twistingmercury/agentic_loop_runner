@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The bundled skill and its template write the commit as three actions, one
+  command each, instead of one `&&` chain, so a failed action's reason names
+  the command. The skill now says to give every command its own action.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

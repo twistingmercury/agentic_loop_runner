@@ -27,20 +27,22 @@ shared:
   # Actions alr runs itself. after_task runs after every task's session; if any
   # fails, the task fails. Put a commit LAST: alr does not undo earlier actions.
   # alr sets ALR_TASK_ID, ALR_TASK_NAME, ALR_TASK_FILE, and ALR_LOG_DIR; use
-  # them in quotes, as "$ALR_TASK_NAME". Keep tasks.yaml and the logs out of a
-  # commit. The action adds everything from the repository root, then unstages
-  # the run folder's own files, so an ignored run folder works and a visible one
-  # is still kept out. The diff --cached test is there because a task that
-  # changed nothing has nothing to commit, and without it a clean tree makes the
-  # action fail. The run folder (tasks.yaml and logs/) must be inside the git
-  # work tree for this action; if it is outside, drop the git reset step and
-  # keep the run folder out of the repository.
-  # Delete the commit action if alr should not commit. Drop these comments from the generated file.
+  # them in quotes, as "$ALR_TASK_NAME". One command per action, never joined
+  # with &&, so a failure names the exact command. Keep tasks.yaml and the logs
+  # out of a commit: the first commit action adds everything from the
+  # repository root, the second unstages the run folder's own files, so an
+  # ignored run folder works and a visible one is still kept out, and the third
+  # commits only when something is staged, because a task that changed nothing
+  # has nothing to commit and without the test a clean tree makes the action
+  # fail. The run folder (tasks.yaml and logs/) must be inside the git work tree
+  # for the git reset action; if it is outside, drop that action and keep the
+  # run folder out of the repository.
+  # Delete the three commit actions if alr should not commit. Drop these comments from the generated file.
   after_task:
     - action: GENERATE_BUILD_AND_TEST_COMMAND_OR_DELETE
-    - action: >-
-        git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" &&
-        (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")
+    - action: git add -A -- :/
+    - action: git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR"
+    - action: git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME"
   # after_run runs once at the end, also when every task was already completed.
   # A failure exits 4 and leaves the tasks completed. Use [] or omit it for none.
   after_run: []
