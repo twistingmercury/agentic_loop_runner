@@ -15,20 +15,21 @@
 - The per-task key is `actions`. Entries have `action` (required) and `timeout` (optional); any other key is an error. Absent and `[]` both mean none; there is no undecided state.
 - Run order for a task: its own `actions`, then `shared.after_task`, as one list. The first failure or timeout fails the task and skips every later action from either list.
 - Per-task actions get the same environment variables as `after_task` actions: `ALR_TASK_ID`, `ALR_TASK_NAME`, `ALR_TASK_FILE`, `ALR_LOG_DIR`. The timeout rule is unchanged: `--action-timeout`, else the action's `timeout`, else `10m`.
-- Error messages name the task, in the existing shape: `tasks[<i>] (id <id>): actions: must be a sequence`, `tasks[<i>] (id <id>): actions[<j>]: <field>: <problem>`. The per-task `after_task`/`after_run` refusal becomes, verbatim: `<where>: <key>: actions are set once for the whole file, under shared, not per task; a task's own actions go under its actions key`.
+- Error messages name the task, in the existing shape: `tasks[<i>] (id <id>): actions: must be a sequence`, `tasks[<i>] (id <id>): actions[<j>]: <field>: <problem>`. The per-task `after_task`/`after_run` refusal becomes, verbatim: `<where>: <key>: not a task key; a task's own actions go under actions, and <key> goes under shared`.
+- A task with any key outside `id`, `name`, `prompt`, `state`, `error`, `actions` is refused, verbatim: `tasks[<i>] (id <id>): <key>: unknown key; a task has only id, name, prompt, state, error, and actions`. The `gates`, `after_task`, and `after_run` checks come first and keep their own messages.
 - The save writes `actions` after `prompt` and before `state`, only when the list is non-empty.
-- Dry-run line for a per-task action, verbatim: `task <id> actions: <first line>: <limit> (<source>)`. These lines come before the `after_task:` lines, in task order, then list order.
+- Dry-run line for a per-task action, verbatim: `task <id> actions: <first line>: <limit> (<source>)`. These lines come before the `after_task:` lines, in task order, then list order, for every task including completed ones. `--action-timeout` overrides them like the shared lines.
 - The view's step count for a task is `len(task.actions) + len(shared.after_task)`. The Actions dialog is not changed.
 - The run log format does not change: a per-task action is an `action_finished` event under its task.
 - No version bump in this plan; the version is set at release time. `CHANGELOG.md` gets an entry under `[Unreleased]`.
-- Branch: `feature/22-per-task-actions`, created from `develop` by the main session before Task 1. Subagents never `git push`. Commits are signed off (`git commit -s`) with a one-line imperative subject, as the repository's history shows.
+- Branch: `feature/22-per-task-actions`, created from `develop` by the main session before Task 1. Subagents never `git push`. Every new test is shown failing before the code that makes it pass, and the e2e tests are shown failing by breaking the code (Task 7). Commits are signed off (`git commit -s`) with a one-line imperative subject, as the repository's history shows.
 - Code shape: `~/.claude/rules/python/python.md` loads when a `.py` file is touched; keep docstrings (the owner asked for no docstring removal); comments say why, not what. Casual wiki tone for `.md` files, with exact key names, flag names, and error text kept verbatim.
 
 ## Review Focus
 
 Inputs the spec implies that no obvious test covers, most likely first. Each has its check in the task that owns it.
 
-1. A task whose own list has an action with a bad `timeout` must be refused naming the task, not `shared.after_task` (Task 1, error table).
+1. A task whose own list has an action with a bad `timeout` must be refused naming the task, not `shared.after_task` (Task 1, error table). A misspelled `action:` key on a task must be refused as an unknown key, not silently dropped (Task 1, error table).
 2. A task with `actions: []` must parse, run only the shared actions, and save without an `actions` key, so a file does not grow a key on every save (Task 1 and Task 2).
 3. A per-task action that fails must skip the shared commit action, or a task's broken work gets committed (Task 3, first-failure test).
 4. A rerun that skips a completed task must not run that task's own actions (Task 3, skipped-task test). The existing shared-list test covers the shared half; the per-task half needs its own assertion.
@@ -100,7 +101,9 @@ def test_actions_for_a_task_is_its_own_then_the_shared_ones() -> None:
         ("    actions:\n      - action: x\n        timeout: 30\n", "tasks[0] (id 1): actions[0]: timeout: must be a duration string such as 90s or 10m"),
         ("    actions:\n      - action: x\n        when: later\n", "tasks[0] (id 1): actions[0]: when: unknown key; an action has only action and timeout"),
         ("    actions:\n      - cmd: x\n", "tasks[0] (id 1): actions[0]: cmd: renamed to action; see the README (Migrating from commit modes and gates)"),
-        ("    after_task: []\n", "tasks[0] (id 1): after_task: actions are set once for the whole file, under shared, not per task; a task's own actions go under its actions key"),
+        ("    after_task: []\n", "tasks[0] (id 1): after_task: not a task key; a task's own actions go under actions, and after_task goes under shared"),
+        ("    action:\n      - action: x\n", "tasks[0] (id 1): action: unknown key; a task has only id, name, prompt, state, error, and actions"),
+        ("    agent: go software engineer\n", "tasks[0] (id 1): agent: unknown key; a task has only id, name, prompt, state, error, and actions"),
     ],
 )
 def test_bad_task_actions_name_the_task(snippet: str, want: str) -> None:
@@ -112,7 +115,7 @@ def test_bad_task_actions_name_the_task(snippet: str, want: str) -> None:
     assert str(exc.value) == want
 ```
 
-Update the existing `test_parse_tasks_task_level_actions_are_an_error` assertion to the new full message.
+Update the existing `test_parse_tasks_task_level_actions_are_an_error` (parametrized over `key`) to assert the exact new message with an f-string: `f"tasks[0] (id 1): {key}: not a task key; a task's own actions go under actions, and {key} goes under shared"`. Replace `test_parse_tasks_ignores_unknown_fields` with `test_parse_tasks_refuses_unknown_fields`, asserting the `agent` message above; the `gates` test at line 532 is unchanged.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -127,6 +130,8 @@ In `src/alr/tasks.py`:
 - `TaskList.actions_for(self, task: Task) -> list[Action]`, with a docstring saying the task's own actions come first.
 - `_check_actions(label, node)` uses `label` in both messages; `_check_action` is unchanged. `_optional_actions` calls it with `f"shared.{key}"`.
 - `_parse_task` reads `actions` with a new helper `_task_actions(where: str, fields: dict[str, yaml.Node]) -> list[Action]` that returns `[]` when the key is absent and otherwise `_check_actions(f"{where}: actions", node)`. Call it after the `after_task`/`after_run` refusal loop, and update that loop's message to the verbatim text in Global Constraints.
+- After those checks, a new `_check_task_keys(where: str, fields: dict[str, yaml.Node]) -> None` refuses any key outside the six known ones with the verbatim unknown-key message. The comment says why: a dropped key would run the task without its checks and the next save would erase it.
+- Docstrings follow the code: `_check_actions` no longer says "under shared.<key>" (it checks any action list, named by `label`), and `Action`'s docstring names the three places a list can sit.
 
 - [ ] **Step 4: Run the whole parse module**
 
@@ -267,12 +272,14 @@ async def test_run_loop_a_tasks_own_action_sees_the_task_variables(tmp_path: Pat
     assert seen.read_text() == "4|Named task"
 ```
 
+Also add `test_run_loop_a_timed_out_own_action_fails_the_task_and_skips_the_shared_ones`: task 1 `actions=[Action(command="sleep 5", timeout="1s")]`, a shared action that touches a marker; assert `RunError`, no marker, state `FAILED`, error `'action "sleep 5" timed out after 1s'`.
+
 Match the exact failure text to what `test_run_loop_action_failure_fails_task_and_stops_run` asserts today; copy its wording for the exit-status part.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/unit/test_actions.py -k "own_action" -v`
-Expected: FAIL; the order file reads `shared\nshared\n`, the shared marker exists, the failing task completes.
+Expected: FAIL for the order, failing, timed-out, and variables tests. `test_run_loop_a_completed_tasks_own_actions_do_not_run` passes already, because the loop skips a completed task before any action; it is a guard against a later change, and its passing here is expected.
 
 - [ ] **Step 3: Implement**
 
@@ -304,25 +311,63 @@ git commit -s -m "Run a task's own actions before the shared after_task actions"
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/unit/test_plain_dryrun.py`, in the file's existing style (a task file text, a dry run, the captured stdout):
+Add to `tests/unit/test_plain_dryrun.py`, next to `test_dry_run_lists_effective_action_timeouts`, using the file's `_dry_run` helper and `write_file`:
 
 ```python
-def test_dry_run_prints_a_tasks_own_action_limits_before_the_shared_ones(...) -> None:
-    # task 1 has actions [{action: uv run pytest, timeout: 15m}], task 2 has [{action: markdownlint README.md}],
-    # shared.after_task has [{action: echo one}]
-    ...
-    assert (
-        "task 1 actions: uv run pytest: 15m (action)\n"
-        "task 2 actions: markdownlint README.md: 10m (default)\n"
-        "after_task: echo one: 10m (default)\n"
-    ) in out
-```
+TASK_ACTIONS_YAML = """shared:
+  prompt: shared
+  after_task:
+    - action: echo one
+tasks:
+  - id: 1
+    name: First
+    prompt: p
+    actions:
+      - action: uv run pytest
+        timeout: 15m
+  - id: 2
+    name: Done
+    prompt: p
+    state: completed
+    actions:
+      - action: markdownlint README.md
+"""
 
-Write the task file text and the call the way the test at line 133 of that file does.
+
+@pytest.mark.parametrize(
+    ("override", "want"),
+    [
+        pytest.param(
+            "",
+            "task 1 actions: uv run pytest: 15m (action)\n"
+            "task 2 actions: markdownlint README.md: 10m (default)\n"
+            "after_task: echo one: 10m (default)\n",
+            id="no flag",
+        ),
+        pytest.param(
+            "2m",
+            "task 1 actions: uv run pytest: 2m (flag)\n"
+            "task 2 actions: markdownlint README.md: 2m (flag)\n"
+            "after_task: echo one: 2m (flag)\n",
+            id="flag overrides every line",
+        ),
+    ],
+)
+async def test_dry_run_lists_a_tasks_own_action_limits_first(
+    tmp_path: Path, override: str, want: str
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", TASK_ACTIONS_YAML)
+
+    got = await _dry_run(tasks_file, action_timeout=override)
+
+    assert got.endswith(f"Done\n{want}{tasks_file} is valid\n"), (
+        "a completed task's actions are listed too: the dry run reports the file, not the run"
+    )
+```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `uv run pytest tests/unit/test_plain_dryrun.py -k own_action -v`
+Run: `uv run pytest tests/unit/test_plain_dryrun.py -k own_action_limits -v`
 Expected: FAIL; no `task 1 actions:` line in the output.
 
 - [ ] **Step 3: Implement**
@@ -402,7 +447,7 @@ git commit -s -m "Count a task's own actions in the progress line"
 **Files:**
 - Modify: `src/alr/skills/alr-task-file/SKILL.md` (the actions section, lines 35 to 82, and step 5 of the procedure, lines 112 to 130)
 - Modify: `src/alr/skills/alr-task-file/templates/tasks_template.yaml` (the task entry)
-- Modify: `README.md` (the Actions section, lines 128 to 160)
+- Modify: `README.md` (the Actions section, lines 130 to 170, and the `--dry-run` row at line 87)
 - Modify: `CHANGELOG.md` (`[Unreleased]`)
 
 **Interfaces:**
@@ -410,11 +455,11 @@ git commit -s -m "Count a task's own actions in the progress line"
 
 - [ ] **Step 1: The skill**
 
-After the paragraph that ends "`--action-timeout` overrides every action's timeout." add a paragraph: a task may carry its own `actions` list, same entry shape, run after that task's session and before `shared.after_task`; use it for checks only that task needs (the issue's example: unit tests for a code task, a Markdown lint for a docs task, ShellCheck and BATS for a script task); keep the commit in `shared.after_task` so every task is committed the same way, and never put a commit in a task's own list. In step 5, where the task fields are listed, add `actions` as optional, and change "Write no other task keys" to name `actions` among the known ones.
+Fix the sentences the change makes wrong: lines 38 to 39 ("A task is `completed` only when every `after_task` action exited 0") become every action in both lists; lines 48 to 49 ("An `after_task` action also gets `ALR_TASK_ID` and `ALR_TASK_NAME`") become a task's own and `after_task` actions. Step 6 (lines 131 to 132) tells the author to put task-specific verification in the prompt; add that a check alr should run and judge goes in the task's `actions` instead, and the prompt's verification text is for the session. After the paragraph that ends "`--action-timeout` overrides every action's timeout." add a paragraph: a task may carry its own `actions` list, same entry shape, run after that task's session and before `shared.after_task`; use it for checks only that task needs (the issue's example: unit tests for a code task, a Markdown lint for a docs task, ShellCheck and BATS for a script task); keep the commit in `shared.after_task` so every task is committed the same way, and never put a commit in a task's own list. In step 5, where the task fields are listed, add `actions` as optional, and replace "Write no other task keys: alr ignores them when reading and drops them the first time it saves the file" with: any other task key is refused, so the file does not run.
 
 - [ ] **Step 2: The template**
 
-Under the task entry, after `prompt`, add a commented optional block:
+Change the prompt's `Task checks:` line (line 68) to `GENERATE_TASK_SPECIFIC_COMMANDS_FOR_THE_SESSION_OR_NONE`, so it is clear the session runs those and alr runs the `actions`. Under the task entry, after `prompt`, add a commented optional block:
 
 ```yaml
     # Optional: checks only this task needs. They run before shared.after_task.
@@ -425,7 +470,7 @@ Under the task entry, after `prompt`, add a commented optional block:
 
 - [ ] **Step 3: The README**
 
-In the Actions section, after the two-list table, add a short paragraph and example: a task may have its own `actions`, same entry shape, run first, then `shared.after_task`; the first failure in either list fails the task. Add the `task <id> actions:` line to the `--dry-run` row of the flag table (line 87). Remove or reword any sentence that says actions live only under `shared`.
+In the Actions section, after the two-list table, add a short paragraph and example: a task may have its own `actions`, same entry shape, run first, then `shared.after_task`; the first failure in either list fails the task. Fix lines 142 to 144 (the completed rule) to say every action in both lists, and lines 154 to 155 ("`after_task` actions also get") to include a task's own actions. Add the `task <id> actions:` line to the `--dry-run` row of the flag table (line 87). Add one sentence to the task-file field list: any task key outside the six known ones is refused.
 
 - [ ] **Step 4: The changelog**
 
@@ -437,6 +482,15 @@ Under `## [Unreleased]`, add `### Added` before `### Changed`:
   timeout rules. The first failure in either list fails the task. `--dry-run`
   prints them as `task <id> actions:` lines, and the progress line counts
   both lists. (#22)
+```
+
+And under the existing `### Changed`:
+
+```markdown
+- A task with a key alr does not know is refused instead of ignored. A task has
+  only `id`, `name`, `prompt`, `state`, `error`, and `actions`; a stray key
+  used to be dropped on the next save, and a misspelled `actions` would have
+  run the task with none of its checks.
 ```
 
 - [ ] **Step 5: Check the template still parses**
@@ -462,9 +516,9 @@ git commit -s -m "Document a task's own actions in the skill, template, README, 
 **Interfaces:**
 - Consumes: `shared_block`, `write_tasks_yaml`, `run_alr`, `run_args`, `run_dry_run`, `run_log`, `read_tasks_yaml`, `task_states`, `task_errors` as they exist. These tests are black-box against the wheel and share nothing with the unit tests.
 
-- [ ] **Step 1: Add a fixture**
+- [ ] **Step 1: Add a helper**
 
-In `e2e_helpers.py`, add `TWO_TASKS_FIRST_WITH_ACTIONS` as a function `two_tasks_first_with_actions(action: str) -> str` that returns the `TWO_TASKS` text with `actions:\n      - action: <action>\n` under task 1 only.
+In `e2e_helpers.py`, add `two_tasks_first_with_actions(actions: list[dict[str, str]]) -> str`: the two tasks of `TWO_TASKS` as data, with `actions` set on task 1 only, dumped with `yaml.safe_dump({"tasks": [...]}, sort_keys=False)` the way `shared_block` builds its text (lines 88 to 101), so commands with quotes or colons survive.
 
 - [ ] **Step 2: Write the tests**
 
@@ -474,8 +528,9 @@ Add to `tests/e2e/test_actions.py`:
 def test_actions_a_tasks_own_actions_run_for_that_task_only_and_first(tmp_path, fake_claude):
     # shared after_task appends "shared"; task 1's own action appends "own"
     # assert the marker file reads "own\nshared\nshared\n"
-    # assert the run log's action_finished events are, in order:
-    #   (task 1, cmd own), (task 1, cmd shared), (task 2, cmd shared)
+    # assert the run log's action_finished events are, in order, by (task, cmd):
+    #   (1, f"echo own >> '{marker}'"), (1, f"echo shared >> '{marker}'"), (2, f"echo shared >> '{marker}'")
+    #   (cmd is the command's whole first line, runlog.py:341)
 
 def test_actions_a_failing_own_action_fails_the_task_and_skips_the_shared_ones(tmp_path, fake_claude):
     # task 1 actions: [exit 7]; shared after_task touches a marker
@@ -485,6 +540,11 @@ def test_actions_bad_task_actions_are_refused_naming_the_task(tmp_path, fake_cla
     # task 1 actions: [{action: x, timeout: 30}]
     # assert dry run exits 3 and stderr holds
     #   "tasks[0] (id 1): actions[0]: timeout: must be a duration string such as 90s or 10m"
+
+def test_actions_an_unknown_task_key_is_refused(tmp_path, fake_claude):
+    # task 1 carries `action:` (singular) with one entry
+    # assert dry run exits 3 and stderr holds
+    #   "tasks[0] (id 1): action: unknown key; a task has only id, name, prompt, state, error, and actions"
 
 def test_actions_dry_run_lists_a_tasks_own_limits_first(tmp_path, fake_claude):
     # task 1 actions: [{action: uv run pytest, timeout: 15m}]; shared after_task: [{action: echo one}]
@@ -496,12 +556,16 @@ def test_actions_a_tasks_own_actions_survive_the_save(tmp_path, fake_claude):
 
 Update `test_actions_task_level_actions_are_rejected` if it asserts the old per-task `after_task` message; the `gates` message it asserts today is unchanged.
 
-- [ ] **Step 3: Run the build**
+- [ ] **Step 3: Prove the tests by breaking the code**
+
+In `src/alr/engine/loop.py`, change `task_list.actions_for(task)` back to `task_list.after_task_list()`; in `src/alr/tasks.py`, make `_check_task_keys` return without checking. The main session runs `./build/build.sh` and expects the e2e suite to fail on the first, second, and unknown-key tests. Revert both edits (`git checkout -- src/alr/engine/loop.py src/alr/tasks.py`).
+
+- [ ] **Step 4: Run the build**
 
 The main session runs: `./build/build.sh`
 Expected: the wheel builds, the unit and e2e suites pass in the container, exit 0. A failing new test here is a bug in Tasks 1 to 5, not a test to loosen.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add tests/e2e/test_actions.py tests/e2e/e2e_helpers.py
@@ -516,7 +580,7 @@ git commit -s -m "Cover a task's own actions end to end"
 - Modify: `docs/design/02_architectural_decisions.md` (ADR-029 status to Accepted; frontmatter version, date, notes)
 - Modify: `docs/design/01_requirements.md` (requirements 2, 4, and the Action enforcement row; frontmatter)
 - Modify: `docs/design/03_system_architecture.md` (the parse bullets at lines 189 to 198, the run bullet at 228, the dry-run bullet at 297, the progress bullet at 347; frontmatter)
-- Modify, in the wiki clone at `../agentic_loop_runner.wiki/`: `Actions.md` (a new section after "The two lists"; drop "alr won't accept them on a single task"), `Write-a-task-file.md` (add `actions` to the task fields)
+- Modify, in the wiki clone at `/home/jeremy/dev/agentic_loop_runner.wiki/` (absolute path; a subagent's working directory resets between calls): `Actions.md` (a new section after "The two lists"; drop "alr won't accept them on a single task"; the variables table at lines 90 to 95 says `after_task` in its "Set for" column, make it "a task's own and `after_task`"), `Write-a-task-file.md` (add `actions` to the task fields; say any other task key is refused), `Plain-mode-and-the-run-log.md` (line 66, "Each `after_task:` or `after_run:` line" gains the `task <id> actions:` line)
 
 **Interfaces:**
 - Consumes: the built behaviour. The wiki is a separate repository: edit and commit in the local clone; the owner pushes it.
@@ -531,11 +595,11 @@ Requirement 2: add `optional actions` to the task fields. Requirement 4: say the
 
 - [ ] **Step 3: System architecture**
 
-Parse bullets: a task's `actions` is validated like the shared lists with errors `tasks[<i>] (id <id>): actions[<j>]: <field>: <problem>`; the per-task `after_task`/`after_run` message gains its new ending. Run bullet: one list, the task's own then the shared. Dry-run bullet: `task <id> actions:` lines first. Progress bullet: n is the running task's own plus shared count. Bump the frontmatter.
+Parse bullets: a task's `actions` is validated like the shared lists with errors `tasks[<i>] (id <id>): actions[<j>]: <field>: <problem>`; the per-task `after_task`/`after_run` message is the new one; an unknown task key is refused with its message. Run bullet: one list, the task's own then the shared. Dry-run bullet: `task <id> actions:` lines first. Progress bullet: n is the running task's own plus shared count. Bump the frontmatter.
 
 - [ ] **Step 4: Wiki**
 
-`Actions.md`: a section "A task's own actions" with the issue's three-task example and the rule that the commit stays in `shared.after_task`. Link ADR-029 the way the page links ADR-026. `Write-a-task-file.md`: add `actions` to the task fields list. Commit in the wiki clone with `git commit -s -m "Describe a task's own actions"`; do not push.
+`Actions.md`: a section "A task's own actions" with the issue's three-task example and the rule that the commit stays in `shared.after_task`. Link ADR-029 the way the page links ADR-026. `Write-a-task-file.md`: add `actions` to the task fields list. Commit in the wiki clone on `master` (a GitHub wiki has only that branch) with `git commit -s -m "Describe a task's own actions"`; do not push.
 
 - [ ] **Step 5: Commit the design documents**
 
