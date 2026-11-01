@@ -1,5 +1,8 @@
 # Agentic Loop Runner (alr)
 
+![Maturity](https://img.shields.io/badge/maturity-emerging-orange)
+![Version](https://img.shields.io/github/v/tag/twistingmercury/agentic_loop_runner?sort=semver)
+
 > **Maturity Level**: Emerging - in active, initial development; expect breaking changes.</br>
 > **Version**: v0.2.0
 >
