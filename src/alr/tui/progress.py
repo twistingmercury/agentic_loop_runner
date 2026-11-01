@@ -27,11 +27,12 @@ class Progress:
     def __init__(
         self,
         total_tasks: int,
-        action_count: int,
+        shared_action_count: int,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._total_tasks = total_tasks
-        self._action_count = action_count
+        self._shared_action_count = shared_action_count
+        self._action_count = shared_action_count
         self._clock = clock
         self._run_start: float | None = None
         self._step_start = 0.0
@@ -48,9 +49,11 @@ class Progress:
             self._run_start = now
 
         match event:
-            case TaskStarted():
+            case TaskStarted(task=task):
                 self._task_number += 1
                 self._action_number = 0
+                # Each task runs its own actions before the shared ones, so "of n" is per task.
+                self._action_count = len(task.actions) + self._shared_action_count
                 self._start_step("session", now)
             case ActionStarted(task=task, action=action):
                 self._start_step(self._action_label(task.id, action.command), now)

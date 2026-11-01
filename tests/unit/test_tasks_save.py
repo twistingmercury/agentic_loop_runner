@@ -95,6 +95,25 @@ def _one_task_list() -> TaskList:
             None,
             id="multi-line shared prompt",
         ),
+        pytest.param(
+            TaskList(
+                shared=SHARED,
+                tasks=[
+                    Task(
+                        id=1,
+                        name="First",
+                        prompt="p",
+                        actions=[
+                            Action(command="uv run pytest", timeout="15m"),
+                            Action(command="markdownlint README.md"),
+                        ],
+                    ),
+                    Task(id=2, name="Second", prompt="q"),
+                ],
+            ),
+            None,
+            id="a task's own actions survive the save",
+        ),
     ],
 )
 def test_save_tasks_round_trip(
@@ -108,6 +127,30 @@ def test_save_tasks_round_trip(
 
     assert sorted(tmp_path.iterdir()) == [path], "no temporary file is left"
     assert tasks.parse_tasks(_saved(path)) == want
+
+
+def test_save_tasks_writes_actions_between_prompt_and_state_and_omits_an_empty_list(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "tasks.yaml"
+    task_list = TaskList(
+        shared=Shared(prompt="p"),
+        tasks=[
+            Task(
+                id=1, name="With", prompt="a", actions=[Action(command="uv run pytest")]
+            ),
+            Task(id=2, name="Without", prompt="b", actions=[]),
+        ],
+    )
+
+    tasks.save_tasks(str(path), task_list)
+
+    text = path.read_text(encoding="utf-8")
+    assert (
+        "    prompt: a\n    actions:\n      - action: uv run pytest\n    state: pending\n"
+        in text
+    )
+    assert text.count("actions:") == 1
 
 
 def test_save_tasks_is_readable_by_the_owner_only(tmp_path: Path) -> None:

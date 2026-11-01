@@ -98,21 +98,23 @@ def test_parse_tasks_preserves_file_order() -> None:
     assert ids == [30, 10, 20], "IDs are identity, not order"
 
 
-def test_parse_tasks_ignores_unknown_fields() -> None:
+def test_parse_tasks_refuses_unknown_fields() -> None:
+    # A key alr does not know used to be dropped on save; with per-task actions
+    # a misspelled key would run the task without its checks and erase the evidence.
     text = """shared:\n  prompt: shared\ntasks:
   - id: 1
     name: Only task
     agent: go software engineer
-    checkpoint: ""
     prompt: Do it.
     state: pending
 """
 
-    got = tasks.parse_tasks(text)
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
 
-    assert got == TaskList(
-        shared=Shared(prompt="shared"),
-        tasks=[Task(id=1, name="Only task", prompt="Do it.", state=PENDING)],
+    assert (
+        str(exc.value)
+        == "tasks[0] (id 1): agent: unknown key; a task has only id, name, prompt, state, error, and actions"
     )
 
 
@@ -552,8 +554,10 @@ def test_parse_tasks_task_level_actions_are_an_error(key: str, value: str) -> No
     with pytest.raises(TaskFileError) as exc:
         tasks.parse_tasks(text)
 
-    assert f"tasks[0] (id 3): {key}" in str(exc.value)
-    assert "once for the whole file, under shared" in str(exc.value)
+    assert (
+        str(exc.value)
+        == f"tasks[0] (id 3): {key}: not a task key; a task's own actions go under actions, and {key} goes under shared"
+    )
 
 
 ACTION_ERROR_CASES = [
@@ -832,3 +836,93 @@ def test_old_and_bad_action_keys_are_refused(snippet: str, message: str) -> None
 
 def test_run_scope_is_a_task_with_id_zero() -> None:
     assert RUN_SCOPE == Task(id=0, name="after the run", prompt="")
+
+
+def test_a_task_may_carry_its_own_actions() -> None:
+    text = """shared:\n  prompt: shared\ntasks:
+  - id: 1
+    name: Only task
+    prompt: Do it.
+    actions:
+      - action: uv run pytest
+        timeout: 15m
+      - action: markdownlint README.md
+"""
+
+    got = tasks.parse_tasks(text)
+
+    assert got.tasks[0].actions == [
+        Action(command="uv run pytest", timeout="15m"),
+        Action(command="markdownlint README.md"),
+    ]
+
+
+@pytest.mark.parametrize("snippet", ["", "    actions: []\n"], ids=["absent", "empty"])
+def test_absent_and_empty_task_actions_both_read_as_none(snippet: str) -> None:
+    text = f"shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: Only task\n    prompt: Do it.\n{snippet}"
+
+    got = tasks.parse_tasks(text)
+
+    assert got.tasks[0].actions == []
+
+
+def test_actions_for_a_task_is_its_own_then_the_shared_ones() -> None:
+    own = Action(command="own")
+    shared = Action(command="shared")
+    task_list = TaskList(
+        shared=Shared(prompt="p", after_task=[shared]),
+        tasks=[
+            Task(id=1, name="A", prompt="a", actions=[own]),
+            Task(id=2, name="B", prompt="b"),
+        ],
+    )
+
+    assert task_list.actions_for(task_list.tasks[0]) == [own, shared]
+    assert task_list.actions_for(task_list.tasks[1]) == [shared]
+
+
+@pytest.mark.parametrize(
+    ("snippet", "want"),
+    [
+        ("    actions: run tests\n", "tasks[0] (id 1): actions: must be a sequence"),
+        (
+            "    actions:\n      - uv run pytest\n",
+            "tasks[0] (id 1): actions[0]: must be a mapping",
+        ),
+        (
+            "    actions:\n      - action: ''\n",
+            "tasks[0] (id 1): actions[0]: action: must not be empty or whitespace",
+        ),
+        (
+            "    actions:\n      - action: x\n        timeout: 30\n",
+            "tasks[0] (id 1): actions[0]: timeout: must be a duration string such as 90s or 10m",
+        ),
+        (
+            "    actions:\n      - action: x\n        when: later\n",
+            "tasks[0] (id 1): actions[0]: when: unknown key; an action has only action and timeout",
+        ),
+        (
+            "    actions:\n      - cmd: x\n",
+            "tasks[0] (id 1): actions[0]: cmd: renamed to action; see the README (Migrating from commit modes and gates)",
+        ),
+        (
+            "    after_task: []\n",
+            "tasks[0] (id 1): after_task: not a task key; a task's own actions go under actions, and after_task goes under shared",
+        ),
+        (
+            "    action:\n      - action: x\n",
+            "tasks[0] (id 1): action: unknown key; a task has only id, name, prompt, state, error, and actions",
+        ),
+        (
+            "    agent: go software engineer\n",
+            "tasks[0] (id 1): agent: unknown key; a task has only id, name, prompt, state, error, and actions",
+        ),
+    ],
+)
+def test_bad_task_actions_name_the_task(snippet: str, want: str) -> None:
+    text = f"shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: Only task\n    prompt: Do it.\n{snippet}"
+
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert str(exc.value) == want

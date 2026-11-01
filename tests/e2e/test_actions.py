@@ -1,4 +1,4 @@
-"""Actions: commands from the task file's shared.after_task list that alr runs itself after each session."""
+"""Actions: commands from a task's own actions list and the shared after_task list that alr runs itself after each session."""
 
 import time
 from pathlib import Path
@@ -13,10 +13,12 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     run_args,
-    shared_block,
     run_dry_run,
+    run_log,
+    shared_block,
     task_errors,
     task_states,
+    two_tasks_first_with_actions,
     write_tasks_yaml,
 )
 
@@ -356,3 +358,138 @@ def test_actions_shared_actions_run_for_every_task(
     after = read_tasks_yaml(tasks_path)
     assert task_states(after) == {1: "completed", 2: "completed"}
     assert after["shared"]["after_task"] == [{"action": f"echo ran >> '{marker}'"}]
+
+
+def test_actions_a_tasks_own_actions_run_for_that_task_only_and_first(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    marker = tmp_path / "action-runs"
+    own = f"echo own >> '{marker}'"
+    shared = f"echo shared >> '{marker}'"
+    tasks_path = write_tasks_yaml(
+        tmp_path,
+        shared_block("Body.", [{"action": shared}])
+        + two_tasks_first_with_actions([{"action": own}]),
+    )
+
+    res = run_alr(*run_args(tasks_path))
+
+    assert res.code == 0, res
+    # Task 1 runs its own action, then the shared one; task 2 has no own action.
+    assert marker.read_text(encoding="utf-8") == "own\nshared\nshared\n"
+    finished = [e for e in run_log(tmp_path) if e["event"] == "action_finished"]
+    assert [(e["task"], e["cmd"]) for e in finished] == [
+        (1, own),
+        (1, shared),
+        (2, shared),
+    ]
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed", 2: "completed"}
+
+
+def test_actions_a_failing_own_action_fails_the_task_and_skips_the_shared_ones(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    never = tmp_path / "never"
+    tasks_path = write_tasks_yaml(
+        tmp_path,
+        shared_block("Body.", [{"action": f"touch '{never}'"}])
+        + two_tasks_first_with_actions([{"action": "exit 7"}]),
+    )
+
+    res = run_alr(*run_args(tasks_path))
+
+    action_err = 'action "exit 7" failed: exit status 7'
+    assert res.code == 1, res
+    assert f"task 1: First task failed: {action_err}" in res.err
+    assert not never.exists(), "a failed own action must skip the shared actions"
+
+    after = read_tasks_yaml(tasks_path)
+    assert task_states(after) == {1: "failed", 2: "pending"}
+    assert task_errors(after)[1] == action_err
+    assert_no_tmp_file(tasks_path)
+
+
+def test_actions_bad_task_actions_are_refused_naming_the_task(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_yaml = shared_block() + two_tasks_first_with_actions(
+        [{"action": "x", "timeout": 30}]
+    )
+
+    res, _ = run_dry_run(tmp_path, tasks_yaml)
+
+    assert res.code == 3, res
+    assert (
+        "tasks[0] (id 1): actions[0]: timeout: must be a duration string such as 90s or 10m"
+        in res.err
+    )
+
+
+def test_actions_an_unknown_task_key_is_refused(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_yaml = (
+        shared_block()
+        + "tasks:\n  - id: 1\n    name: First task\n    prompt: do it\n"
+        + "    action:\n      - action: uv run pytest\n"
+    )
+
+    res, _ = run_dry_run(tmp_path, tasks_yaml)
+
+    assert res.code == 3, res
+    assert (
+        "tasks[0] (id 1): action: unknown key; a task has only id, name, prompt, state, error, and actions"
+        in res.err
+    )
+
+
+def test_actions_dry_run_lists_a_tasks_own_limits_first(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_yaml = shared_block(
+        "Body.", [{"action": "echo one"}]
+    ) + two_tasks_first_with_actions([{"action": "uv run pytest", "timeout": "15m"}])
+
+    res, tasks_path = run_dry_run(tmp_path, tasks_yaml)
+
+    assert res.code == 0, res
+    assert (
+        "task 1 actions: uv run pytest: 15m (action)\n"
+        "after_task: echo one: 10m (default)\n"
+        f"{tasks_path} is valid\n"
+    ) in res.out
+
+
+def test_actions_dry_run_flag_overrides_a_tasks_own_limits(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_yaml = shared_block(
+        "Body.", [{"action": "echo one"}]
+    ) + two_tasks_first_with_actions([{"action": "uv run pytest", "timeout": "15m"}])
+
+    res, tasks_path = run_dry_run(tmp_path, tasks_yaml, "--action-timeout", "2m")
+
+    assert res.code == 0, res
+    assert (
+        "task 1 actions: uv run pytest: 2m (flag)\n"
+        "after_task: echo one: 2m (flag)\n"
+        f"{tasks_path} is valid\n"
+    ) in res.out
+
+
+def test_actions_a_tasks_own_actions_survive_the_save(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    own = [{"action": "echo own"}, {"action": "true", "timeout": "30s"}]
+    tasks_path = write_tasks_yaml(
+        tmp_path, shared_block("Body.", []) + two_tasks_first_with_actions(own)
+    )
+
+    res = run_alr(*run_args(tasks_path))
+
+    assert res.code == 0, res
+    after = read_tasks_yaml(tasks_path)
+    assert task_states(after) == {1: "completed", 2: "completed"}
+    assert after["tasks"][0]["actions"] == own
+    assert "actions" not in after["tasks"][1]
+    assert_no_tmp_file(tasks_path)

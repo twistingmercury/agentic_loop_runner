@@ -101,6 +101,18 @@ def shared_block(
     return yaml.safe_dump({"shared": shared}, sort_keys=False)
 
 
+def two_tasks_first_with_actions(actions: list[dict[str, str]]) -> str:
+    """The two tasks of TWO_TASKS, with actions on task 1 only; put it after a shared block."""
+    first = {
+        "id": 1,
+        "name": "First task",
+        "prompt": "Do the first thing.",
+        "actions": actions,
+    }
+    second = {"id": 2, "name": "Second task", "prompt": "Do the second thing."}
+    return yaml.safe_dump({"tasks": [first, second]}, sort_keys=False)
+
+
 def run_args(tasks_path: Path) -> list[str]:
     """The flags of an ordinary unsandboxed run; the task file is the folder's tasks.yaml."""
     return ["--yolo", f"--dir={tasks_path.parent}"]

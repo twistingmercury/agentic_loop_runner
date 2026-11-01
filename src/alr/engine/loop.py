@@ -258,7 +258,10 @@ async def _run_task(
     options: RunOptions,
     front_end: FrontEnd,
 ) -> _Outcome:
-    """Run the task's session and its after_task actions; return the state and error to save."""
+    """Run the task's session, then its own actions and the shared after_task ones.
+
+    Returns the state and error to save.
+    """
     stdin_text = f"{task_list.shared.prompt}\n\n{task.text()}\n"
     argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
     started = time.monotonic()
@@ -278,7 +281,7 @@ async def _run_task(
     env = action_env(task, options.tasks_file, options.log_dir)
     state, error = await run_actions(
         replace(task),
-        task_list.after_task_list(),
+        task_list.actions_for(task),
         options.action_timeout,
         front_end,
         env,

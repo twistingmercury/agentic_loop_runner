@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A task may carry its own `actions` list. They run after that task's session
+  and before `shared.after_task`, with the same entry shape, variables, and
+  timeout rules. The first failure in either list fails the task. `--dry-run`
+  prints them as `task <id> actions:` lines, and the progress line counts
+  both lists. (#22)
+
 ### Changed
 
+- A task with a key alr does not know is refused instead of ignored. A task has
+  only `id`, `name`, `prompt`, `state`, `error`, and `actions`; a stray key
+  used to be dropped on the next save, and a misspelled `actions` would have
+  run the task with none of its checks.
 - The bundled skill and its template write the commit as three actions, one
   command each, instead of one `&&` chain, so a failed action's reason names
   the command. The skill now says to give every command its own action.

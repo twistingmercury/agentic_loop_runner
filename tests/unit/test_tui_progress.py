@@ -40,7 +40,7 @@ def clock() -> FakeClock:
 
 @pytest.fixture
 def progress(clock: FakeClock) -> Progress:
-    return Progress(total_tasks=12, action_count=2, clock=clock)
+    return Progress(total_tasks=12, shared_action_count=2, clock=clock)
 
 
 def test_text_is_empty_before_any_event(progress: Progress) -> None:
@@ -160,7 +160,7 @@ def test_run_done_clears_the_line(progress: Progress, clock: FakeClock) -> None:
 
 
 def test_default_clock_is_monotonic() -> None:
-    progress = Progress(total_tasks=1, action_count=0)
+    progress = Progress(total_tasks=1, shared_action_count=0)
     progress.feed(TaskStarted(FIRST))
 
     assert progress.text().startswith("task 1 of 1 · session · ")
@@ -231,7 +231,7 @@ def test_next_task_start_brings_the_step_back(
 
 
 def test_no_step_is_shown_once_the_last_task_has_finished(clock: FakeClock) -> None:
-    progress = Progress(total_tasks=1, action_count=1, clock=clock)
+    progress = Progress(total_tasks=1, shared_action_count=1, clock=clock)
     progress.feed(TaskStarted(FIRST))
     progress.feed(TaskFinished(FIRST, None, 4.0))
     clock.advance(4)
@@ -256,7 +256,7 @@ def test_after_run_action_is_labelled_after_the_run_and_leaves_the_task_actions_
 def test_after_run_action_with_no_task_actions_is_still_labelled_after_the_run(
     clock: FakeClock,
 ) -> None:
-    progress = Progress(total_tasks=1, action_count=0, clock=clock)
+    progress = Progress(total_tasks=1, shared_action_count=0, clock=clock)
     progress.feed(TaskStarted(FIRST))
     progress.feed(TaskFinished(FIRST, None, 1.0))
     progress.feed(ActionStarted(RUN_SCOPE, FORMAT))
@@ -274,3 +274,18 @@ def test_after_run_shows_progress_when_no_task_was_pending(
     assert progress.text() == (
         "after the run: uv run pytest -n auto tests/unit · 1m 5s · run 1m 5s"
     )
+
+
+def test_the_step_count_is_the_running_tasks_own_actions_plus_the_shared_ones() -> None:
+    progress = Progress(total_tasks=2, shared_action_count=1)
+    first = Task(id=1, name="With", prompt="p", actions=[Action(command="own")])
+    second = Task(id=2, name="Without", prompt="p")
+
+    progress.feed(TaskStarted(task=first))
+    progress.feed(ActionStarted(task=first, action=Action(command="own")))
+    assert "action 1 of 2: own" in progress.text()
+
+    progress.feed(TaskFinished(first, None, 1.0))
+    progress.feed(TaskStarted(task=second))
+    progress.feed(ActionStarted(task=second, action=Action(command="shared")))
+    assert "action 1 of 1: shared" in progress.text()

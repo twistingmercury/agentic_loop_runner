@@ -157,6 +157,57 @@ async def test_dry_run_lists_effective_action_timeouts(
     )
 
 
+TASK_ACTIONS_YAML = """shared:
+  prompt: shared
+  after_task:
+    - action: echo one
+tasks:
+  - id: 1
+    name: First
+    prompt: p
+    actions:
+      - action: uv run pytest
+        timeout: 15m
+  - id: 2
+    name: Done
+    prompt: p
+    state: completed
+    actions:
+      - action: markdownlint README.md
+"""
+
+
+@pytest.mark.parametrize(
+    ("override", "want"),
+    [
+        pytest.param(
+            "",
+            "task 1 actions: uv run pytest: 15m (action)\n"
+            "task 2 actions: markdownlint README.md: 10m (default)\n"
+            "after_task: echo one: 10m (default)\n",
+            id="no flag",
+        ),
+        pytest.param(
+            "2m",
+            "task 1 actions: uv run pytest: 2m (flag)\n"
+            "task 2 actions: markdownlint README.md: 2m (flag)\n"
+            "after_task: echo one: 2m (flag)\n",
+            id="flag overrides every line",
+        ),
+    ],
+)
+async def test_dry_run_lists_a_tasks_own_action_limits_first(
+    tmp_path: Path, override: str, want: str
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", TASK_ACTIONS_YAML)
+
+    got = await _dry_run(tasks_file, action_timeout=override)
+
+    assert got.endswith(f"Done\n{want}{tasks_file} is valid\n"), (
+        "a completed task's actions are listed too: the dry run reports the file, not the run"
+    )
+
+
 async def test_dry_run_lists_after_run_actions_after_the_after_task_ones(
     tmp_path: Path,
 ) -> None:

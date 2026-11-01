@@ -4,7 +4,7 @@ import contextlib
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -60,7 +60,9 @@ _CONTROL = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f]")
 class Action:
     """One command alr runs itself, never sent to the session.
 
-    Which list it sits in (`after_task` or `after_run`) says when it runs.
+    Which list it sits in says when it runs: a task's own `actions` after that
+    task's session, `shared.after_task` after every task, `shared.after_run`
+    once at the end.
     """
 
     command: str
@@ -74,6 +76,7 @@ class Task:
     prompt: str
     state: str = PENDING
     error: str = ""
+    actions: list[Action] = field(default_factory=list)
 
     def text(self) -> str:
         """The task as it is sent to the session."""
@@ -120,6 +123,10 @@ class TaskList:
             return []
 
         return self.shared.after_run
+
+    def actions_for(self, task: Task) -> list[Action]:
+        """Every action that runs after the task's session: its own first, then the shared ones."""
+        return task.actions + self.after_task_list()
 
 
 def parse_tasks(text: str) -> TaskList:
@@ -265,7 +272,7 @@ def _optional_actions(key: str, fields: dict[str, yaml.Node]) -> list[Action] | 
     if node is None:
         return None
 
-    return _check_actions(key, node)
+    return _check_actions(f"shared.{key}", node)
 
 
 def _parse_task(i: int, el: yaml.Node) -> Task:
@@ -299,26 +306,55 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
 
     error = _text(where, fields, "error")
 
-    # An error rather than a quietly dropped key: dropping it would leave an
-    # old file running every task with no checks at all.
+    # Checked before the unknown-key refusal so an old file is told where the
+    # key moved, not just that it is unknown.
     if "gates" in fields:
         raise TaskFileError(
             f"{where}: gates: gates are set once for the whole file, "
             "as shared.after_task; see the README (Migrating from commit modes and gates)"
         )
 
-    # The same plausible mistake: dropped silently, it would run the task
-    # without the actions its author expected, and the next save erases it.
+    # The same plausible mistake, so the same early check and its own message.
     for key in ("after_task", "after_run"):
         if key in fields:
             raise TaskFileError(
-                f"{where}: {key}: actions are set once for the whole file, "
-                f"under shared, not per task"
+                f"{where}: {key}: not a task key; a task's own actions go under "
+                f"actions, and {key} goes under shared"
             )
 
+    actions = _task_actions(where, fields)
+    _check_task_keys(where, fields)
     return Task(
-        id=task_id, name=name, prompt=prompt, state=state or PENDING, error=error
+        id=task_id,
+        name=name,
+        prompt=prompt,
+        state=state or PENDING,
+        error=error,
+        actions=actions,
     )
+
+
+def _task_actions(where: str, fields: dict[str, yaml.Node]) -> list[Action]:
+    """The task's own actions; an absent key and an empty list both mean none."""
+    node = fields.get("actions")
+    if node is None:
+        return []
+
+    return _check_actions(f"{where}: actions", node)
+
+
+def _check_task_keys(where: str, fields: dict[str, yaml.Node]) -> None:
+    """Refuse a key a task does not have.
+
+    A dropped key would run the task without its checks (`action:` typed for
+    `actions:`) and the next save would erase the evidence.
+    """
+    for key in fields:
+        if key not in ("id", "name", "prompt", "state", "error", "actions"):
+            raise TaskFileError(
+                f"{where}: {key}: unknown key; "
+                "a task has only id, name, prompt, state, error, and actions"
+            )
 
 
 def _fields(where: str, el: yaml.MappingNode) -> dict[str, yaml.Node]:
@@ -400,16 +436,17 @@ def _is_string(node: yaml.Node) -> bool:
     return isinstance(node, yaml.ScalarNode) and node.tag == _STR
 
 
-def _check_actions(key: str, node: yaml.Node) -> list[Action]:
-    """Check the sequence under shared.<key> and build its actions.
+def _check_actions(label: str, node: yaml.Node) -> list[Action]:
+    """Check an action sequence, named by label in errors, and build its actions.
 
-    A malformed action must reject the file: reading only what is recognized
-    would drop the rest, and the next save would then erase it.
+    One checker serves the shared lists and a task's own list, so every list
+    gets the same rules. A malformed action must reject the file: reading only
+    what is recognized would drop the rest, and the next save would then erase it.
     """
     if not isinstance(node, yaml.SequenceNode):
-        raise TaskFileError(f"shared.{key}: must be a sequence")
+        raise TaskFileError(f"{label}: must be a sequence")
 
-    return [_check_action(f"shared.{key}[{j}]", el) for j, el in enumerate(node.value)]
+    return [_check_action(f"{label}[{j}]", el) for j, el in enumerate(node.value)]
 
 
 def _check_action(where: str, el: yaml.Node) -> Action:
@@ -618,13 +655,18 @@ def _action_entry(action: Action) -> dict[str, str]:
     return entry
 
 
-def _task_entry(task: Task) -> dict[str, int | str]:
-    entry: dict[str, int | str] = {
+def _task_entry(task: Task) -> dict[str, object]:
+    entry: dict[str, object] = {
         "id": task.id,
         "name": task.name,
         "prompt": task.prompt,
-        "state": task.state,
     }
+    # An empty list is not written: a task's actions have no undecided state
+    # to record, unlike the shared lists (ADR-029).
+    if task.actions:
+        entry["actions"] = [_action_entry(action) for action in task.actions]
+
+    entry["state"] = task.state
     if task.error:
         entry["error"] = task.error
 

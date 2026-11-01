@@ -32,22 +32,41 @@ while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand, or runs with
 `--reset-failed`, which sets every failed task back to `pending` at startup.
 
-alr runs two optional lists of actions, shell commands it runs itself
+alr runs two optional shared lists of actions, shell commands it runs itself
 through `sh -c` in its own working directory. `shared.after_task` runs after
 every task whose session reported success; if any action fails or times out,
 the task is `failed` (exit 1) and the later actions do not run. A task is
-`completed` only when every `after_task` action exited 0. `shared.after_run`
-runs once at the end of every run that has no failed task, including a run
-where every task was already completed, so a rerun after an `after_run`
-failure retries it. An `after_run` failure exits 4 and leaves the tasks
-`completed`. Each entry has `action` (required) and `timeout` (optional, such
-as `90s` or `10m`; the default is 10 minutes). `--action-timeout` overrides
-every action's timeout.
+`completed` only when every action in both lists, its own `actions` (next
+paragraph) and `after_task`, exited 0. `shared.after_run` runs once at the end
+of every run that has no failed task, including a run where every task was
+already completed, so a rerun after an `after_run` failure retries it. An
+`after_run` failure exits 4 and leaves the tasks `completed`. Each entry has
+`action` (required) and `timeout` (optional, such as `90s` or `10m`; the
+default is 10 minutes). `--action-timeout` overrides every action's timeout.
+
+A task may also carry its own `actions` list, with the same entry shape. They
+run after that task's session and before `shared.after_task`, as one list: the
+first failure in either list fails the task and skips every later action from
+both. Use it for checks only that task needs: the unit tests for a code task, a
+Markdown lint for a docs task, ShellCheck and BATS for a script task. Keep the
+commit in `shared.after_task`, so every task is committed the same way, and
+never put a commit in a task's own list. An absent `actions` and `actions: []`
+both mean none.
+
+```yaml
+tasks:
+  - id: 2
+    name: Update the README
+    prompt: |
+      ...
+    actions:
+      - action: markdownlint README.md
+```
 
 alr sets these environment variables on every action: `ALR_TASK_FILE` and
-`ALR_LOG_DIR`, both absolute paths. An `after_task` action also gets
-`ALR_TASK_ID` and `ALR_TASK_NAME`. Use them in double quotes, as
-`"$ALR_TASK_NAME"`, so a value stays data to the shell.
+`ALR_LOG_DIR`, both absolute paths. A task's own actions and the `after_task`
+actions get `ALR_TASK_ID` and `ALR_TASK_NAME` as well. Use them in double
+quotes, as `"$ALR_TASK_NAME"`, so a value stays data to the shell.
 
 Give each command its own `action` entry. Never join commands with `&&`:
 alr already runs the list in order and stops at the first failure, and with
@@ -116,18 +135,19 @@ authorized.
    above); any other key in `shared` or in an action is an error.
    `tasks` is a sequence holding at least one task. Unknown keys inside `shared`
    are rejected too. Each task has a stable positive integer `id` (at most 32767), a
-   nonblank `name`, a nonblank block-scalar `prompt`, and an optional `state`.
+   nonblank `name`, a nonblank block-scalar `prompt`, an optional `actions`
+   list for checks only that task needs (see above), and an optional `state`.
    IDs are unique and independent of order; alr runs tasks in file order.
    Names are unique ignoring case and surrounding whitespace, and each name is
    a single line: a line break, or any other control character except a tab, in
    a name is an error. `state` is
    `pending`, `completed`, or `failed`; leave it empty for new work, which
    alr reads as `pending`. The optional `error` field is alr-only: never
-   write it; preserve it if present when updating an existing file. Write no
-   other task keys: alr ignores them when reading and drops them the first
-   time it saves the file. Write `after_task` only with actions the user
-   asked for or confirmed; leave it out when the user wants to be asked in the
-   full-screen view, and write `after_task: []` for a decision of none.
+   write it; preserve it if present when updating an existing file. Any other
+   task key is refused, so the file does not run. Write `after_task` only with
+   actions the user asked for or confirmed; leave it out when the user wants to
+   be asked in the full-screen view, and write `after_task: []` for a decision
+   of none.
 6. Put scope, steps, the project's own checks (tests, linters, the build),
    task-specific verification, and completion criteria inside each task's
    prompt. Preserve project-specific instructions. YAML comments are not
@@ -138,8 +158,11 @@ authorized.
    `--sandbox-settings`, inside its sandbox: a command that sets a variable
    inline (`VAR=value cmd`) can be refused, and Docker, other users' files,
    and hosts outside the sandbox's network list are out of reach. Give the
-   session an equivalent it can run. A check it cannot run belongs only in `after_task`,
-   whose actions alr runs itself; tell the user to add it there.
+   session an equivalent it can run. The prompt's verification text is for the
+   session to run; a check alr should run and judge goes in the task's
+   `actions` instead, or in `after_task` when every task needs it. alr runs
+   both lists itself, so a check the session cannot run belongs there; tell
+   the user to add it.
 7. Write `shared.prompt` from the template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
@@ -181,11 +204,12 @@ lands, put the prerequisite step first (for example, update test fixtures
 before the change that needs them).
 
 Check each task against every check the run will apply, not only its own
-tests: the project's own checks and any `after_task` actions the user sets for the run. A
-task can be complete and tested and still fail one because of where it sits in
-the sequence: code that nothing calls until a later task fails an unused-code
-linter, and a fixture change can break a suite another task fixes. Reorder or
-merge tasks so each one leaves every check passing.
+tests: the project's own checks, the task's own `actions`, and any `after_task`
+actions the user sets for the run. A task can be complete and tested and still
+fail one because of where it sits in the sequence: code that nothing calls
+until a later task fails an unused-code linter, and a fixture change can break
+a suite another task fixes. Reorder or merge tasks so each one leaves every
+check passing.
 
 Honor project policies for source commits unless an `after_task` action does
 the committing, and never instruct the session to edit or commit

@@ -32,6 +32,7 @@ from alr.tasks import (
     Shared,
     Task,
     TaskList,
+    parse_tasks,
 )
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
@@ -317,6 +318,56 @@ async def test_run_cancel_during_action_leaves_file_untouched(
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml, (
         "the tasks file must be byte-for-byte unchanged after a cancel during an action"
     )
+
+
+async def test_run_cancel_during_a_tasks_own_action_leaves_file_untouched(
+    tmp_path: Path,
+) -> None:
+    ready = tmp_path / "ready"
+    shared_ran = tmp_path / "shared-ran"
+    tasks_file = tmp_path / "tasks.yaml"
+    tasks_yaml = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+    tasks_file.write_text(tasks_yaml, encoding="utf-8")
+    task_list = TaskList(
+        shared=Shared(prompt="shared", after_task=[_touch_action(shared_ran)]),
+        tasks=[
+            Task(
+                id=1,
+                name="First",
+                prompt="p1",
+                actions=[Action(command=f"echo ready > '{ready}'; sleep 60")],
+            )
+        ],
+    )
+
+    run = asyncio.ensure_future(run_loop(task_list, tasks_file))
+    await wait_for_text(ready)
+    error = await cancel_run(run)
+
+    assert "task 1: First: stopped during action" in str(error)
+    assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
+    assert not shared_ran.exists(), "the shared list must not start after a stop"
+
+
+async def test_run_loop_a_file_with_empty_own_actions_runs_and_saves_without_the_key(
+    tmp_path: Path,
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    marker = tmp_path / "shared-ran"
+    tasks_file.write_text(
+        "shared:\n  prompt: shared\n  after_task:\n"
+        f"    - action: touch '{marker}'\n"
+        "tasks:\n  - id: 1\n    name: First\n    prompt: p1\n    actions: []\n",
+        encoding="utf-8",
+    )
+    task_list = parse_tasks(tasks_file.read_text(encoding="utf-8"))
+
+    await run_loop(task_list, tasks_file)
+
+    assert marker.exists()
+    saved_text = tasks_file.read_text(encoding="utf-8")
+    assert "actions:" not in saved_text.split("tasks:")[1]
+    assert saved_tasks(tasks_file).tasks[0].state == COMPLETED
 
 
 async def test_run_action_shell_that_cannot_be_executed_fails_the_task(
@@ -728,3 +779,111 @@ async def test_run_saves_each_task_completed_after_its_actions(
     )
     assert saves == [[COMPLETED]], "one save per task, after its actions"
     assert [task.state for task in saved_tasks(tasks_file).tasks] == [COMPLETED]
+
+
+async def test_run_loop_a_tasks_own_actions_run_before_the_shared_ones(
+    tmp_path: Path,
+) -> None:
+    order = tmp_path / "order"
+    task_list = TaskList(
+        shared=Shared(
+            prompt="shared", after_task=[Action(command=f"echo shared >> '{order}'")]
+        ),
+        tasks=[
+            Task(
+                id=1,
+                name="With",
+                prompt="p1",
+                actions=[Action(command=f"echo own >> '{order}'")],
+            ),
+            Task(id=2, name="Without", prompt="p2"),
+        ],
+    )
+
+    await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert order.read_text() == "own\nshared\nshared\n"
+
+
+async def test_run_loop_a_failing_own_action_skips_the_shared_actions(
+    tmp_path: Path,
+) -> None:
+    shared_ran = tmp_path / "shared-ran"
+    task_list = TaskList(
+        shared=Shared(prompt="shared", after_task=[_touch_action(shared_ran)]),
+        tasks=[
+            Task(id=1, name="With", prompt="p1", actions=[Action(command="exit 7")])
+        ],
+    )
+
+    with pytest.raises(RunError):
+        await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert not shared_ran.exists(), "the commit must not run after a failed check"
+    saved = saved_tasks(tmp_path / "tasks.yaml")
+    assert saved.tasks[0].state == FAILED
+    assert saved.tasks[0].error == 'action "exit 7" failed: exit status 7'
+
+
+async def test_run_loop_a_timed_out_own_action_fails_the_task_and_skips_the_shared_ones(
+    tmp_path: Path,
+) -> None:
+    shared_ran = tmp_path / "shared-ran"
+    task_list = TaskList(
+        shared=Shared(prompt="shared", after_task=[_touch_action(shared_ran)]),
+        tasks=[
+            Task(
+                id=1,
+                name="With",
+                prompt="p1",
+                actions=[Action(command="sleep 5", timeout="1s")],
+            )
+        ],
+    )
+
+    with pytest.raises(RunError):
+        await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert not shared_ran.exists(), "the commit must not run after a timed-out check"
+    saved = saved_tasks(tmp_path / "tasks.yaml")
+    assert saved.tasks[0].state == FAILED
+    assert saved.tasks[0].error == 'action "sleep 5" timed out after 1s'
+
+
+async def test_run_loop_a_completed_tasks_own_actions_do_not_run(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "ran"
+    task_list = TaskList(
+        shared=Shared(prompt="shared", after_task=[]),
+        tasks=[
+            Task(
+                id=1,
+                name="Done",
+                prompt="p1",
+                state=COMPLETED,
+                actions=[_touch_action(marker)],
+            )
+        ],
+    )
+
+    await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert not marker.exists()
+
+
+async def test_run_loop_a_tasks_own_action_sees_the_task_variables(
+    tmp_path: Path,
+) -> None:
+    seen = tmp_path / "seen"
+    show_task = Action(
+        command=f"printf '%s|%s' \"$ALR_TASK_ID\" \"$ALR_TASK_NAME\" > '{seen}'"
+    )
+    task_list = TaskList(
+        shared=Shared(prompt="shared", after_task=[]),
+        tasks=[Task(id=4, name="Named task", prompt="p", actions=[show_task])],
+    )
+
+    await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    assert seen.read_text() == "4|Named task"

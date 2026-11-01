@@ -74,7 +74,13 @@ def _read_for_dry_run(tasks_file: str) -> TaskList:
 
 
 def _print_action_limits(out: TextIO, task_list: TaskList, override: str) -> None:
-    """Write one line per action, after_task ones first: the limit it would run under and where the limit came from."""
+    """Write one line per action, each task's own ones first, then after_task, then after_run: the limit it would run under and where the limit came from.
+
+    Every task's actions are listed, completed ones included: the dry run reports the file, not the run.
+    """
+    for task in task_list.tasks:
+        _print_list_limits(out, f"task {task.id} actions", task.actions, override)
+
     lists = (
         ("after_task", task_list.after_task_list()),
         ("after_run", task_list.after_run_list()),
