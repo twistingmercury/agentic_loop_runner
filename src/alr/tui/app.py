@@ -498,7 +498,9 @@ class AlrApp(App[None]):
         """Follow the run on the status line, which counts up every second."""
         pending = sum(task.state == PENDING for task in prepared.task_list.tasks)
         actions = len(prepared.task_list.after_task_list())
-        self._progress = Progress(pending, actions, clock=self._clock)
+        self._progress = Progress(
+            pending, shared_action_count=actions, clock=self._clock
+        )
         self._ticker = self.set_interval(1, self._tick)
 
     def _tick(self) -> None:
