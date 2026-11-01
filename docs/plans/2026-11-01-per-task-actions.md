@@ -523,7 +523,7 @@ git commit -s -m "Cover a task's own actions end to end"
 
 - [ ] **Step 1: ADR-029 to Accepted**
 
-Change its status line to `**Status:** Accepted. It amends ADR-026: ...` keeping the rest of the sentence. Bump the frontmatter to version 45, today's date, and a note that starts `ADR-029 is Accepted: a task's own actions are built and documented. Earlier: `.
+Change its status line to `**Status:** Accepted. It amends ADR-026: ...` keeping the rest of the sentence. Bump the frontmatter to version 46, today's date, and a note that starts `ADR-029 is Accepted: a task's own actions are built and documented. Earlier: `.
 
 - [ ] **Step 2: Requirements**
 
