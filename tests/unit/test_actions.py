@@ -32,6 +32,7 @@ from alr.tasks import (
     Shared,
     Task,
     TaskList,
+    parse_tasks,
 )
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
@@ -317,6 +318,56 @@ async def test_run_cancel_during_action_leaves_file_untouched(
     assert tasks_file.read_text(encoding="utf-8") == tasks_yaml, (
         "the tasks file must be byte-for-byte unchanged after a cancel during an action"
     )
+
+
+async def test_run_cancel_during_a_tasks_own_action_leaves_file_untouched(
+    tmp_path: Path,
+) -> None:
+    ready = tmp_path / "ready"
+    shared_ran = tmp_path / "shared-ran"
+    tasks_file = tmp_path / "tasks.yaml"
+    tasks_yaml = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p1, state: pending}\n"
+    tasks_file.write_text(tasks_yaml, encoding="utf-8")
+    task_list = TaskList(
+        shared=Shared(prompt="shared", after_task=[_touch_action(shared_ran)]),
+        tasks=[
+            Task(
+                id=1,
+                name="First",
+                prompt="p1",
+                actions=[Action(command=f"echo ready > '{ready}'; sleep 60")],
+            )
+        ],
+    )
+
+    run = asyncio.ensure_future(run_loop(task_list, tasks_file))
+    await wait_for_text(ready)
+    error = await cancel_run(run)
+
+    assert "task 1: First: stopped during action" in str(error)
+    assert tasks_file.read_text(encoding="utf-8") == tasks_yaml
+    assert not shared_ran.exists(), "the shared list must not start after a stop"
+
+
+async def test_run_loop_a_file_with_empty_own_actions_runs_and_saves_without_the_key(
+    tmp_path: Path,
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    marker = tmp_path / "shared-ran"
+    tasks_file.write_text(
+        "shared:\n  prompt: shared\n  after_task:\n"
+        f"    - action: touch '{marker}'\n"
+        "tasks:\n  - id: 1\n    name: First\n    prompt: p1\n    actions: []\n",
+        encoding="utf-8",
+    )
+    task_list = parse_tasks(tasks_file.read_text(encoding="utf-8"))
+
+    await run_loop(task_list, tasks_file)
+
+    assert marker.exists()
+    saved_text = tasks_file.read_text(encoding="utf-8")
+    assert "actions:" not in saved_text.split("tasks:")[1]
+    assert saved_tasks(tasks_file).tasks[0].state == COMPLETED
 
 
 async def test_run_action_shell_that_cannot_be_executed_fails_the_task(

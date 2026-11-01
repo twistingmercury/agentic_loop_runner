@@ -306,16 +306,15 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
 
     error = _text(where, fields, "error")
 
-    # An error rather than a quietly dropped key: dropping it would leave an
-    # old file running every task with no checks at all.
+    # Checked before the unknown-key refusal so an old file is told where the
+    # key moved, not just that it is unknown.
     if "gates" in fields:
         raise TaskFileError(
             f"{where}: gates: gates are set once for the whole file, "
             "as shared.after_task; see the README (Migrating from commit modes and gates)"
         )
 
-    # The same plausible mistake: dropped silently, it would run the task
-    # without the actions its author expected, and the next save erases it.
+    # The same plausible mistake, so the same early check and its own message.
     for key in ("after_task", "after_run"):
         if key in fields:
             raise TaskFileError(

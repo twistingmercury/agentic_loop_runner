@@ -1,7 +1,7 @@
 ---
-version: 14
-date: 2026-10-11
-notes: "Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+version: 15
+date: 2026-11-01
+notes: "The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -60,7 +60,7 @@ flowchart TD
     style programs fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
-For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has the file's `shared.after_task` actions run, in order, and counts as done only if every one exits zero. A commit is just one of those actions (ADR-026). The task file is saved after every task, and a failed task stops the run. After the last task, `shared.after_run` runs once, even when every task was already completed.
+For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has its own `actions` run first, then the file's `shared.after_task` actions, in order, and counts as done only if every one exits zero (ADR-029). A commit is just one of those actions (ADR-026). The task file is saved after every task, and a failed task stops the run. After the last task, `shared.after_run` runs once, even when every task was already completed.
 
 ## System Model
 
