@@ -656,13 +656,18 @@ def _action_entry(action: Action) -> dict[str, str]:
     return entry
 
 
-def _task_entry(task: Task) -> dict[str, int | str]:
-    entry: dict[str, int | str] = {
+def _task_entry(task: Task) -> dict[str, object]:
+    entry: dict[str, object] = {
         "id": task.id,
         "name": task.name,
         "prompt": task.prompt,
-        "state": task.state,
     }
+    # An empty list is not written: a task's actions have no undecided state
+    # to record, unlike the shared lists (ADR-029).
+    if task.actions:
+        entry["actions"] = [_action_entry(action) for action in task.actions]
+
+    entry["state"] = task.state
     if task.error:
         entry["error"] = task.error
 
