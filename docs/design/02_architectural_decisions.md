@@ -1,7 +1,7 @@
 ---
-version: 40
-date: 2026-10-29
-notes: "ADR-027 is Accepted: sandbox presets are built and documented, and the web switch writes the fixed domain list, not a bare *; the README, CHANGELOG, requirements, and system architecture describe them. Earlier: Adds ADR-027 (Proposed): sandbox presets; the permissions dialog offers Tight and Large with three switches and a preview, writes <folder>/sandbox.json on Start, offers the folder's file when one exists, and plain mode gets --sandbox tight|large; a new refusal reason sandbox-file-unwritable. Earlier: The Inherited Decisions rows for gralph ADR-019 and ADR-020 name ADR-026 as well as ADR-008, since the gate list is now the after_task list. Earlier: ADR-026 amended after the final whole-branch review: the documented commit action is now git add -A -- :/ followed by git reset of the run folder's files, because the :(exclude) form exits 1 for a gitignored run folder and `-- .` misses changes outside the current directory; ADR-009, ADR-013, ADR-020, and ADR-023 carry Amended by notes, the two inherited gralph rows (ADR-013, ADR-015) name ADR-026, and its status line lists every amended and superseded ADR. Earlier: ADR-026 is Accepted: commits are actions, built and documented. It supersedes ADR-014 and ADR-024 (their status lines and the Decision Summary say so) and carries Amended by notes on ADR-008, ADR-015, ADR-019, and ADR-025 (its exit table row 4 and its commit parts). Its git example uses the long :(exclude) form, because git silently ignores the short :! form when the path is absolute, as ALR_TASK_FILE and ALR_LOG_DIR are, and its lifecycle says after_run runs at the end of every run with no failed task, even when every task was already completed, so a rerun after an after_run failure retries it. Earlier: adds ADR-026 (Proposed): commits become actions; the task file gets after_task and after_run lists of actions, --commit goes, exit 4 now means an after_run action failed, and the TUI's Commit dropdown becomes an actions dialog with two lists; it supersedes ADR-014 and ADR-024 on acceptance. Earlier: ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons are named (task file visible, log folder visible naming the logs directory, and git's message when git cannot answer), a check-ignore failure during a run is a commit failure, the signing-program claim is narrowed to a program that prompts on /dev/tty, the re-check's log test covers the whole logs directory, a SIGKILL during a post-commit hook is a stated limit, and the Positive line no longer claims no duplicate commit. Earlier: ADR-025 is Accepted: stage 2, commit safety, is built, and its text now says what the code does. The lock is a flock on alr.lock in the git directory (a linked worktree has its own), taken after the task file check and before the log folder and clean tree checks, and a dry run with a commit mode only looks at it; a lock file alr cannot open or lock is git-error; only the git add and git commit alr starts get their own session and, on Linux, the kernel stop; the pre-add re-check runs before every task commit and once before the run commit, and its reasons are task file visible and log folder visible, exit 4. Earlier: ADR-025 after a wording check against the code: the dry run applies its failed-task and log-unwritable checks with or without --commit, and only --commit task or run adds the repository checks, log-folder-visible among them. Earlier: ADR-025 after the stage 1c re-review: a save that fails after a landed commit exits 4 and names the commit in every mode, including after a stop, where it replaces the stop's 130 or 143; task-file-unwritable also covers the save of edited gates when the view starts, not only the --reset-failed save. Earlier: ADR-025 after the stage 1b re-review: a name with a line break or any other control character except tab is rejected; a refusal leaves nothing behind, not even a `logs/` it created, and the two refusals decided as the log opens (`log-unwritable`, `task-file-unwritable`) remove what they made, which ends the contradiction with \"refusals are raised before the run log opens\"; the dry run also refuses an unwritable log folder; the save of the task file uses a uniquely named temporary file. Earlier: ADR-025 after the stage 1 review: adds the refusal reason task-file-unwritable; the dry run exits 3 on a failed task like a real run; a refusal leaves nothing on disk in plain mode and the view; a stop after a commit landed saves the tasks completed; a stop in run mode before the commit leaves tasks.yaml untouched; the view carries the stop signal. Earlier: Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
+version: 46
+date: 2026-11-01
+notes: "ADR-029 after its adversarial review: an unknown task key is refused (the owner's call), the per-task after_task/after_run message no longer denies per-task actions exist, the Status line lists every ADR-026 rule it amends, completed tasks and stops and duplicates are decided, the dry run lists every task's actions, the progress count's source is named, actions: [] is not kept, and four negatives are added. Earlier: ADR-029's example shows after_run too, so nobody reads the per-task list as replacing it. Earlier: Adds ADR-029 (Proposed): a task may carry its own actions list, same entry shape as the shared lists, run before shared.after_task; absent and [] both mean none; errors name the task; the save keeps the list; the dry run prints task <id> actions: lines first; the view's step count covers both lists; ADR-026 carries an Amended by note. Earlier: ADR-028: the TestPyPI rehearsal install uses --index-strategy unsafe-best-match so stale dependencies on TestPyPI cannot fail it. Earlier: ADR-028 after the builder check: rc tags publish to TestPyPI and final tags to PyPI, so the rehearsal burns no public version; MIT license and real package metadata land before the first rc tag; a pending publisher does not reserve the name, and alr-cli is the fallback; docs change with the first final tag. Earlier: Adds ADR-028 (Proposed): publish releases to PyPI with trusted publishing from a tag-triggered release.yaml, a build job that runs build.sh and a publish job that waits for the owner's approval in the pypi environment; rehearsal on TestPyPI first; the GitHub release keeps the wheel as a download. Earlier: ADR-027 is Accepted: sandbox presets are built and documented, and the web switch writes the fixed domain list, not a bare *; the README, CHANGELOG, requirements, and system architecture describe them. Earlier: Adds ADR-027 (Proposed): sandbox presets; the permissions dialog offers Tight and Large with three switches and a preview, writes <folder>/sandbox.json on Start, offers the folder's file when one exists, and plain mode gets --sandbox tight|large; a new refusal reason sandbox-file-unwritable. Earlier: The Inherited Decisions rows for gralph ADR-019 and ADR-020 name ADR-026 as well as ADR-008, since the gate list is now the after_task list. Earlier: ADR-026 amended after the final whole-branch review: the documented commit action is now git add -A -- :/ followed by git reset of the run folder's files, because the :(exclude) form exits 1 for a gitignored run folder and `-- .` misses changes outside the current directory; ADR-009, ADR-013, ADR-020, and ADR-023 carry Amended by notes, the two inherited gralph rows (ADR-013, ADR-015) name ADR-026, and its status line lists every amended and superseded ADR. Earlier: ADR-026 is Accepted: commits are actions, built and documented. It supersedes ADR-014 and ADR-024 (their status lines and the Decision Summary say so) and carries Amended by notes on ADR-008, ADR-015, ADR-019, and ADR-025 (its exit table row 4 and its commit parts). Its git example uses the long :(exclude) form, because git silently ignores the short :! form when the path is absolute, as ALR_TASK_FILE and ALR_LOG_DIR are, and its lifecycle says after_run runs at the end of every run with no failed task, even when every task was already completed, so a rerun after an after_run failure retries it. Earlier: adds ADR-026 (Proposed): commits become actions; the task file gets after_task and after_run lists of actions, --commit goes, exit 4 now means an after_run action failed, and the TUI's Commit dropdown becomes an actions dialog with two lists; it supersedes ADR-014 and ADR-024 on acceptance. Earlier: ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons are named (task file visible, log folder visible naming the logs directory, and git's message when git cannot answer), a check-ignore failure during a run is a commit failure, the signing-program claim is narrowed to a program that prompts on /dev/tty, the re-check's log test covers the whole logs directory, a SIGKILL during a post-commit hook is a stated limit, and the Positive line no longer claims no duplicate commit. Earlier: ADR-025 is Accepted: stage 2, commit safety, is built, and its text now says what the code does. The lock is a flock on alr.lock in the git directory (a linked worktree has its own), taken after the task file check and before the log folder and clean tree checks, and a dry run with a commit mode only looks at it; a lock file alr cannot open or lock is git-error; only the git add and git commit alr starts get their own session and, on Linux, the kernel stop; the pre-add re-check runs before every task commit and once before the run commit, and its reasons are task file visible and log folder visible, exit 4. Earlier: ADR-025 after a wording check against the code: the dry run applies its failed-task and log-unwritable checks with or without --commit, and only --commit task or run adds the repository checks, log-folder-visible among them. Earlier: ADR-025 after the stage 1c re-review: a save that fails after a landed commit exits 4 and names the commit in every mode, including after a stop, where it replaces the stop's 130 or 143; task-file-unwritable also covers the save of edited gates when the view starts, not only the --reset-failed save. Earlier: ADR-025 after the stage 1b re-review: a name with a line break or any other control character except tab is rejected; a refusal leaves nothing behind, not even a `logs/` it created, and the two refusals decided as the log opens (`log-unwritable`, `task-file-unwritable`) remove what they made, which ends the contradiction with \"refusals are raised before the run log opens\"; the dry run also refuses an unwritable log folder; the save of the task file uses a uniquely named temporary file. Earlier: ADR-025 after the stage 1 review: adds the refusal reason task-file-unwritable; the dry run exits 3 on a failed task like a real run; a refusal leaves nothing on disk in plain mode and the view; a stop after a commit landed saves the tasks completed; a stop in run mode before the commit leaves tasks.yaml untouched; the view carries the stop signal. Earlier: Adds ADR-025 (Proposed): every outcome has an exit code and a reason; completed means complete. Earlier: ADR-024's known limit no longer advises stashing or removing leftovers: in run mode that destroys the work of completed tasks. Earlier: ADR-024's run commit subject gets the singular form (alr: 1 task completed for one task) at its decision line, to agree with the README, the bundled gralph-docs-writer skill, and 03_system_architecture.md. Earlier: ADR-024 gets the run commit subject (alr: 1 task completed for one task), the log folder checked before the clean tree, and the known limit after a failed run. Earlier: Adds ADR-024: one --commit flag with three modes (none, task, run), default none; the old flags are removed with no alias; --version shows the OS and architecture; the view looks for a work tree only when a mode other than none is chosen. Amended by ADR-024, with notes or corrected sentences: ADR-007 (the compatibility list), ADR-009 (a positive example), ADR-013 (the layout bullet), ADR-014 (its Flags, No work tree, Negative, and Consequences bullets, beside its earlier In the TUI note), ADR-015 (context), and ADR-019 (committing runs, now with --commit none). Earlier: ADR-023 gets the bounded-read rule for gates and git and the carriage-return log note. Earlier: adds ADR-023: plain mode records gate, git, and session-stderr output; ADR-022: alr has evolved beyond gralph."
 ---
 
 # alr — Architectural Decisions
@@ -56,6 +56,8 @@ Each architectural decision is recorded as an ADR with the following structure:
 | [025](#adr-025-every-outcome-has-an-exit-code-and-a-reason) | Every outcome has an exit code and a reason | Accepted | 2026-10-08 |
 | [026](#adr-026-commits-are-actions-the-task-file-has-after_task-and-after_run) | Commits are actions: the task file has `after_task` and `after_run` | Accepted | 2026-10-11 |
 | [027](#adr-027-sandbox-presets-alr-writes-the-run-folders-sandboxjson) | Sandbox presets: alr writes the run folder's `sandbox.json` | Accepted | 2026-10-29 |
+| [028](#adr-028-publish-releases-to-pypi-with-trusted-publishing-and-manual-approval) | Publish releases to PyPI with trusted publishing and manual approval | Proposed | 2026-10-30 |
+| [029](#adr-029-a-task-may-carry-its-own-actions-run-before-sharedafter_task) | A task may carry its own `actions`, run before `shared.after_task` | Proposed | 2026-11-01 |
 
 ## Inherited Decisions
 
@@ -1364,7 +1366,9 @@ This amends ADR-024 (the lifecycle and log of each commit mode) and ADR-019 (the
 
 [Back to Decision Summary](#decision-summary)
 
-**Status:** Accepted. It supersedes ADR-014 and ADR-024 and amends ADR-008, ADR-009, ADR-013, ADR-015, ADR-019, ADR-020, ADR-023, and ADR-025.
+**Status:** Accepted. It supersedes ADR-014 and ADR-024 and amends ADR-008, ADR-009, ADR-013, ADR-015, ADR-019, ADR-020, ADR-023, and ADR-025. Amended by ADR-029.
+
+*Amended by [ADR-029](#adr-029-a-task-may-carry-its-own-actions-run-before-sharedafter_task):* a task may carry its own `actions` list, run before `shared.after_task`. Where this ADR says "every `after_task` action" read every action in both lists; `ALR_TASK_ID` and `ALR_TASK_NAME` are set for a task's own actions too; the progress step count covers both lists; the per-task refusal names the new key; and a task with an unknown key is refused.
 
 **Context:**
 
@@ -1604,5 +1608,183 @@ and the two flag conflicts.
 - The web list is an opinion that will need updating as toolchains change
 - "Run Docker" punches a hole the rest of the sandbox cannot close; the dialog can only say so
 - The command line gets the presets but not the switches
+
+### ADR-028: Publish releases to PyPI with trusted publishing and manual approval
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed. This is the first written release process for alr; it amends no earlier ADR. A tag still marks a release, and now the release workflow also publishes the wheel.
+
+**Context:**
+
+Installing alr today means cloning the repository, checking out the tag, and running the Docker build (the wiki's Install page). The audience the owner has in mind is a developer who is not a Python developer, who wants to install alr once and update it with one command, and who should never see a build step. Three things stand in the way:
+
+- Nothing is published. The v0.2.0 tag has no release assets, and `alr` is not on PyPI (a 404 on 2026-10-30).
+- Installing from the git tag (`uv tool install git+https://...@v0.2.0`) works but reports `alr version: 0.0.1`, because the version is stamped only inside the Docker build (`uv version ${BUILD_VER}` in `build/Dockerfile`). A wheel built any other way carries the placeholder from `pyproject.toml`.
+- A wheel attached to a GitHub release gives install-once but no update path: uv pins the URL, so `uv tool upgrade alr` does nothing. A private index on GitHub Pages would fix that without PyPI but adds more moving parts than either option.
+
+The owner accepts uv as the one prerequisite for the first release, and wants every upload to wait for their approval.
+
+**Decision:**
+
+*What the user types.* Install is `uv tool install alr`; update is `uv tool upgrade alr`. Nothing else. This is the only option under which both commands are the ones a non-Python developer would guess, and it is why PyPI is the registry and not a GitHub release alone.
+
+*Trusted publishing, no stored token.* The repository is registered on PyPI as a trusted publisher of the project `alr`: owner `twistingmercury`, repository `agentic_loop_runner`, workflow file `release.yaml`, environment `pypi`. PyPI issues a short-lived upload credential to that workflow at run time by verifying GitHub's OIDC token. No API token is created, stored as a secret, or passed through a settings file. The same registration is made on TestPyPI.
+
+*A pending publisher, and the name.* The project `alr` does not exist on PyPI yet, so the registration is made as a pending publisher from the owner's account settings. The first upload creates the project and converts the publisher to a normal one. A pending publisher does not reserve the name: only the first successful upload claims it, and PyPI may refuse a name it judges too close to an existing project. `alr` is free on PyPI and TestPyPI as of 2026-10-30. If it is taken or refused by the time of the first upload, the package is named `alr-cli` (the owner's choice): `[project] name` changes, both pending publishers are re-registered under that name, and the install command in the docs becomes `uv tool install alr-cli`. The command users run stays `alr` either way, since `[project.scripts]` does not change.
+
+*License and metadata.* The repository has no license file and `pyproject.toml` carries placeholder metadata. PyPI freezes a version's metadata at upload, so before the first tag that reaches the new workflow, rc tags included, the repository gets a `LICENSE` file with the MIT license (the owner's choice) and `pyproject.toml` gets `license`, `authors`, a `description` that matches the wiki's one-line summary, and `[project.urls]` for the repository, the wiki, and the changelog. The README stays the long description; its relative links do not resolve on PyPI, and that is accepted for the first release.
+
+*The release workflow.* A new workflow, `.github/workflows/release.yaml`, separate from `alr-ci.yaml`, triggered only by a push of a tag of one of two shapes: a final tag `v[0-9]+.[0-9]+.[0-9]+` or a release-candidate tag `v[0-9]+.[0-9]+.[0-9]+rc[0-9]+`. The tag's shape picks the destination, permanently: an rc tag publishes to TestPyPI and creates a GitHub release marked as a prerelease; a final tag publishes to PyPI and creates a normal GitHub release. Both wait for approval. It has two jobs:
+
+1. `build`: checks out the tag with full history and runs `./build/build.sh`, exactly as `alr-ci.yaml` does on develop. This is the only way the wheel is built: `build.sh` derives the version from `git describe --tags`, so the wheel carries the tag's version and the e2e tests have run against that wheel. The job uploads `dist/` as a workflow artifact and holds `contents: read` only.
+2. `publish`: needs `build`, runs in the GitHub environment `pypi`, and holds `id-token: write` and `contents: write` only. It downloads the `dist/` artifact and does two things: uploads it with the PyPA publish action `pypa/gh-action-pypi-publish`, pinned to a version tag and digest, to TestPyPI (`repository-url: https://test.pypi.org/legacy/`) for an rc tag or to PyPI for a final tag, and creates a GitHub release for the tag with `gh release create`, attaching the wheel and the sdist and taking the body from the tag's `CHANGELOG.md` section. It never builds and never checks out source beyond what `gh` needs.
+
+*Manual approval.* The `pypi` environment has the owner as a required reviewer. A tag push therefore builds, then waits. The upload happens only when the owner approves the run in GitHub; a run left unapproved publishes nothing and leaves the tag as it was. This is the owner's decision, in place of fully automatic publishing on tag.
+
+*Rehearsal with rc tags.* The rehearsal is two rc tags, say `v0.2.1rc1` and `v0.2.1rc2`, both to TestPyPI. After the first, the owner installs from TestPyPI with `uv tool install --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match alr` and checks that `alr --version` prints the tag's version; after the second, `uv tool upgrade alr` must move to it. The index-strategy flag is there because uv stops at the first index that has a package at all, and TestPyPI holds stale or missing copies of alr's dependencies (Textual, PyYAML); without it the rehearsal can fail on a bad Textual and look like a pipeline fault. The flag is for the rehearsal only and never appears in user-facing docs, since on PyPI the default strategy is the safe one. Then the final tag `v0.2.1` is the first version on PyPI. No workflow edit sits between rehearsal and production, no public version is burned on a rehearsal, and rc tags remain available for any later release that wants a dry run. The version in the wheel follows the tag, so `uv version` in the Docker build must accept the rc form; `0.2.1rc1` is a valid Python version and needs no change there. An rc tag gets a `CHANGELOG.md` note only if the owner wants one; the final tag's entry is the one that counts.
+
+*Why the PyPA action and not `uv publish`.* The uv docs show `uv publish` behind `astral-sh/setup-uv`, which installs a tool on the runner. This repository's build rule is that CI calls scripts and tools directly, with every tool run from a pinned Docker image and nothing installed on the runner. The PyPA publish action is itself a Docker action, so pinning it by digest keeps that rule. `uv publish` could instead run inside the build image with the OIDC request variables forwarded, but that is more plumbing for the same upload.
+
+*Version numbers are burned.* PyPI never accepts the same version twice, even after a delete. A bad 0.2.0 is fixed by 0.2.1. The two-job split and the build gate mean nothing reaches the upload step without a green build, and the manual approval gives the owner a last look.
+
+*Docs.* These change together with the first final tag, not before, so they are never ahead of what PyPI has. The wiki's Install page leads with the two uv commands and drops the clone-and-build steps, which move to the Contributing page. The README gets an Install section with the same two commands (it has none today). The Contributing page's release section says what a tag does now: an rc tag rehearses on TestPyPI, a final tag publishes to PyPI, and both wait for the owner's approval. The wiki is a separate repository; the builder edits it in the local clone and the owner pushes it, as for every wiki change.
+
+*Alternatives rejected.*
+
+- A wheel on a GitHub release only: no update command. Kept as a secondary artifact, not the install path.
+- A private index on GitHub Pages: both commands work with an extra `--index` flag, no PyPI account. Rejected as more parts (a static index generator, a Pages deploy) for a worse user experience than PyPI.
+- An RPM, as the owner's voyager project ships: the `dnf install` feel without needing uv. Deferred: a Python tool's RPM wraps a built wheel anyway, so it would sit on top of this pipeline, and uv is acceptable for the first release.
+- Automatic publish on tag with no approval: rejected by the owner.
+
+*Out of scope.* Any installer that does not need uv (RPM, Homebrew). Automatic version bumps. Publishing from develop or from pull requests. PEP 740 attestations, which can be added to the publish job later without changing the rest.
+
+*Set-up the owner does by hand, once.* A PyPI account with two-factor authentication; a pending publisher for `alr` with the four values above; the same on TestPyPI, which is a separate account; a `pypi` environment in the GitHub repository with the owner as required reviewer. None of this is in the repository.
+
+*Testing.* The rehearsal on TestPyPI is the test: the uploaded wheel installs with `uv tool install`, `alr --version` prints the tag's version, and `uv tool upgrade alr` after the second rc tag moves to it. Nothing in CI lints workflow files today, and adding a workflow linter is out of scope; a mistake in `release.yaml` shows up on the first rc tag, which is what the rehearsal is for. `build.sh` is not changed.
+
+**Consequences:**
+
+*Positive:*
+
+- Install and update are the two commands a non-Python developer would guess, with uv as the only prerequisite
+- The published wheel is the one the e2e tests ran against, with the right version in it
+- No secret anywhere: not in the repository, not in GitHub secrets, not in a settings file
+- Nothing is published without the owner pressing approve
+- The GitHub release keeps a plain download and a visible changelog per tag
+
+*Negative:*
+
+- A version number, once uploaded, can never be reused; a mistake costs a patch release
+- The owner carries two more accounts (PyPI, TestPyPI) with two-factor auth, and the offboarding of a trusted publisher is a manual review on PyPI
+- Users still need uv; the `dnf install` experience waits for an RPM
+- The package name is not reserved until the first upload; `alr-cli` is the fallback if `alr` is gone by then
+- Two release workflows in `.github/workflows/` instead of one, by design, so the publishing permission stays in the smallest job
+
+### ADR-029: A task may carry its own `actions`, run before `shared.after_task`
+
+[Back to Decision Summary](#decision-summary)
+
+**Status:** Proposed. It amends ADR-026 in these places: the task file gains one optional key per task; the per-task refusal that ADR-026 added now names the new key; "completed only after every `after_task` action exited 0" becomes every action in both lists; `ALR_TASK_ID` and `ALR_TASK_NAME` are set for a task's own actions too, not for `after_task` only; the progress line's step count covers both lists; the lifecycle diagram gains a step; and `tasks.py` parses and saves three lists, not two. It also ends the rule, from ADR-001's drop-in days, that an unknown task key is ignored: a task with an unknown key is now refused, as `shared` and an action already are.
+
+**Context:**
+
+ADR-026 put every action in two shared lists: `shared.after_task` runs after every task, `shared.after_run` once at the end. That fits a file whose tasks all want the same checks, and it keeps the commit action in one place. It does not fit a file whose tasks touch different things. Issue #22 (2026-10-30) gives the case: one task changes code, one changes docs, one changes a shell script, and the author wants unit tests after the first, a Markdown lint after the second, and ShellCheck plus BATS after the third. With ADR-026 as written, every task runs all three, or the author gives up the task-specific checks and keeps only the commit.
+
+Three shapes were weighed:
+
+1. **A per-task list that runs before the shared list.** A task may carry its own actions; they run first, then `shared.after_task` as today. Smallest change, and the shared commit still runs last. The one thing it cannot do is run something after the shared list.
+2. **A per-task list that replaces the shared list when present.** Full control per task, but a task whose author forgets the commit action quietly skips it. That is the foot-gun ADR-026 removed; a task that skips its commit is exactly the "completed does not mean complete" case.
+3. **Named shared actions and a per-task list of names.** No duplicated commands across tasks, one place to edit. A new concept and an indirection for a case that needs two or three short commands per task.
+
+The owner chose the first. The issue's sketch is an idea, not a spec: here an entry's key is `action`, the key the shared lists already use, and the list is named `actions`.
+
+**Decision:**
+
+*The task file.* A task may have an optional `actions` key: a sequence of entries with the same shape as the shared lists, `action` (required) and `timeout` (optional); nothing else is allowed. The key is named `actions`, not `after_task`, so the file reads as "this task's actions" and "after every task", and so the error for a per-task `after_task` key stays an error. An absent `actions` and `actions: []` both mean none; there is no undecided state, since the view already asks about `shared.after_task` and a task list needs no prompt.
+
+```yaml
+shared:
+  prompt: ...
+  after_task:
+    - action: git add -A -- :/
+    - action: git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR"
+    - action: git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME"
+  after_run:
+    - action: git push --dry-run
+tasks:
+  - id: 1
+    name: Update the source
+    prompt: ...
+    actions:
+      - action: uv run ruff format --check
+      - action: uv run pytest -n auto tests/unit
+        timeout: 15m
+  - id: 2
+    name: Update the README
+    prompt: ...
+    actions:
+      - action: markdownlint README.md
+  - id: 3
+    name: Update build.sh
+    prompt: ...
+    actions:
+      - action: shellcheck build/build.sh
+      - action: bats tests/build
+```
+
+*The lifecycle.* After a task's session reports success, alr runs one list: the task's own `actions` in order, then `shared.after_task` in order. A task that is already `completed` is skipped whole, its own actions included, as today. A stop during any action saves nothing, so the rerun repeats the task's session and both lists; that is ADR-026's rule, and a task's own list adds no new save point. The same command in both lists runs twice, on purpose: alr does not compare actions. The first action that fails or times out saves the task `failed` with that action's text as the reason, and no later action runs, from either list. A task is `completed` only when every action in both lists exited 0. `after_run` is unchanged. The order is fixed on purpose: the task's checks come first because they are the ones that can say the task's own work is wrong, and the shared commit comes last because alr does not undo what earlier actions did (ADR-026).
+
+```mermaid
+flowchart TD
+    A[session for task] --> B[the task's own actions, in order]
+    B -->|any fails| X["task failed, run stops, exit 1"]
+    B -->|all pass| C[shared.after_task actions, in order]
+    C -->|any fails| X
+    C -->|all pass| D["task saved completed"]
+    D --> E{another task?}
+    E -->|yes| A
+    E -->|no| F[after_run actions, in order]
+```
+
+*Everything else is the same action.* A per-task action runs through `sh -c` in alr's working directory with the same environment variables as an `after_task` action: `ALR_TASK_ID`, `ALR_TASK_NAME`, `ALR_TASK_FILE`, and `ALR_LOG_DIR`. The same timeout rule applies: `--action-timeout`, else the action's own `timeout`, else 10 minutes. The run log reports it as an `action_finished` event under its task, as it does today; the log format does not change. Plain mode and the view show its output where they show an `after_task` action's output.
+
+*Errors name the task.* A bad per-task action is refused like a bad shared one, with the task's position in the message: `tasks[<i>] (id <id>): actions[<j>]: <field>: <problem>`, `tasks[<i>] (id <id>): actions: must be a sequence`, and the unknown-key and `cmd` messages that `shared.after_task[<j>]` already gets. One checker serves all three lists, so the `cmd` migration hint appears on a per-task entry too, even though no per-task list ever had `cmd`; that is accepted over a second checker. A per-task `after_task` or `after_run` key is still refused, with a message that no longer denies per-task actions exist: `<where>: <key>: not a task key; a task's own actions go under actions, and <key> goes under shared`.
+
+*Unknown task keys are refused.* Until now a task key alr did not know was ignored on read and dropped on the next save (a leftover from ADR-001, when gralph files carried keys alr had no use for). With a per-task list that is a trap: `action:` typed for `actions:` would run the task with none of its checks and then erase the evidence. A task may have only `id`, `name`, `prompt`, `state`, `error`, and `actions`; any other key is refused as `tasks[<i>] (id <id>): <key>: unknown key; a task has only id, name, prompt, state, error, and actions`. The `gates`, `after_task`, and `after_run` keys keep their own messages, checked first. This is the rule `shared` and an action entry already follow.
+
+*The save keeps the list.* `save_tasks` writes a task's `actions` back when it has any, after `prompt` and before `state`, so a run that saves a task's state does not erase its actions. A task with no actions gets no `actions` key, so `actions: []` is not kept as written; this differs from the shared lists, which keep an empty key, because a task's list has no undecided state to record.
+
+*The dry run.* `--dry-run` prints a line per action with its effective limit and where the limit came from, as it does for the shared lists. Per-task actions print first, in task order and list order, labelled by the task: `task <id> actions: <first line>: <limit> (<source>)`. The `after_task:` and `after_run:` lines follow, unchanged. Every task's actions are listed, completed tasks included, as the shared lines are listed whether or not a task will run; the dry run reports the file, not the run. `--action-timeout` overrides the per-task lines as it does the shared ones.
+
+*The view.* The Actions dialog keeps editing the two shared lists only; a task's own actions are written in the file, not in the view. The progress line's step count becomes the number of actions the running task has: its own plus the shared ones, so "action 2 of 5" counts both lists. The count comes from the `TaskStarted` event, whose task copy carries the list, plus the shared count given at start. The copy the front end gets is shallow, so the list object is shared with the engine; that is harmless because nothing changes a task's actions after the file is parsed. The pane that shows action results needs no change, since it already groups by task.
+
+*The skill and the template.* The bundled skill explains per-task `actions` beside the shared lists: use them for checks that only one task needs, keep the shared commit in `shared.after_task` so every task is committed the same way, and never put a commit in a task's own list. The template gains a commented, optional `actions` entry under the task.
+
+*Alternatives rejected.* Options 2 and 3 above. Also rejected: letting a task put its actions after the shared list (a per-task `after_shared` or an ordering flag), because the only action that wants to run last is the commit, and it is already last.
+
+*Out of scope.* Editing a task's own actions in the view. Per-task `after_run`, which has no meaning. Any way to skip the shared list for one task.
+
+*Testing.* Unit tests per rule: a task's `actions` parse with the same key checks as the shared lists and errors name the task; absent and `[]` both read as none; an unknown task key is refused with the message above, and the three old keys keep theirs; the save writes the list back and omits an empty one; a per-task action's own `timeout` and the `--action-timeout` flag apply, and a timed-out per-task action fails the task and skips the shared list; the engine runs the task's actions before the shared ones and stops at the first failure in either list; the environment variables are set; the progress step count includes both lists; the dry run lines appear in the stated order. E2e tests (black-box, against the wheel): a file where only one of two tasks has actions runs them for that task alone, before the shared action, as the run log shows; a failing per-task action fails its task and skips the shared actions; a bad per-task action is refused with the task named; the dry run prints the per-task lines, under the flag too. Each new test is proven by breaking the code it covers, the e2e tests included.
+
+**Consequences:**
+
+*Positive:*
+
+- A task runs only the checks it needs, so a docs task does not wait for the unit tests
+- The shared commit still runs for every task, last, so `completed` still means committed where the file says so
+- One shape for every action, one runner, one set of variables and timeout rules; nothing new to learn beyond one key
+- A per-task list is plain data in the file, visible in a diff and in the dry run
+
+*Negative:*
+
+- A task cannot run anything after the shared list; the fixed order is the price of a shared commit that cannot be skipped
+- The same check repeated in several tasks is written several times; a named-action form would remove that, if the need shows up
+- A file written for v0.2.0 that happened to carry an `actions` key per task had it ignored and dropped on save; from this version it is read and run
+- The view's progress count depends on the running task now, not on the file alone
+- A file that carried a stray task key, such as a leftover `agent:` from a hand-written file, is refused from this version; the key must go
+- The run log's `action_finished` event does not say which list an action came from, so the same command in both lists cannot be told apart by an outer agent
+- A stop between a task's own actions and the shared list reruns the whole task, session included; a mutating per-task action, such as a formatter, runs again
+- A file that uses only per-task actions still gets the view's undecided prompt unless it writes `shared.after_task: []`
 
 **Next:** [System Architecture](03_system_architecture.md)
