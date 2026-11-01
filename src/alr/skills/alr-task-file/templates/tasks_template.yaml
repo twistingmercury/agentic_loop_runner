@@ -65,8 +65,12 @@ tasks:
       Verification:
       - Working directory: GENERATE_ACTUAL_VERIFICATION_DIRECTORY
       - Project checks: GENERATE_PROJECT_TEST_LINT_AND_BUILD_COMMANDS
-      - Task checks: GENERATE_TASK_SPECIFIC_COMMANDS_OR_NONE
+      - Task checks: GENERATE_TASK_SPECIFIC_COMMANDS_FOR_THE_SESSION_OR_NONE
       - Expected outcome: GENERATE_OBSERVABLE_SUCCESS_CONDITION
 
       Completion criteria:
       - GENERATE_CONCRETE_DELIVERED_BEHAVIOR_AND_RELEVANT_ACCEPTANCE_CHECKS
+    # Optional: checks only this task needs. They run before shared.after_task.
+    # Never put a commit here. Delete the key if the task needs none.
+    actions:
+      - action: GENERATE_TASK_SPECIFIC_CHECK_OR_DELETE

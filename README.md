@@ -84,7 +84,7 @@ plain output.
 | Flag                         | Short | Description                                                                              |
 | ---------------------------- | ----- | ---------------------------------------------------------------------------------------- |
 | `--dir <folder>`             | `-d`  | Run folder: uses `<folder>/tasks.yaml` and, if present, `<folder>/sandbox.json`. Required in plain mode; the view asks if it is missing |
-| `--dry-run`                  |       | Validate and report only; prints each action's limit in `after_task:` and `after_run:` lines |
+| `--dry-run`                  |       | Validate and report only; prints each action's limit in `task <id> actions:`, `after_task:`, and `after_run:` lines |
 | `--sandbox-settings <path>`  |       | Run sessions in Claude's sandbox with this settings file                                 |
 | `--sandbox <preset>`         |       | Sandbox sessions with a preset, `tight` or `large`; written to `<folder>/sandbox.json` at start, replacing an existing file |
 | `--yolo`                     |       | Run sessions with no sandbox (`--dangerously-skip-permissions`); wins over a folder's `sandbox.json`. Replaces `--skip-permissions` |
@@ -130,18 +130,34 @@ path and writes nothing.
 ### Actions
 
 An action is a shell command that `alr` runs itself, through `sh -c`, in its own
-working directory. The task file has two lists of them under `shared`. Each entry
-has `action` (required) and `timeout` (optional, such as `90s` or `10m`);
-nothing else is allowed.
+working directory. The task file has two shared lists of them under `shared`, and
+a task may carry its own. Each entry has `action` (required) and `timeout`
+(optional, such as `90s` or `10m`); nothing else is allowed.
 
 | List         | When it runs                                         | If an action fails                                      |
 | ------------ | ---------------------------------------------------- | ------------------------------------------------------- |
 | `after_task` | After each task's session reports `completed`, in order | The task is `failed` and the later actions do not run; exit 1 |
 | `after_run`  | Once at the end of every run that has no failed task | The run stops; the tasks stay `completed`; exit 4        |
 
+A task may have its own `actions` list, with the same entry shape. They run
+first, then `shared.after_task`, as one list; the first failure in either list
+fails the task and skips the rest. Use it for checks only that task needs, and
+keep the commit in `shared.after_task` so every task is committed the same way:
+
+```yaml
+tasks:
+  - id: 2
+    name: Update the README
+    prompt: |
+      Objective: ...
+    actions:
+      - action: markdownlint README.md
+```
+
 - A task is `completed` only after its session reported success and every
-  `after_task` action exited 0. A failed or timed-out action saves the task as
-  `failed`, with that action's text as the reason.
+  action in both lists, its own and `after_task`, exited 0. A failed or
+  timed-out action saves the task as `failed`, with that action's text as the
+  reason.
 - `after_run` also runs when every task was already completed, so a rerun after
   an `after_run` failure retries it.
 - `--action-timeout` sets the time limit of every action; without it, an action
@@ -152,7 +168,8 @@ nothing else is allowed.
 - `alr` sets these environment variables on the action's process. Use them in
   double quotes, as `"$ALR_TASK_NAME"`, so a value is data to the shell and never
   code. Every action gets `ALR_TASK_FILE` and `ALR_LOG_DIR`, both absolute
-  paths; `after_task` actions also get `ALR_TASK_ID` and `ALR_TASK_NAME`.
+  paths; a task's own actions and the `after_task` actions get `ALR_TASK_ID`
+  and `ALR_TASK_NAME` as well.
 - `alr` does not undo an action, so an action that cannot be repeated, such as a
   commit, goes last in `after_task`.
 
@@ -189,7 +206,7 @@ its replacement:
 | Code  | Meaning                                                                                  |
 | ----- | ---------------------------------------------------------------------------------------- |
 | `0`   | Every task completed (or the dry run found the file valid)                                |
-| `1`   | A task or one of its `after_task` actions failed, or the run hit an error such as a failed save |
+| `1`   | A task or one of its actions, its own or `after_task`, failed, or the run hit an error such as a failed save |
 | `2`   | Usage error: a bad or missing flag, a removed flag, or a run folder with no `tasks.yaml`  |
 | `3`   | Refused to start; nothing ran and nothing was left on disk: no run log, and the task file unchanged |
 | `4`   | An `after_run` action failed; every task stays `completed`, and a rerun retries `after_run` |
@@ -235,12 +252,13 @@ action sees a pipe instead of a terminal.
 Tasks run one at a time, in file order, each in a fresh `claude --print` session. The
 shared prompt and the task go to Claude on stdin. The runner owns task state: Claude
 reports its outcome as one JSON line at the end of its output. When a task completes,
-the file's `shared.after_task` actions run, and the task counts as done only if every
-action exits zero. The file is saved after every task, and the first failed task stops the
-run. After the last task, `shared.after_run` runs once.
+its own `actions` run, then the file's `shared.after_task` actions, and the task counts
+as done only if every action exits zero. The file is saved after every task, and the
+first failed task stops the run. After the last task, `shared.after_run` runs once.
 
-Each task has an `id`, a `name`, a `prompt`, and an optional `state` of `pending`,
-`completed`, or `failed`.
+Each task has an `id`, a `name`, a `prompt`, an optional `actions` list, and an
+optional `state` of `pending`, `completed`, or `failed`; `alr` writes `error` when a
+task fails. Any task key outside those six is refused.
 
 Full design: [docs/design/00_overview.md](docs/design/00_overview.md). The build plan is
 in [docs/plans/](docs/plans/).
