@@ -1,14 +1,22 @@
 name: Agentic Loop Runner (alr) CI build
 
+# Documentation changes do not need the Docker build. The job is not a
+# required status check, so skipping it leaves a docs-only PR mergeable.
 on:
   push:
     branches:
       - develop
       - main
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
   pull_request:
     branches:
       - develop
       - main
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
 
 jobs:
   build:
