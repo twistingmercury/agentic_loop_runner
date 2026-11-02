@@ -2120,6 +2120,48 @@ async def test_choosing_tight_over_the_folders_file_shows_adjusted_when_a_switch
         assert "Permissions: sandbox (tight, adjusted)" in label
 
 
+async def test_x_before_start_shows_the_preset_not_the_old_folder_file(
+    work_dir: Path,
+) -> None:
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    sandbox = Path(write_file(work_dir / "run" / "sandbox.json", "old\n"))
+    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        await pilot.press("x")
+        await until(lambda: isinstance(app.screen, FileViewer))
+
+        text = app.screen.query_one("#text", TextArea).text
+        assert text == render(switches_for(Preset.LARGE))
+        assert sandbox.read_text(encoding="utf-8") == "old\n", "nothing is written yet"
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_x_while_running_shows_the_file_on_disk(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.state is AppState.RUNNING)
+        on_disk = Path(preset_path(tasks_file)).read_text(encoding="utf-8")
+        Path(preset_path(tasks_file)).write_text("changed on disk\n", encoding="utf-8")
+
+        await pilot.press("x")
+        await until(lambda: isinstance(app.screen, FileViewer))
+
+        assert on_disk == render(switches_for(Preset.LARGE))
+        assert app.screen.query_one("#text", TextArea).text == "changed on disk\n"
+
+        await pilot.press("escape")
+        await until(lambda: not isinstance(app.screen, ModalScreen))
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
 @pytest.mark.usefixtures("fake_claude")
 async def test_start_with_a_preset_writes_the_folder_file(work_dir: Path) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)

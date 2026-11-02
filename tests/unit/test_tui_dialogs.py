@@ -504,6 +504,23 @@ async def test_file_viewer_shows_the_file_read_only(tmp_path: Path) -> None:
         assert text.text == "a: 1\n"
 
 
+async def test_file_viewer_shows_a_preset_under_a_header_saying_when_it_is_written(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sandbox.json"
+    path.write_text("old\n", encoding="utf-8")
+    preset = render(switches_for(Preset.TIGHT))
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(FileViewer(str(path), preset))
+        await pilot.pause()
+
+        header = str(host.screen.query_one("#path", Label).render())
+        assert header == f"{path} (written when you press Start)"
+        text = host.screen.query_one("#text", TextArea)
+        assert text.text == preset
+
+
 async def test_file_viewer_says_when_the_file_is_missing(tmp_path: Path) -> None:
     host = Host()
     async with host.run_test() as pilot:
