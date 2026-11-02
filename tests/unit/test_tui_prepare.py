@@ -392,7 +392,7 @@ async def test_prepare_still_removes_the_run_folder_when_the_restore_fails(
         await prepare(settings)
 
     assert caught.value.reason == "task-file-unwritable"
-    assert f"{sandbox} now holds the preset" in error_text(caught.value)
+    assert "it now holds the preset" in error_text(caught.value)
     assert sandbox.read_bytes() == render(switches_for(Preset.TIGHT)).encode("utf-8")
     assert not (work_dir / "run" / "logs").exists()
 

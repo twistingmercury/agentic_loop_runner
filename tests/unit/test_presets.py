@@ -257,8 +257,8 @@ def test_restore_after_refusal_tells_the_user_the_file_now_holds_the_preset(
     assert excinfo.value.reason == "task-file-unwritable"
     assert excinfo.value.message == (
         "failed to save tasks\n"
-        f"Restoring the previous file failed ({path}: No space left on device);"
-        f" {path} now holds the preset."
+        f"Restoring the previous file failed: {path}: No space left on device;"
+        " it now holds the preset."
     )
     assert isinstance(excinfo.value.__cause__, RefusedError)
     assert excinfo.value.__cause__.reason == SANDBOX_FILE_UNWRITABLE

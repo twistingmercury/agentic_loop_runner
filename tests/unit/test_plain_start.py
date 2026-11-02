@@ -557,7 +557,7 @@ async def test_start_says_sandbox_json_holds_the_preset_when_the_restore_fails(
         )
 
     assert caught.value.reason == "task-file-unwritable"
-    assert f"{path} now holds the preset" in str(caught.value)
+    assert "it now holds the preset" in str(caught.value)
     assert "failed to save tasks" in str(caught.value)
     assert not (tmp_path / "logs").exists()
 

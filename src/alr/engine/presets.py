@@ -120,8 +120,8 @@ def restore_after_refusal(
     except RefusedError as restore_failure:
         message = (
             f"{refusal.message}\n"
-            f"Restoring the previous file failed ({restore_failure.message});"
-            f" {path} now holds the preset."
+            f"Restoring the previous file failed: {restore_failure.message};"
+            " it now holds the preset."
         )
         raise RefusedError(refusal.reason, message) from restore_failure
 
