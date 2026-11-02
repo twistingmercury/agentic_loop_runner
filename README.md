@@ -4,7 +4,7 @@
 ![Version](https://img.shields.io/github/v/tag/twistingmercury/agentic_loop_runner?sort=semver)
 
 > **Maturity Level**: Emerging - in active, initial development; expect breaking changes.</br>
-> **Version**: v0.2.0
+> **Version**: v0.3.0
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes

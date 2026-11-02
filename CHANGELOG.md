@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
 ### Added
 
 - A task may carry its own `actions` list. They run after that task's session
@@ -24,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The bundled skill and its template write the commit as three actions, one
   command each, instead of one `&&` chain, so a failed action's reason names
   the command. The skill now says to give every command its own action.
+- With a preset chosen and the run not started, the view's `x` shows the preset
+  that Start will write, under a header saying so, instead of the folder's old
+  `sandbox.json`. (#18)
+
+### Fixed
+
+- When a failed `tasks.yaml` save is followed by a failed restore of
+  `sandbox.json`, the refusal now says the file could not be restored and now
+  holds the preset. It keeps the `task-file-unwritable` reason. (#19)
 
 ## [0.2.0] - 2026-10-30
 
