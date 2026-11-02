@@ -12,7 +12,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import RUN_SCOPE
+from alr.tasks import RUN_SCOPE, Task
 
 SEPARATOR = " · "
 ELLIPSIS = "…"
@@ -32,7 +32,6 @@ class Progress:
     ) -> None:
         self._total_tasks = total_tasks
         self._shared_action_count = shared_action_count
-        self._action_count = shared_action_count
         self._clock = clock
         self._run_start: float | None = None
         self._step_start = 0.0
@@ -49,28 +48,28 @@ class Progress:
             self._run_start = now
 
         match event:
-            case TaskStarted(task=task):
+            case TaskStarted():
                 self._task_number += 1
                 self._action_number = 0
-                # Each task runs its own actions before the shared ones, so "of n" is per task.
-                self._action_count = len(task.actions) + self._shared_action_count
                 self._start_step("session", now)
             case ActionStarted(task=task, action=action):
-                self._start_step(self._action_label(task.id, action.command), now)
+                self._start_step(self._action_label(task, action.command), now)
             case TaskFinished():
                 # No step runs between a task's end and the next one's start, so none is shown.
                 self._step = ""
             case RunDone():
                 self._done = True
 
-    def _action_label(self, task_id: int, command: str) -> str:
+    def _action_label(self, task: Task, command: str) -> str:
         """Name an action's step; the run's own actions are not counted against a task's."""
-        if task_id == RUN_SCOPE.id:
+        if task.id == RUN_SCOPE.id:
             self._in_after_run = True
             return f"{RUN_SCOPE.name}: {first_line(command)}"
 
         self._action_number += 1
-        return f"action {self._action_number} of {self._action_count}: {first_line(command)}"
+        # Each task runs its own actions before the shared ones, so "of n" is per task.
+        action_count = len(task.actions) + self._shared_action_count
+        return f"action {self._action_number} of {action_count}: {first_line(command)}"
 
     def text(self, width: int | None = None) -> str:
         """The status line for the current moment, or "" before the first task and after the run.

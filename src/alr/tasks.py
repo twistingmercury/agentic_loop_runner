@@ -655,8 +655,8 @@ def _action_entry(action: Action) -> dict[str, str]:
     return entry
 
 
-def _task_entry(task: Task) -> dict[str, object]:
-    entry: dict[str, object] = {
+def _task_entry(task: Task) -> dict[str, int | str | list[dict[str, str]]]:
+    entry: dict[str, int | str | list[dict[str, str]]] = {
         "id": task.id,
         "name": task.name,
         "prompt": task.prompt,

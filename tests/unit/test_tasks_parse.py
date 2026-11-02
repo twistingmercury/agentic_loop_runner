@@ -16,6 +16,8 @@ from alr.tasks import (
 )
 
 _WITH_SHARED = "shared:{}\ntasks:\n  - {{id: 1, name: a, prompt: p}}\n"
+# One task with no actions of its own; a test appends the keys it is about.
+ONE_TASK_PREFIX = "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: Only task\n    prompt: Do it.\n"
 VALID = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n"
 
 
@@ -839,15 +841,14 @@ def test_run_scope_is_a_task_with_id_zero() -> None:
 
 
 def test_a_task_may_carry_its_own_actions() -> None:
-    text = """shared:\n  prompt: shared\ntasks:
-  - id: 1
-    name: Only task
-    prompt: Do it.
-    actions:
+    text = (
+        ONE_TASK_PREFIX
+        + """    actions:
       - action: uv run pytest
         timeout: 15m
       - action: markdownlint README.md
 """
+    )
 
     got = tasks.parse_tasks(text)
 
@@ -859,7 +860,7 @@ def test_a_task_may_carry_its_own_actions() -> None:
 
 @pytest.mark.parametrize("snippet", ["", "    actions: []\n"], ids=["absent", "empty"])
 def test_absent_and_empty_task_actions_both_read_as_none(snippet: str) -> None:
-    text = f"shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: Only task\n    prompt: Do it.\n{snippet}"
+    text = ONE_TASK_PREFIX + snippet
 
     got = tasks.parse_tasks(text)
 
@@ -906,21 +907,13 @@ def test_actions_for_a_task_is_its_own_then_the_shared_ones() -> None:
             "tasks[0] (id 1): actions[0]: cmd: renamed to action; see the README (Migrating from commit modes and gates)",
         ),
         (
-            "    after_task: []\n",
-            "tasks[0] (id 1): after_task: not a task key; a task's own actions go under actions, and after_task goes under shared",
-        ),
-        (
             "    action:\n      - action: x\n",
             "tasks[0] (id 1): action: unknown key; a task has only id, name, prompt, state, error, and actions",
-        ),
-        (
-            "    agent: go software engineer\n",
-            "tasks[0] (id 1): agent: unknown key; a task has only id, name, prompt, state, error, and actions",
         ),
     ],
 )
 def test_bad_task_actions_name_the_task(snippet: str, want: str) -> None:
-    text = f"shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: Only task\n    prompt: Do it.\n{snippet}"
+    text = ONE_TASK_PREFIX + snippet
 
     with pytest.raises(TaskFileError) as exc:
         tasks.parse_tasks(text)

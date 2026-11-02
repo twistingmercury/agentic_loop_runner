@@ -443,38 +443,34 @@ def test_actions_an_unknown_task_key_is_refused(
     )
 
 
+@pytest.mark.parametrize(
+    ("flags", "want"),
+    [
+        pytest.param(
+            [],
+            "task 1 actions: uv run pytest: 15m (action)\n"
+            "after_task: echo one: 10m (default)\n",
+            id="action and default",
+        ),
+        pytest.param(
+            ["--action-timeout", "2m"],
+            "task 1 actions: uv run pytest: 2m (flag)\n"
+            "after_task: echo one: 2m (flag)\n",
+            id="flag",
+        ),
+    ],
+)
 def test_actions_dry_run_lists_a_tasks_own_limits_first(
-    tmp_path: Path, fake_claude: Path
+    tmp_path: Path, fake_claude: Path, flags: list[str], want: str
 ) -> None:
     tasks_yaml = shared_block(
         "Body.", [{"action": "echo one"}]
     ) + two_tasks_first_with_actions([{"action": "uv run pytest", "timeout": "15m"}])
 
-    res, tasks_path = run_dry_run(tmp_path, tasks_yaml)
+    res, tasks_path = run_dry_run(tmp_path, tasks_yaml, *flags)
 
     assert res.code == 0, res
-    assert (
-        "task 1 actions: uv run pytest: 15m (action)\n"
-        "after_task: echo one: 10m (default)\n"
-        f"{tasks_path} is valid\n"
-    ) in res.out
-
-
-def test_actions_dry_run_flag_overrides_a_tasks_own_limits(
-    tmp_path: Path, fake_claude: Path
-) -> None:
-    tasks_yaml = shared_block(
-        "Body.", [{"action": "echo one"}]
-    ) + two_tasks_first_with_actions([{"action": "uv run pytest", "timeout": "15m"}])
-
-    res, tasks_path = run_dry_run(tmp_path, tasks_yaml, "--action-timeout", "2m")
-
-    assert res.code == 0, res
-    assert (
-        "task 1 actions: uv run pytest: 2m (flag)\n"
-        "after_task: echo one: 2m (flag)\n"
-        f"{tasks_path} is valid\n"
-    ) in res.out
+    assert f"{want}{tasks_path} is valid\n" in res.out
 
 
 def test_actions_a_tasks_own_actions_survive_the_save(

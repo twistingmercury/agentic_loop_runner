@@ -124,7 +124,7 @@ async def test_dry_run_refuses_failed_tasks_after_showing_them(
     )
 
 
-# Each action is listed once for the file, not once per task.
+# The shared lists are listed once for the file, not once per task.
 @pytest.mark.parametrize(
     ("override", "want"),
     [

@@ -805,15 +805,28 @@ async def test_run_loop_a_tasks_own_actions_run_before_the_shared_ones(
     assert order.read_text() == "own\nshared\nshared\n"
 
 
-async def test_run_loop_a_failing_own_action_skips_the_shared_actions(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("action", "want_error"),
+    [
+        pytest.param(
+            Action(command="exit 7"),
+            'action "exit 7" failed: exit status 7',
+            id="failing",
+        ),
+        pytest.param(
+            Action(command="sleep 5", timeout="1s"),
+            'action "sleep 5" timed out after 1s',
+            id="timed out",
+        ),
+    ],
+)
+async def test_run_loop_a_failed_own_action_fails_the_task_and_skips_the_shared_ones(
+    tmp_path: Path, action: Action, want_error: str
 ) -> None:
     shared_ran = tmp_path / "shared-ran"
     task_list = TaskList(
         shared=Shared(prompt="shared", after_task=[_touch_action(shared_ran)]),
-        tasks=[
-            Task(id=1, name="With", prompt="p1", actions=[Action(command="exit 7")])
-        ],
+        tasks=[Task(id=1, name="With", prompt="p1", actions=[action])],
     )
 
     with pytest.raises(RunError):
@@ -822,32 +835,7 @@ async def test_run_loop_a_failing_own_action_skips_the_shared_actions(
     assert not shared_ran.exists(), "the commit must not run after a failed check"
     saved = saved_tasks(tmp_path / "tasks.yaml")
     assert saved.tasks[0].state == FAILED
-    assert saved.tasks[0].error == 'action "exit 7" failed: exit status 7'
-
-
-async def test_run_loop_a_timed_out_own_action_fails_the_task_and_skips_the_shared_ones(
-    tmp_path: Path,
-) -> None:
-    shared_ran = tmp_path / "shared-ran"
-    task_list = TaskList(
-        shared=Shared(prompt="shared", after_task=[_touch_action(shared_ran)]),
-        tasks=[
-            Task(
-                id=1,
-                name="With",
-                prompt="p1",
-                actions=[Action(command="sleep 5", timeout="1s")],
-            )
-        ],
-    )
-
-    with pytest.raises(RunError):
-        await run_loop(task_list, tmp_path / "tasks.yaml")
-
-    assert not shared_ran.exists(), "the commit must not run after a timed-out check"
-    saved = saved_tasks(tmp_path / "tasks.yaml")
-    assert saved.tasks[0].state == FAILED
-    assert saved.tasks[0].error == 'action "sleep 5" timed out after 1s'
+    assert saved.tasks[0].error == want_error
 
 
 async def test_run_loop_a_completed_tasks_own_actions_do_not_run(
