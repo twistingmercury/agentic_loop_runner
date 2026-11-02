@@ -539,6 +539,44 @@ async def test_start_puts_the_old_sandbox_json_back_when_the_task_file_save_fail
     assert _calls(record) == 0
 
 
+async def test_start_says_sandbox_json_holds_the_preset_when_the_restore_fails(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", FAILED_TASK_YAML)
+    path = _preset_file(tasks_file)
+    path.write_bytes(b"old")
+    _refuse_task_save(monkeypatch)
+    _fail_the_second_atomic_write(monkeypatch)
+
+    with pytest.raises(RefusedError) as caught:
+        await _start(
+            tasks_file,
+            reset_failed=True,
+            sandbox_settings=str(path),
+            switches=TIGHT,
+        )
+
+    assert caught.value.reason == "task-file-unwritable"
+    assert f"{path} now holds the preset" in str(caught.value)
+    assert "failed to save tasks" in str(caught.value)
+    assert not (tmp_path / "logs").exists()
+
+
+def _fail_the_second_atomic_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let the preset write through and fail the restore that follows it."""
+    real = presets_module._replace_atomically
+    calls: list[Path] = []
+
+    def flaky(target: Path, data: bytes) -> None:
+        calls.append(target)
+        if len(calls) > 1:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        real(target, data)
+
+    monkeypatch.setattr(presets_module, "_replace_atomically", flaky)
+
+
 async def test_start_removes_the_new_sandbox_json_when_the_task_file_save_fails(
     record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
