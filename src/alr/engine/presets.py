@@ -109,15 +109,21 @@ def restore_previous(path: str, previous: bytes | None) -> None:
 def restore_after_refusal(
     path: str, previous: bytes | None, refusal: RefusedError
 ) -> None:
-    """Restore the preset for a refused run; when that fails too, raise the original refusal.
+    """Restore the preset for a refused run; when that fails too, raise a refusal that says so.
 
-    The user needs the reason the run was refused, so the failed restore
-    rides along as its cause instead of replacing it.
+    The new refusal keeps the original reason and message and adds that path
+    could not be restored and now holds the preset, since that is the one
+    thing the user could not otherwise learn.
     """
     try:
         restore_previous(path, previous)
     except RefusedError as restore_failure:
-        raise refusal from restore_failure
+        message = (
+            f"{refusal.message}\n"
+            f"Restoring the previous file failed: {restore_failure.message};"
+            " it now holds the preset."
+        )
+        raise RefusedError(refusal.reason, message) from restore_failure
 
 
 def _read_previous(target: Path) -> bytes | None:

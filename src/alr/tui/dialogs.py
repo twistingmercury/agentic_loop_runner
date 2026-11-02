@@ -134,22 +134,37 @@ class SummaryDialog(_Dialog[None]):
 
 
 class FileViewer(_Dialog[None]):
-    """A file shown as it is on disk, read-only."""
+    """A file shown as it is on disk, read-only; or, given a preset document, that document and where Start writes it."""
 
     DEFAULT_CSS = """
     FileViewer #dialog { width: 80%; height: 80%; }
     FileViewer #text { height: 1fr; }
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, preset: str | None = None) -> None:
         super().__init__()
         self._path = path
+        self._preset = preset
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
-            yield Label(self._path or "no file")
-            yield TextArea(_read(self._path), read_only=True, id="text")
+            yield Label(self._header(), id="path")
+            yield TextArea(self._text(), read_only=True, id="text")
             yield Button("Close", id="close")
+
+    def _header(self) -> str:
+        """The path, saying when a preset is written there."""
+        if self._preset is None:
+            return self._path or "no file"
+
+        return f"{self._path} (written when you press Start)"
+
+    def _text(self) -> str:
+        """The preset when one is waiting for Start, otherwise the file on disk."""
+        if self._preset is None:
+            return _read(self._path)
+
+        return self._preset
 
     def on_button_pressed(self) -> None:
         self.dismiss(None)

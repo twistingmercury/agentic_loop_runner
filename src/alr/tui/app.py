@@ -15,7 +15,7 @@ from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine import proc
-from alr.engine.presets import preset_path
+from alr.engine.presets import preset_path, render
 from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
@@ -392,7 +392,7 @@ class AlrApp(App[None]):
             return
 
         if item == "sandbox":
-            self.push_screen(FileViewer(self.settings.sandbox_file))
+            self.push_screen(self._sandbox_viewer())
             return
 
         # The setup dialogs change the settings, which are locked once a run starts.
@@ -406,6 +406,16 @@ class AlrApp(App[None]):
             "reset": self.ask_reset,
         }
         self.run_worker(action[item](), exit_on_error=False)
+
+    def _sandbox_viewer(self) -> FileViewer:
+        """Before Start a chosen preset is what will run, so show it; from Start on the file is the truth."""
+        waiting = self.state in (AppState.SETUP, AppState.READY)
+        if waiting and self.settings.switches is not None:
+            return FileViewer(
+                self.settings.sandbox_file, render(self.settings.switches)
+            )
+
+        return FileViewer(self.settings.sandbox_file)
 
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "logging" and isinstance(message.value, bool):

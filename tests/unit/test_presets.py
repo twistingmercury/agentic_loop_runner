@@ -239,7 +239,7 @@ def test_restore_previous_refuses_when_the_new_file_cannot_be_removed(
     assert excinfo.value.reason == SANDBOX_FILE_UNWRITABLE
 
 
-def test_restore_after_refusal_keeps_the_original_refusal_when_the_restore_fails(
+def test_restore_after_refusal_tells_the_user_the_file_now_holds_the_preset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "sandbox.json"
@@ -254,7 +254,12 @@ def test_restore_after_refusal_keeps_the_original_refusal_when_the_restore_fails
     with pytest.raises(RefusedError) as excinfo:
         restore_after_refusal(str(path), b"old", original)
 
-    assert excinfo.value is original
+    assert excinfo.value.reason == "task-file-unwritable"
+    assert excinfo.value.message == (
+        "failed to save tasks\n"
+        f"Restoring the previous file failed: {path}: No space left on device;"
+        " it now holds the preset."
+    )
     assert isinstance(excinfo.value.__cause__, RefusedError)
     assert excinfo.value.__cause__.reason == SANDBOX_FILE_UNWRITABLE
 

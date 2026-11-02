@@ -18,6 +18,7 @@ from alr.errors import (
 )
 from alr.record.runlog import RunLog
 from alr.tasks import Action, parse_tasks
+from alr.tui.dialogs import error_text
 from alr.tui.prepare import prepare
 from alr.tui.settings import Permissions, RunSettings
 
@@ -391,6 +392,7 @@ async def test_prepare_still_removes_the_run_folder_when_the_restore_fails(
         await prepare(settings)
 
     assert caught.value.reason == "task-file-unwritable"
+    assert "it now holds the preset" in error_text(caught.value)
     assert sandbox.read_bytes() == render(switches_for(Preset.TIGHT)).encode("utf-8")
     assert not (work_dir / "run" / "logs").exists()
 
