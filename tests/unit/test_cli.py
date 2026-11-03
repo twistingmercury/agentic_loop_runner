@@ -948,27 +948,42 @@ def test_no_default_changes_nothing(folder: Path) -> None:
     assert vars(args) == before
 
 
-@pytest.mark.parametrize("mode", ["tight", "large"])
-def test_a_preset_default_without_dir_leaves_the_view_to_ask(mode: str) -> None:
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+def test_a_default_without_dir_leaves_the_view_to_ask(mode: str, settings: str) -> None:
     args = cli._parser().parse_args([])
     before = vars(args).copy()
 
-    cli.apply_sandbox_default(args, SandboxDefault(mode, ""))
+    cli.apply_sandbox_default(args, SandboxDefault(mode, settings))
 
     assert vars(args) == before
 
 
+@pytest.mark.parametrize("mode", ["yolo", "custom"])
 def test_a_default_without_dir_never_reads_the_current_folder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, settings: str
 ) -> None:
     """No --dir means no run folder, so a sandbox.json in the current folder must not count."""
     _add_sandbox(tmp_path)
     monkeypatch.chdir(tmp_path)
     args = cli._parser().parse_args([])
+    before = vars(args).copy()
 
-    cli.apply_sandbox_default(args, SandboxDefault("yolo", ""))
+    cli.apply_sandbox_default(args, SandboxDefault(mode, settings))
 
-    assert args.yolo is True
+    assert vars(args) == before
+
+
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+def test_a_default_beside_the_folders_sandbox_json_changes_nothing(
+    folder: Path, settings: str, mode: str
+) -> None:
+    _add_sandbox(folder)
+    args = cli._parser().parse_args(["-d", str(folder)])
+    before = vars(args).copy()
+
+    cli.apply_sandbox_default(args, SandboxDefault(mode, settings))
+
+    assert vars(args) == before
 
 
 BAD_CONFIG = "version: 1.0.0\nnot_a_key: 1\n"
@@ -1323,3 +1338,15 @@ def test_a_config_default_reaches_the_run(
 
     assert cli.main(["-d", str(folder)]) == 0
     assert sessions == [["--dangerously-skip-permissions"]]
+
+
+def test_a_yolo_config_default_without_dir_leaves_the_view_permissions_unset(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(home, YOLO_CONFIG)
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main([])
+
+    assert code == 0
+    assert seen[0].permissions is Permissions.UNSET

@@ -262,6 +262,27 @@ async def test_ok_with_a_preset_and_no_folder_returns_no_path() -> None:
         )
 
 
+async def test_with_no_folder_the_dialog_starts_on_tight_and_waits_for_the_user() -> (
+    None
+):
+    host = Host()
+    async with host.run_test(size=BIG) as pilot:
+        host.push_screen(PermissionsDialog(RunSettings()), host.record)
+        await pilot.pause()
+
+        assert selected(host.screen) == "tight"
+        assert host.result == "unset"
+        assert isinstance(host.screen, PermissionsDialog)
+
+        await pilot.click("#large")
+        await pilot.click("#ok")
+        await pilot.pause()
+
+        assert host.result == PermissionChoice(
+            Permissions.SANDBOX, "", Preset.LARGE, switches_for(Preset.LARGE)
+        )
+
+
 async def test_ok_with_the_file_returns_the_file_and_no_switches(
     tmp_path: Path,
 ) -> None:

@@ -382,13 +382,17 @@ def apply_sandbox_default(
 
     It sets the same fields the real flags set, so the dry run, the view, and
     start need no change. A flag wins, and so does the run folder's
-    sandbox.json; with either, or with no default, nothing changes. A tight or
-    large default needs a run folder to write its preset into, so with no
-    --dir it fills in nothing and the view asks.
+    sandbox.json; with either, or with no default, nothing changes. With no
+    --dir there is no run folder to look in yet, and the folder the user picks
+    in the view may hold its own sandbox.json, so no mode fills in anything
+    and the view asks, with Tight pre-selected.
 
     _main runs this at startup, before resolve_permissions.
     """
     if default is None:
+        return
+
+    if not args.dir:
         return
 
     if _permission_chosen(args):
@@ -402,17 +406,18 @@ def apply_sandbox_default(
         args.sandbox_settings = default.sandbox_file
         return
 
-    if args.dir:
-        args.sandbox = default.mode
+    args.sandbox = default.mode
 
 
 def _permission_chosen(args: argparse.Namespace) -> bool:
-    """Report whether a flag or the run folder's sandbox.json already chose the permissions."""
+    """Report whether a flag or the run folder's sandbox.json already chose the permissions.
+
+    The caller has checked that --dir was given.
+    """
     if args.sandbox is not None or args.sandbox_settings or args.yolo:
         return True
 
-    # No --dir means no run folder; folder_sandbox("") would look in the current folder.
-    return bool(args.dir) and folder_sandbox(args.dir) is not None
+    return folder_sandbox(args.dir) is not None
 
 
 def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> Answer:
