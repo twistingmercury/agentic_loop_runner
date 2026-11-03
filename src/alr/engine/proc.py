@@ -5,6 +5,7 @@ import os
 import signal
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from subprocess import DEVNULL
+from typing import Any, Protocol, cast
 
 # How long a bounded finish keeps draining after its process has exited. Tests
 # patch it to stay fast.
@@ -127,7 +128,7 @@ async def _wait_for_exit(
     exited = asyncio.ensure_future(process.wait())
     try:
         while process.returncode is None:
-            waiting: set[asyncio.Future[object]] = {exited}
+            waiting: set[asyncio.Future[Any]] = {exited}
             if drain is not None and not drain.done():
                 waiting.add(drain)
 
@@ -237,6 +238,10 @@ async def _stop_group(process: asyncio.subprocess.Process) -> None:
     _close_transport(process)
 
 
+class _HasTransport(Protocol):
+    _transport: asyncio.BaseTransport
+
+
 def _close_transport(process: asyncio.subprocess.Process) -> None:
     """Close our ends of the process's pipes, which will not close by themselves.
 
@@ -244,7 +249,9 @@ def _close_transport(process: asyncio.subprocess.Process) -> None:
     them here keeps asyncio from doing it at garbage collection, after the loop
     is gone, and printing a traceback.
     """
-    process._transport.close()
+    # asyncio publishes no way to reach the pipes' transport, so the private
+    # attribute is read through a type that says so.
+    cast(_HasTransport, process)._transport.close()
 
 
 def _signal_group(pgid: int, sig: int) -> bool:

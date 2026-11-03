@@ -4,10 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.4.1",
     "pytest",
     "pytest-asyncio",
     "pytest-xdist>=3.8.0",
     "ruff",
+    "types-pyyaml>=6.0.12.20261103",
 ]
 
 [project]
@@ -27,6 +29,11 @@ alr = "alr.main:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests/unit"]
+
+[tool.mypy]
+# Only the package: the unit tests still have errors of their own, and the e2e
+# tests run in their own container with their own dependencies.
+files = ["src"]
 
 [tool.ruff]
 # The plans under docs/ hold code blocks that ruff would otherwise reformat.

@@ -218,6 +218,9 @@ class ActivityPane(RichLog):
 
     def _redraw(self) -> None:
         self.clear()
+        if self._shown is None:
+            return
+
         for line in self._by_task.get(self._shown, []):
             self.write(line, scroll_end=True)
 

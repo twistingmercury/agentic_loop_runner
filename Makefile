@@ -9,9 +9,10 @@ help: ## Show this help
 test: analyze ## Run analyze, then the unit tests
 	uv run pytest -n auto tests/unit
 
-analyze: ## Runs formatting and linting
+analyze: ## Runs formatting, linting, and type checking
 	uv run ruff format
 	uv run ruff check --fix
+	uv run mypy
 
 build: ## Builds the wheel, then runs the e2e tests in a container
 	build/build.sh
