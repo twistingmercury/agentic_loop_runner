@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The build gate runs mypy over `src/` beside ruff and the unit tests. Two small
+  fixes came with it: the log pane's redraw returns early when no task is
+  shown, and the process helper reads asyncio's private pipe transport through
+  a typed protocol.
 - The e2e tests run in parallel, one worker per CPU, so `./build/build.sh` is
   faster (the e2e step went from 82 seconds to 7).
 - The run summary focuses its button. After a clean run the button is Exit and
