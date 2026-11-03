@@ -50,7 +50,24 @@ class Config:
 
 def config_dir(home: Path | None = None) -> Path:
     """Name the one folder alr keeps its config in, so every caller agrees where it is."""
-    return (home or Path.home()) / ".local" / "alr"
+    if home is None:
+        home = _find_home()
+
+    return home / ".local" / "alr"
+
+
+def _find_home() -> Path:
+    """Find the home folder, refusing when the system cannot say where it is.
+
+    Path.home() raises RuntimeError when HOME is unset and the user has no
+    passwd entry, as in a container run with an unnamed user id.
+    """
+    try:
+        return Path.home()
+    except RuntimeError as error:
+        raise RefusedError(
+            CONFIG_UNWRITABLE, f"cannot find the home folder: {error}"
+        ) from error
 
 
 def print_to_stderr(message: str) -> None:
@@ -70,8 +87,7 @@ def load(
     is not created; the copy shipped in the package is read instead.
     """
     folder = config_dir(home)
-    _refuse_foreign(folder)
-    if folder.exists():
+    if _folder_exists(folder):
         return _read_folder(folder)
 
     if not create:
@@ -108,6 +124,21 @@ def parse(text: str, folder: Path) -> Config:
             remediation, "task_remediation", folder, path
         ),
     )
+
+
+def _folder_exists(folder: Path) -> bool:
+    """Say whether the config folder is there, refusing what is not a plain folder.
+
+    Checking a path whose parent cannot be searched raises PermissionError,
+    which must end as a refusal, not a traceback.
+    """
+    try:
+        _refuse_foreign(folder)
+        return folder.exists()
+    except OSError as error:
+        raise RefusedError(
+            CONFIG_UNWRITABLE, f"cannot check {folder}: {error.strerror or error}"
+        ) from error
 
 
 def _refuse_foreign(folder: Path) -> None:
@@ -326,7 +357,14 @@ def _prompt_path(section: dict[str, Any], name: str, folder: Path, path: Path) -
     """Return a prompt file's absolute path, refusing one that is not there."""
     prompt = _required(section, "prompt", path, name)
     prompt_path = _absolute(prompt, f"{name} prompt", folder, path)
-    if not prompt_path.is_file():
+    try:
+        is_file = prompt_path.is_file()
+    except OSError as error:
+        raise _refuse(
+            path, f"{name} prompt {prompt_path} cannot be checked: {error}"
+        ) from error
+
+    if not is_file:
         raise _refuse(
             path, f"{name} prompt {quote(str(prompt))} is not a file: {prompt_path}"
         )

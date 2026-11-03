@@ -1,5 +1,6 @@
 """config.yaml: parse and validate."""
 
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -412,6 +413,58 @@ def test_an_unwritable_home_is_refused(tmp_path: Path) -> None:
     assert caught.value.reason == CONFIG_UNWRITABLE
     assert str(config_dir(tmp_path)) in caught.value.message
     assert (tmp_path / ".local").read_text(encoding="utf-8") == "in the way"
+
+
+@pytest.fixture
+def locked_folder(tmp_path: Path):
+    """A folder with no permissions, restored afterwards so pytest can clean up."""
+    if os.geteuid() == 0:
+        pytest.skip("root can search any folder")
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o000)
+    yield locked
+    locked.chmod(0o700)
+
+
+@pytest.mark.parametrize("create", [True, False])
+def test_a_local_folder_that_cannot_be_searched_is_refused(
+    locked_folder: Path, create: bool
+) -> None:
+    # locked/.local/alr: the check of alr cannot get past locked/.
+    with pytest.raises(RefusedError) as caught:
+        load(locked_folder, create=create, say=collect([]))
+
+    assert caught.value.reason == CONFIG_UNWRITABLE
+    assert str(config_dir(locked_folder)) in caught.value.message
+
+
+def test_a_home_that_cannot_be_found_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_home() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", no_home)
+
+    with pytest.raises(RefusedError) as caught:
+        load(create=True, say=collect([]))
+
+    assert caught.value.reason == CONFIG_UNWRITABLE
+    assert "cannot find the home folder" in caught.value.message
+
+
+def test_a_prompt_that_cannot_be_checked_is_refused(
+    tmp_path: Path, locked_folder: Path
+) -> None:
+    text = replace("./prompts/task_review.md", f"{locked_folder}/review.md")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(text, make_folder(tmp_path))
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert f"{locked_folder}/review.md" in caught.value.message
 
 
 def test_an_existing_folder_without_config_is_refused(tmp_path: Path) -> None:
