@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from importlib.resources import as_file, files
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -77,6 +77,44 @@ def default_file_names() -> list[str]:
     """List the files create_folder writes, relative to the folder, so the user can be told first."""
     with as_file(files("alr") / "defaults") as source:
         return _default_names(source)
+
+
+def paths_to_create(home: Path | None = None) -> list[Path]:
+    """List everything create_folder makes, in the order it makes it, so the user can be told first.
+
+    That is each missing parent of the config folder (only the ones that do
+    not exist, so nothing already there is listed), the config folder, its
+    subfolders, then the files. The subfolders come from the shipped file
+    names, so a new shipped folder shows up here without a change.
+    """
+    folder = config_dir(home)
+    names = default_file_names()
+
+    missing_parents: list[Path] = []
+    parent = folder.parent
+    while not parent.exists():
+        missing_parents.append(parent)
+        parent = parent.parent
+
+    subfolders = _subfolders(names)
+    return [
+        *reversed(missing_parents),
+        folder,
+        *(folder / subfolder for subfolder in subfolders),
+        *(folder / name for name in names),
+    ]
+
+
+def _subfolders(names: list[str]) -> list[PurePosixPath]:
+    """List the folders the shipped files sit in, outermost first, each once."""
+    subfolders: dict[PurePosixPath, None] = {}
+    for name in names:
+        for parent in reversed(PurePosixPath(name).parents):
+            # The last parent is "." (the config folder itself), which has no parts.
+            if parent.parts:
+                subfolders[parent] = None
+
+    return list(subfolders)
 
 
 def load(home: Path | None = None) -> Config:

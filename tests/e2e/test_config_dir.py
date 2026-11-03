@@ -77,6 +77,20 @@ def test_yes_sets_up_the_folder_and_starts_no_run(
     assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
 
 
+def test_the_prompt_names_every_folder_it_will_create(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr_in_terminal("--yolo", "--plain", f"--dir={tmp_path}", keys=NO)
+
+    config_folder = home / ".local" / "alr"
+    listed = [line.strip() for line in res.shown.splitlines()]
+    assert str(home / ".local") in listed
+    assert str(config_folder) in listed
+    assert str(config_folder / "prompts") in listed
+
+
 @pytest.mark.parametrize(
     "keys", [NO, "\n", "maybe\n", END_OF_INPUT], ids=["n", "empty", "maybe", "EOF"]
 )

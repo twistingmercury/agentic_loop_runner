@@ -1094,6 +1094,53 @@ def test_the_setup_question_names_what_it_will_create_before_creating_it(
     assert str(config_folder / "prompts" / "task_remediation.md") in said
 
 
+def _listed(said: str) -> list[str]:
+    """Pick the paths the setup notice lists, one per indented line."""
+    return [line.strip() for line in said.splitlines() if line.startswith("  ")]
+
+
+def test_the_setup_notice_lists_every_folder_and_file_in_creation_order(
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _reply(monkeypatch, "n")
+    local = fresh_home / ".local"
+    config_folder = local / "alr"
+
+    cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    assert _listed(capsys.readouterr().out) == [
+        str(local),
+        str(config_folder),
+        str(config_folder / "prompts"),
+        str(config_folder / "prompts" / "task_remediation.md"),
+        str(config_folder / "prompts" / "task_review.md"),
+        str(config_folder / "config.yaml"),
+    ]
+
+
+def test_the_setup_notice_leaves_out_a_parent_that_already_exists(
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _reply(monkeypatch, "n")
+    (fresh_home / ".local").mkdir()
+    config_folder = fresh_home / ".local" / "alr"
+
+    cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    listed = _listed(capsys.readouterr().out)
+    assert str(fresh_home / ".local") not in listed
+    assert listed[0] == str(config_folder)
+    assert str(config_folder / "prompts") in listed
+
+
 def test_the_setup_question_is_asked_with_a_yes_no_prompt(
     folder: Path,
     fresh_home: Path,

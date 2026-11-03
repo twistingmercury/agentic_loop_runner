@@ -16,8 +16,8 @@ from alr.config import (
     config_dir,
     config_folder_exists,
     create_folder,
-    default_file_names,
     load,
+    paths_to_create,
 )
 from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
 from alr.engine.sandbox import (
@@ -205,7 +205,7 @@ def _set_up_config() -> int:
             f"{missing}; run alr in a terminal once to create it",
         )
 
-    print(_setup_notice(folder))
+    print(_setup_notice())
     answer = _read_answer("Create them? [y/N] ")
     if answer.strip().lower() not in _YES_ANSWERS:
         print("Nothing was created.")
@@ -219,10 +219,9 @@ def _set_up_config() -> int:
     return 0
 
 
-def _setup_notice(folder: Path) -> str:
-    """Say what setting up the configuration creates and where."""
-    paths = [folder, *(folder / name for name in default_file_names())]
-    listing = "\n".join(f"  {path}" for path in paths)
+def _setup_notice() -> str:
+    """Say every folder and file setting up the configuration creates, and where."""
+    listing = "\n".join(f"  {path}" for path in paths_to_create())
     return f"alr needs to set up its configuration before it can run. It will create:\n{listing}"
 
 
