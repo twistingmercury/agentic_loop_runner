@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from alr.config import SandboxDefault
 from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
 from alr.engine.sandbox import (
     bypass_args,
@@ -28,6 +29,9 @@ from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
 
 _INTERRUPTED = "error: interrupted"
+# The config's sandbox modes that are not presets (see alr.config).
+_YOLO = "yolo"
+_CUSTOM = "custom"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -284,6 +288,47 @@ def resolve_permissions(
         return Answer(sandbox_settings, skip, None)
 
     return Answer(folder_sandbox(dir) or "", skip, None)
+
+
+def apply_sandbox_default(
+    args: argparse.Namespace, default: SandboxDefault | None
+) -> None:
+    """Fill in the permission flag nobody passed from the config's sandbox default.
+
+    It sets the same fields the real flags set, so the dry run, the view, and
+    start need no change. A flag wins, and so does the run folder's
+    sandbox.json; with either, or with no default, nothing changes. A tight or
+    large default needs a run folder to write its preset into, so with no
+    --dir it fills in nothing and the view asks.
+
+    Nothing calls this yet: Task 4 of the config directory plan runs it at
+    startup, before resolve_permissions.
+    """
+    if default is None:
+        return
+
+    if _permission_chosen(args):
+        return
+
+    if default.mode == _YOLO:
+        args.yolo = True
+        return
+
+    if default.mode == _CUSTOM:
+        args.sandbox_settings = default.sandbox_file
+        return
+
+    if args.dir:
+        args.sandbox = default.mode
+
+
+def _permission_chosen(args: argparse.Namespace) -> bool:
+    """Report whether a flag or the run folder's sandbox.json already chose the permissions."""
+    if args.sandbox is not None or args.sandbox_settings or args.yolo:
+        return True
+
+    # No --dir means no run folder; folder_sandbox("") would look in the current folder.
+    return bool(args.dir) and folder_sandbox(args.dir) is not None
 
 
 def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> Answer:

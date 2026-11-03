@@ -14,6 +14,7 @@ import pytest
 from helpers import start_alr, wait_for_file
 
 from alr import cli
+from alr.config import SandboxDefault
 from alr.engine.presets import Preset, Switches, render, switches_for
 from alr.engine.sandbox import settings_args
 from alr.engine.stop import Stop
@@ -872,3 +873,99 @@ def test_the_view_leaves_the_preset_path_empty_until_a_folder_is_chosen(
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].preset is Preset.TIGHT
     assert seen[0].sandbox_file == ""
+
+
+def _answer(argv: list[str], default: SandboxDefault | None) -> cli.Answer:
+    """Parse the flags, let the config default fill in, and return what the permissions settle."""
+    args = cli._parser().parse_args(argv)
+    cli.apply_sandbox_default(args, default)
+    return cli.resolve_permissions(
+        args.dir, args.sandbox_settings, args.yolo, args.sandbox
+    )
+
+
+@pytest.mark.parametrize("mode", ["tight", "large"])
+def test_a_preset_default_fills_in_the_missing_flag(folder: Path, mode: str) -> None:
+    from_default = _answer(["-d", str(folder)], SandboxDefault(mode, ""))
+    from_flag = _answer(["-d", str(folder), "--sandbox", mode], None)
+
+    assert from_default == from_flag
+    assert from_default.switches is not None
+
+
+def test_a_yolo_default_fills_in_the_missing_flag(folder: Path) -> None:
+    from_default = _answer(["-d", str(folder)], SandboxDefault("yolo", ""))
+    from_flag = _answer(["-d", str(folder), "--yolo"], None)
+
+    assert from_default == from_flag
+    assert from_default.skip is True
+
+
+def test_a_custom_default_fills_in_the_missing_flag(
+    folder: Path, settings: str
+) -> None:
+    from_default = _answer(["-d", str(folder)], SandboxDefault("custom", settings))
+    from_flag = _answer(["-d", str(folder), "--sandbox-settings", settings], None)
+
+    assert from_default == from_flag
+    assert from_default.sandbox_file == settings
+
+
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+@pytest.mark.parametrize("flag", ["--sandbox", "--sandbox-settings", "--yolo"])
+def test_a_flag_beats_the_default(
+    folder: Path, settings: str, mode: str, flag: str
+) -> None:
+    flags = {
+        "--sandbox": ["--sandbox", "large" if mode == "tight" else "tight"],
+        "--sandbox-settings": ["--sandbox-settings", settings],
+        "--yolo": ["--yolo"],
+    }[flag]
+    argv = ["-d", str(folder), *flags]
+    default = SandboxDefault(mode, settings if mode == "custom" else "")
+
+    assert _answer(argv, default) == _answer(argv, None)
+
+
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+def test_the_folders_sandbox_json_beats_the_default(
+    folder: Path, settings: str, mode: str
+) -> None:
+    _add_sandbox(folder)
+    default = SandboxDefault(mode, settings if mode == "custom" else "")
+
+    answer = _answer(["-d", str(folder)], default)
+
+    assert answer == cli.Answer(str(folder / "sandbox.json"), False, None)
+
+
+def test_no_default_changes_nothing(folder: Path) -> None:
+    args = cli._parser().parse_args(["-d", str(folder)])
+    before = vars(args).copy()
+
+    cli.apply_sandbox_default(args, None)
+
+    assert vars(args) == before
+
+
+@pytest.mark.parametrize("mode", ["tight", "large"])
+def test_a_preset_default_without_dir_leaves_the_view_to_ask(mode: str) -> None:
+    args = cli._parser().parse_args([])
+    before = vars(args).copy()
+
+    cli.apply_sandbox_default(args, SandboxDefault(mode, ""))
+
+    assert vars(args) == before
+
+
+def test_a_default_without_dir_never_reads_the_current_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No --dir means no run folder, so a sandbox.json in the current folder must not count."""
+    _add_sandbox(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    args = cli._parser().parse_args([])
+
+    cli.apply_sandbox_default(args, SandboxDefault("yolo", ""))
+
+    assert args.yolo is True
