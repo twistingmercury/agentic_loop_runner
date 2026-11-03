@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
 ### Added
 
 - A config folder, `~/.local/alr`, with a `config.yaml` and the prompt files in
@@ -27,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command-line flag, then the run folder, then `config.yaml`, then alr's own
   default. The prompt paths and the review cap are read and checked now but
   nothing uses them yet. (#36)
+
+### Changed
+
+- **Breaking:** alr refuses to start until the config folder exists. Run it once in a
+  terminal and answer `y`; scripts and CI images need this one-time step, because a
+  run without a terminal, and `--dry-run`, are refused with `config-setup-missing`
+  (exit 3). `--version` and `--install-skill` are unaffected. The folder is created
+  private to you (mode 0700), and the prompt names every folder it will create,
+  `~/.local` included when it is missing. (#36)
 
 ## [0.3.0] - 2026-11-02
 

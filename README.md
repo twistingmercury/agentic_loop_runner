@@ -4,7 +4,7 @@
 ![Version](https://img.shields.io/github/v/tag/twistingmercury/agentic_loop_runner?sort=semver)
 
 > **Maturity Level**: Emerging - in active, initial development; expect breaking changes.</br>
-> **Version**: v0.3.0
+> **Version**: v0.4.0
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes
@@ -60,6 +60,10 @@ and each build plan is in [docs/plans/](docs/plans/).
 
 - Supported platforms are Linux and macOS only.
 - No automatic retries: at most one attempt per task per run.
+- The first run on a machine needs a one-time setup: `alr` asks before creating
+  `~/.local/alr` (its `config.yaml` and prompt files) and then stops. Without a
+  terminal, or with `--dry-run`, it refuses with `config-setup-missing` and creates
+  nothing, so run `alr` once in a terminal on any machine or CI image before scripting it.
 - Claude Code is the only supported agent. It uses your installed CLI's own model and
   authentication settings; `alr` adds no model-selection flags.
 - The task file is code: its prompts go to Claude and its actions run through `sh -c`.
