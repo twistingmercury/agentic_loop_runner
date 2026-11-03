@@ -992,35 +992,313 @@ def _write_config(home: Path, text: str) -> None:
     (home / ".local" / "alr" / "config.yaml").write_text(text, encoding="utf-8")
 
 
-def test_a_real_run_creates_the_config_and_says_so(
+SETUP_PROMPT = "Create them? [y/N] "
+REFUSED_SETUP = "error: refused: config-setup-missing: "
+
+
+@pytest.fixture
+def terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make alr see a terminal, so a person could answer.
+
+    This patches the check itself: pytest swaps stdin and stdout around each
+    phase, so a patch on their isatty made in a fixture does not survive into
+    the test. test_a_terminal_needs_both_stdin_and_stdout covers the check.
+    """
+    monkeypatch.setattr(cli, "_terminal_attached", lambda: True)
+
+
+@pytest.fixture
+def no_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make alr see pipes, whatever runs the tests."""
+    monkeypatch.setattr(cli, "_terminal_attached", lambda: False)
+
+
+@pytest.mark.parametrize(
+    ("stdin_tty", "stdout_tty", "want"),
+    [
+        (True, True, True),
+        (True, False, False),
+        (False, True, False),
+        (False, False, False),
+    ],
+    ids=["both", "only stdin", "only stdout", "neither"],
+)
+def test_a_terminal_needs_both_stdin_and_stdout(
+    stdin_tty: bool, stdout_tty: bool, want: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: stdin_tty)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: stdout_tty)
+
+    assert cli._terminal_attached() is want
+
+
+def _reply(monkeypatch: pytest.MonkeyPatch, reply: str) -> list[str]:
+    """Answer the setup question with reply; the list collects the questions asked."""
+    asked: list[str] = []
+
+    def read_answer(prompt: str) -> str:
+        asked.append(prompt)
+        return reply
+
+    monkeypatch.setattr(cli, "_read_answer", read_answer)
+    return asked
+
+
+def _fail_if_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if alr asks anything."""
+
+    def read_answer(prompt: str) -> str:
+        pytest.fail(f"alr asked: {prompt}")
+
+    monkeypatch.setattr(cli, "_read_answer", read_answer)
+
+
+def test_the_setup_question_names_what_it_will_create_before_creating_it(
     folder: Path,
     fresh_home: Path,
-    sessions: list[list[str]],
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = cli.main(["-d", str(folder), "--yolo"])
+    config_folder = fresh_home / ".local" / "alr"
+    seen_when_asked: list[bool] = []
+
+    def read_answer(prompt: str) -> str:
+        seen_when_asked.append(config_folder.exists())
+        return "n"
+
+    monkeypatch.setattr(cli, "_read_answer", read_answer)
+
+    cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    said = capsys.readouterr().out
+    assert seen_when_asked == [False]
+    assert str(config_folder) in said
+    assert str(config_folder / "config.yaml") in said
+    assert str(config_folder / "prompts" / "task_review.md") in said
+    assert str(config_folder / "prompts" / "task_remediation.md") in said
+
+
+def test_the_setup_question_is_asked_with_a_yes_no_prompt(
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked = _reply(monkeypatch, "n")
+
+    cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    assert asked == [SETUP_PROMPT]
+
+
+@pytest.mark.parametrize("reply", ["y", "yes", "Y", "YES", "Yes", " y "])
+def test_yes_sets_up_the_config_and_stops_without_a_run(
+    reply: str,
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    sessions: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _reply(monkeypatch, reply)
+
+    code = cli.main(["-d", str(folder), "--yolo", "--plain"])
 
     captured = capsys.readouterr()
     config_folder = fresh_home / ".local" / "alr"
     assert code == 0
     assert (config_folder / "config.yaml").is_file()
-    assert f"creating {config_folder}" in captured.err
-    assert "creating" not in captured.out
-    assert len(sessions) == 1
+    assert (config_folder / "prompts" / "task_review.md").is_file()
+    assert (config_folder / "prompts" / "task_remediation.md").is_file()
+    assert f"The configuration is set up in {config_folder}." in captured.out
+    assert "Run alr again" in captured.out
+    assert captured.err == ""
+    assert sessions == []
 
 
-def test_dry_run_creates_nothing(folder: Path, fresh_home: Path) -> None:
+@pytest.mark.parametrize(
+    "reply", ["n", "N", "no", "", "  ", "maybe", "yy", "yes please", "1"]
+)
+def test_anything_but_yes_creates_nothing_and_refuses(
+    reply: str,
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    sessions: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _reply(monkeypatch, reply)
+
+    code = cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert not (fresh_home / ".local").exists()
+    assert "Nothing was created." in captured.out
+    assert captured.err.startswith(REFUSED_SETUP)
+    assert "run alr again and answer y to create it" in captured.err
+    assert len(captured.err.splitlines()) == 1
+    assert sessions == []
+
+
+def test_the_end_of_input_counts_as_no(
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    sessions: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def end_of_input(prompt: object = "") -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", end_of_input)
+
+    code = cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert not (fresh_home / ".local").exists()
+    # The unanswered question's line is ended before alr says anything else.
+    assert captured.out.startswith("alr needs to set up")
+    assert captured.out.endswith(f"{SETUP_PROMPT}\nNothing was created.\n")
+    assert captured.err.startswith(REFUSED_SETUP)
+    assert "run alr again and answer y to create it" in captured.err
+    assert len(captured.err.splitlines()) == 1
+    assert sessions == []
+
+
+def test_the_question_is_printed_to_stdout_not_given_to_input(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """input() writes a prompt it is given to stderr unless readline is loaded, and stderr must stay clean."""
+    prompts_given_to_input: list[tuple[object, ...]] = []
+
+    def typed_yes(*prompt: object) -> str:
+        prompts_given_to_input.append(prompt)
+        return "y"
+
+    monkeypatch.setattr("builtins.input", typed_yes)
+
+    assert cli._read_answer(SETUP_PROMPT) == "y"
+
+    captured = capsys.readouterr()
+    assert captured.out == SETUP_PROMPT
+    assert captured.err == ""
+    assert prompts_given_to_input == [()]
+
+
+def test_without_a_terminal_alr_neither_asks_nor_writes_and_refuses(
+    folder: Path,
+    fresh_home: Path,
+    no_terminal: None,
+    sessions: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _fail_if_asked(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--yolo"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert not (fresh_home / ".local").exists()
+    assert captured.out == ""
+    assert captured.err.startswith(REFUSED_SETUP)
+    assert "the config setup is missing" in captured.err
+    assert "run alr in a terminal once to create it" in captured.err
+    assert len(captured.err.splitlines()) == 1
+    assert sessions == []
+
+
+@pytest.mark.parametrize(
+    ("attached", "reply", "want_code"),
+    [(True, "y", 0), (True, "n", 3), (False, "n", 3)],
+    ids=["yes", "no", "no terminal"],
+)
+@pytest.mark.parametrize("problem", ["no run folder", "no permission flag"])
+def test_setup_comes_before_the_run_folder_and_the_flags_are_checked(
+    attached: bool,
+    reply: str,
+    want_code: int,
+    problem: str,
+    folder: Path,
+    fresh_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "_terminal_attached", lambda: attached)
+    _reply(monkeypatch, reply)
+    # Either would end the run with exit 2 if it were checked first.
+    argv = {
+        "no run folder": ["-d", str(fresh_home / "nowhere"), "--yolo"],
+        "no permission flag": ["-d", str(folder), "--plain"],
+    }[problem]
+
+    assert cli.main(argv) == want_code
+
+
+def test_an_existing_config_folder_is_never_asked_about(
+    folder: Path,
+    terminal: None,
+    sessions: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _fail_if_asked(monkeypatch)
+
+    code = cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == ""
+    assert captured.err == ""
+    assert sessions == [["--dangerously-skip-permissions"]]
+
+
+def test_dry_run_neither_asks_nor_creates(
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_if_asked(monkeypatch)
+
     assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
     assert not (fresh_home / ".local").exists()
 
 
 @pytest.mark.parametrize("flag", ["--version", "--install-skill"])
-def test_version_and_install_skill_do_not_load_the_config(
-    flag: str, fresh_home: Path
+def test_version_and_install_skill_neither_ask_nor_create(
+    flag: str,
+    fresh_home: Path,
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _fail_if_asked(monkeypatch)
+
     cli.main([flag])
 
     assert not (fresh_home / ".local").exists()
+
+
+def test_a_file_where_the_config_folder_belongs_refuses_before_asking(
+    folder: Path,
+    fresh_home: Path,
+    terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _fail_if_asked(monkeypatch)
+    (fresh_home / ".local").mkdir()
+    (fresh_home / ".local" / "alr").write_text("in the way", encoding="utf-8")
+
+    code = cli.main(["-d", str(folder), "--yolo", "--plain"])
+
+    assert code == 3
+    assert capsys.readouterr().err.startswith("error: refused: invalid-config: ")
 
 
 def test_a_bad_config_refuses_with_exit_3_before_any_task(

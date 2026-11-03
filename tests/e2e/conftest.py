@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from e2e_helpers import find_alr
+from e2e_helpers import YES, find_alr, run_alr_in_terminal
 
 FAKE_CLAUDE_SOURCE = Path(__file__).parent / "testdata" / "fake_claude.py"
 
@@ -83,3 +83,18 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("HOME", str(folder))
         yield folder
+
+
+@pytest.fixture(autouse=True)
+def set_up_config(home: Path) -> None:
+    """Set up the config folder in the test's home the way a user does.
+
+    A real run refuses on a machine that was never set up, and the tests have
+    no terminal. So each test starts after the one-time setup: alr runs in a
+    terminal and is answered yes. test_config_dir.py replaces this fixture,
+    because it tests the setup itself.
+    """
+    done = run_alr_in_terminal(keys=YES)
+
+    assert done.code == 0, done
+    assert (home / ".local" / "alr" / "config.yaml").is_file()

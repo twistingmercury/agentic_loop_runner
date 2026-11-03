@@ -18,7 +18,6 @@ from e2e_helpers import (
     start_alr,
     task_states,
     wait_for_file,
-    without_first_run_line,
     write_tasks_yaml,
 )
 from test_signal import stopped_at_exit
@@ -87,8 +86,7 @@ def test_refusal_exits_3_and_writes_no_log(tmp_path: Path, fake_claude: Path) ->
     res = run_alr(*run_args(tasks_path))
 
     assert res.code == 3, res
-    first_line = without_first_run_line(res.err).splitlines()[0]
-    assert first_line.startswith("error: refused: failed-tasks: ")
+    assert res.err.splitlines()[0].startswith("error: refused: failed-tasks: ")
     assert not (tmp_path / "logs").exists()
 
 
@@ -106,8 +104,7 @@ def test_reset_failed_with_an_unwritable_log_folder_leaves_the_file_alone(
     res = run_alr(*run_args(tasks_path), "--reset-failed")
 
     assert res.code == 3, res
-    first_line = without_first_run_line(res.err).splitlines()[0]
-    assert first_line.startswith("error: refused: log-unwritable: ")
+    assert res.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
     assert tasks_path.read_text(encoding="utf-8") == failed_yaml
 
 

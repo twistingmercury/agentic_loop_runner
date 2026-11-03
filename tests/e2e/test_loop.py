@@ -17,7 +17,6 @@ from e2e_helpers import (
     run_args,
     shared_block,
     task_states,
-    without_first_run_line,
     write_tasks_yaml,
 )
 
@@ -98,7 +97,7 @@ def test_loop_failed_task_refuses_to_run(tmp_path: Path, fake_claude: Path) -> N
         "❌  2  \033[1;91mFAILED   \033[0m  Second task  \033[1;91m← Needs review!\033[0m\n"
         in res.out
     )
-    assert without_first_run_line(res.err).startswith(
+    assert res.err.startswith(
         "error: refused: failed-tasks: fix the failed tasks and set their state to pending before running\n"
     )
     assert fake_claude_records(record_file) == []

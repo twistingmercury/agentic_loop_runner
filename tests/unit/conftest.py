@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.config import load
+from alr.config import create_folder
 
 FAKE_CLAUDE_SOURCE = Path(__file__).parent / "fakeclaude" / "fake_claude.py"
 
@@ -52,8 +52,8 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Point the home folder at a temporary one that already holds the config folder.
 
     No test may touch the real ~/.local/alr. The folder is created up front so
-    a real run says nothing on first run and the tests that check stderr stay
-    about their own subject; fresh_home is the one without it.
+    a real run goes straight to its work instead of asking to set up; fresh_home
+    is the one without it.
 
     This uses its own MonkeyPatch, not the monkeypatch fixture: an autouse
     fixture that shared it would change when a test's own patches are undone.
@@ -61,7 +61,7 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     folder = tmp_path_factory.mktemp("home")
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("HOME", str(folder))
-        load(folder, create=True, say=_say_nothing)
+        create_folder(folder)
         yield folder
 
 
@@ -70,7 +70,3 @@ def fresh_home(home: Path) -> Path:
     """The temporary home as a machine that never ran alr: no ~/.local at all."""
     shutil.rmtree(home / ".local")
     return home
-
-
-def _say_nothing(message: str) -> None:
-    """Swallow the first-run line while the fixture creates the folder."""

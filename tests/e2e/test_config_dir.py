@@ -1,14 +1,23 @@
-"""The config folder, ~/.local/alr: made on the first real run, left alone after, never made by a dry run."""
+"""The config folder, ~/.local/alr: set up only after a typed yes, never by a dry run, left alone after."""
 
 from pathlib import Path
 
+import pytest
 from e2e_helpers import (
-    FIRST_RUN_PREFIX,
+    END_OF_INPUT,
+    NO,
+    SETUP_PROMPT,
     VALID_TASKS_YAML,
+    YES,
     fake_claude_records,
+    read_tasks_yaml,
     run_alr,
+    run_alr_in_terminal,
+    task_states,
     write_tasks_yaml,
 )
+
+REFUSED = "error: refused: config-setup-missing: "
 
 YOLO_CONFIG = """version: 1.0.0
 defaults:
@@ -24,73 +33,165 @@ defaults:
 """
 
 
-def test_first_run_creates_the_folder_and_says_so(
-    tmp_path: Path, home: Path, fake_claude: Path
+@pytest.fixture(autouse=True)
+def set_up_config() -> None:
+    """Replace the conftest fixture: every test here starts on a machine that was never set up."""
+
+
+def set_up(home: Path) -> Path:
+    """Set up the config folder the way a user does, and return it."""
+    done = run_alr_in_terminal(keys=YES)
+
+    assert done.code == 0, done
+    return home / ".local" / "alr"
+
+
+@pytest.mark.parametrize("keys", [YES, "yes\n", "Y\n", "YES\n"])
+def test_yes_sets_up_the_folder_and_starts_no_run(
+    keys: str, tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:
-    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    record_file = tmp_path / "record.ndjson"
     folder = home / ".local" / "alr"
 
-    res = run_alr("--yolo", f"--dir={tmp_path}", env={"HOME": str(home)})
+    res = run_alr_in_terminal(
+        "--yolo",
+        "--plain",
+        f"--dir={tmp_path}",
+        keys=keys,
+        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
+    )
 
     assert res.code == 0, res
-    said = [line for line in res.err.splitlines() if line.startswith(FIRST_RUN_PREFIX)]
-    assert len(said) == 1, res.err
-    assert str(folder) in said[0]
-    assert "config.yaml" in said[0]
-    assert (folder / "config.yaml").is_file()
-    assert (folder / "prompts" / "task_review.md").is_file()
-    assert (folder / "prompts" / "task_remediation.md").is_file()
+    for name in (
+        "config.yaml",
+        "prompts/task_review.md",
+        "prompts/task_remediation.md",
+    ):
+        assert (folder / name).is_file()
+        assert str(folder / name) in res.shown
+    assert "configuration is set up" in res.shown
+    assert "Run alr again" in res.shown
+    assert res.err == ""
+    assert fake_claude_records(record_file) == []
+    assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML
 
 
-def test_a_second_run_leaves_edits_alone(
+@pytest.mark.parametrize(
+    "keys", [NO, "\n", "maybe\n", END_OF_INPUT], ids=["n", "empty", "maybe", "EOF"]
+)
+def test_anything_but_yes_creates_nothing_and_refuses(
+    keys: str, tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    record_file = tmp_path / "record.ndjson"
+
+    res = run_alr_in_terminal(
+        "--yolo",
+        "--plain",
+        f"--dir={tmp_path}",
+        keys=keys,
+        env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
+    )
+
+    assert res.code == 3, res
+    assert "Nothing was created." in res.shown
+    assert res.err.startswith(REFUSED)
+    assert len(res.err.splitlines()) == 1
+    assert list(home.iterdir()) == []
+    assert fake_claude_records(record_file) == []
+
+
+def test_no_terminal_refuses_without_asking_or_writing(
     tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:
-    folder = home / ".local" / "alr"
     write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
-    run_alr("--yolo", f"--dir={tmp_path}", env={"HOME": str(home)})
+
+    res = run_alr("--yolo", f"--dir={tmp_path}")
+
+    assert res.code == 3, res
+    assert res.out == ""
+    assert res.err.startswith(REFUSED)
+    assert "run alr in a terminal once to create it" in res.err
+    assert len(res.err.splitlines()) == 1
+    assert list(home.iterdir()) == []
+
+
+def test_a_run_after_the_setup_proceeds(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    set_up(home)
+
+    res = run_alr("--yolo", f"--dir={tmp_path}")
+
+    assert res.code == 0, res
+    assert res.err == ""
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
+
+
+def test_a_run_after_the_setup_leaves_edits_alone(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = set_up(home)
     review_prompt = folder / "prompts" / "task_review.md"
     review_prompt.write_text("my own review prompt\n", encoding="utf-8")
     config_before = (folder / "config.yaml").read_text(encoding="utf-8")
-    # The first run completed the task; a fresh file gives the second run work to do.
     write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
-    res = run_alr("--yolo", f"--dir={tmp_path}", env={"HOME": str(home)})
+    res = run_alr("--yolo", f"--dir={tmp_path}")
 
     assert res.code == 0, res
-    assert FIRST_RUN_PREFIX not in res.err
+    assert res.err == ""
     assert review_prompt.read_text(encoding="utf-8") == "my own review prompt\n"
     assert (folder / "config.yaml").read_text(encoding="utf-8") == config_before
-
-
-def test_dry_run_creates_nothing(tmp_path: Path, home: Path, fake_claude: Path) -> None:
-    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
-
-    res = run_alr("--dry-run", f"--dir={tmp_path}", env={"HOME": str(home)})
-
-    assert res.code == 0, res
-    assert FIRST_RUN_PREFIX not in res.err
-    assert not (home / ".local").exists()
-    assert list(home.iterdir()) == []
 
 
 def test_a_yolo_default_runs_without_a_flag(
     tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:
-    folder = home / ".local" / "alr"
-    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
-    run_alr("--yolo", f"--dir={tmp_path}", env={"HOME": str(home)})
+    folder = set_up(home)
     (folder / "config.yaml").write_text(YOLO_CONFIG, encoding="utf-8")
-    # The first run completed the task; a fresh file gives the second run work to do.
     write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
-        f"--dir={tmp_path}",
-        env={"HOME": str(home), "FAKECLAUDE_RECORD_FILE": str(record_file)},
-    )
+    res = run_alr(f"--dir={tmp_path}", env={"FAKECLAUDE_RECORD_FILE": str(record_file)})
 
     assert res.code == 0, res
     records = fake_claude_records(record_file)
     assert [record["argv"] for record in records] == [
         ["--print", "--dangerously-skip-permissions"]
     ]
+
+
+def test_dry_run_neither_asks_nor_creates(tmp_path: Path, home: Path) -> None:
+    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr_in_terminal("--dry-run", f"--dir={tmp_path}")
+
+    assert res.code == 0, res
+    assert SETUP_PROMPT not in res.shown
+    assert res.err == ""
+    assert list(home.iterdir()) == []
+
+
+def test_dry_run_without_a_terminal_creates_nothing(tmp_path: Path, home: Path) -> None:
+    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr("--dry-run", f"--dir={tmp_path}")
+
+    assert res.code == 0, res
+    assert res.err == ""
+    assert list(home.iterdir()) == []
+
+
+@pytest.mark.parametrize("flag", ["--version", "--install-skill"])
+def test_version_and_install_skill_neither_ask_nor_create(
+    flag: str, home: Path
+) -> None:
+    res = run_alr_in_terminal(flag)
+
+    assert res.code == 0, res
+    assert SETUP_PROMPT not in res.shown
+    assert res.err == ""
+    assert not (home / ".local").exists()

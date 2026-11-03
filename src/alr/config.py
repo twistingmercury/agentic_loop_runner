@@ -1,10 +1,8 @@
-"""The user config folder, ~/.local/alr: create it on first run, then parse and validate config.yaml."""
+"""The user config folder, ~/.local/alr: create it once the user agrees, then parse and validate config.yaml."""
 
 import errno
 import shutil
-import sys
 import tempfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
@@ -70,31 +68,50 @@ def _find_home() -> Path:
         ) from error
 
 
-def print_to_stderr(message: str) -> None:
-    """Say what alr is about to do on stderr, so stdout stays the run's own output."""
-    print(message, file=sys.stderr)
+def config_folder_exists(home: Path | None = None) -> bool:
+    """Say whether the config folder is there, refusing what is not a plain folder."""
+    return _folder_exists(config_dir(home))
 
 
-def load(
-    home: Path | None = None,
-    *,
-    create: bool,
-    say: Callable[[str], None] = print_to_stderr,
-) -> Config:
-    """Read the config, creating the folder with its default files on first run.
+def default_file_names() -> list[str]:
+    """List the files create_folder writes, relative to the folder, so the user can be told first."""
+    with as_file(files("alr") / "defaults") as source:
+        return _default_names(source)
 
-    With create=False (a dry run never writes, requirement 9) a missing folder
-    is not created; the copy shipped in the package is read instead.
+
+def load(home: Path | None = None) -> Config:
+    """Read the config from the config folder.
+
+    This never writes. A real run asks before creating the folder (see
+    create_folder) and a dry run writes nothing (requirement 9), so when the
+    folder is missing the copy shipped in the package is read instead.
     """
     folder = config_dir(home)
     if _folder_exists(folder):
         return _read_folder(folder)
 
-    if not create:
-        return _read_packaged()
+    return _read_packaged()
 
-    _create_folder(folder, say)
-    return _read_folder(folder)
+
+def create_folder(home: Path | None = None) -> None:
+    """Create the config folder with its default files.
+
+    The caller has already told the user what is created and been told to go
+    ahead. The folder appears all at once or not at all, so a killed run or a
+    second alr starting at the same moment never sees it without its
+    config.yaml.
+    """
+    folder = config_dir(home)
+    with as_file(files("alr") / "defaults") as source:
+        names = _default_names(source)
+        try:
+            folder.parent.mkdir(parents=True, exist_ok=True)
+            _create_all_at_once(source, names, folder)
+        except OSError as error:
+            raise RefusedError(
+                CONFIG_UNWRITABLE,
+                f"cannot create {folder}: {error.strerror or error}",
+            ) from error
 
 
 def parse(text: str, folder: Path) -> Config:
@@ -171,25 +188,6 @@ def _read_folder(folder: Path) -> Config:
         raise _refuse(path, f"cannot be read: {error}") from error
 
     return parse(text, folder)
-
-
-def _create_folder(folder: Path, say: Callable[[str], None]) -> None:
-    """Say what is about to be created, then create the folder with the default files.
-
-    The folder appears all at once or not at all, so a killed run or a second
-    alr starting at the same moment never sees it without its config.yaml.
-    """
-    with as_file(files("alr") / "defaults") as source:
-        names = _default_names(source)
-        say(f"alr: first run: creating {folder} with {', '.join(names)}")
-        try:
-            folder.parent.mkdir(parents=True, exist_ok=True)
-            _create_all_at_once(source, names, folder)
-        except OSError as error:
-            raise RefusedError(
-                CONFIG_UNWRITABLE,
-                f"cannot create {folder}: {error.strerror or error}",
-            ) from error
 
 
 def _create_all_at_once(source: Path, names: list[str], folder: Path) -> None:

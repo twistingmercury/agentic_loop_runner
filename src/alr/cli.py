@@ -11,7 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from alr.config import SandboxDefault, load
+from alr.config import (
+    SandboxDefault,
+    config_dir,
+    config_folder_exists,
+    create_folder,
+    default_file_names,
+    load,
+)
 from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
 from alr.engine.sandbox import (
     bypass_args,
@@ -20,7 +27,13 @@ from alr.engine.sandbox import (
     settings_args,
 )
 from alr.engine.stop import Stop
-from alr.errors import AlrError, RunCancelledError, UsageError
+from alr.errors import (
+    CONFIG_SETUP_MISSING,
+    AlrError,
+    RefusedError,
+    RunCancelledError,
+    UsageError,
+)
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
 from alr.skillinstall import install
@@ -32,6 +45,7 @@ _INTERRUPTED = "error: interrupted"
 # The config's sandbox modes that are not presets (see alr.config).
 _YOLO = "yolo"
 _CUSTOM = "custom"
+_YES_ANSWERS = ("y", "yes")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,9 +97,12 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return _install_skill()
 
     try:
+        # Before anything else a real run does, so no later refusal hides the question.
+        if _needs_config_setup(args):
+            return _set_up_config()
+
         tasks_file = resolve_dir(args.dir)
-        # A dry run writes nothing (requirement 9), so only a real run creates the folder.
-        config = load(create=not args.dry_run)
+        config = load()
         apply_sandbox_default(args, config.sandbox)
         answer = resolve_permissions(
             args.dir, args.sandbox_settings, args.yolo, args.sandbox
@@ -147,12 +164,77 @@ def _install_skill() -> int:
     return 0
 
 
+def _needs_config_setup(args: argparse.Namespace) -> bool:
+    """Report whether this is a real run on a machine with no config folder.
+
+    A dry run never asks and never writes (requirement 9).
+    """
+    return not args.dry_run and not config_folder_exists()
+
+
+def _set_up_config() -> int:
+    """Ask before creating the config folder, then stop so the user starts the run themselves.
+
+    Nothing is created without a typed yes. The questions and answers go to
+    stdout, so a refusal stays the first thing on stderr. Without a terminal
+    nobody can answer, so alr refuses instead of asking or writing.
+    """
+    folder = config_dir()
+    missing = f"the config setup is missing ({folder})"
+    if not _terminal_attached():
+        raise RefusedError(
+            CONFIG_SETUP_MISSING,
+            f"{missing}; run alr in a terminal once to create it",
+        )
+
+    print(_setup_notice(folder))
+    answer = _read_answer("Create them? [y/N] ")
+    if answer.strip().lower() not in _YES_ANSWERS:
+        print("Nothing was created.")
+        raise RefusedError(
+            CONFIG_SETUP_MISSING,
+            f"{missing}; run alr again and answer y to create it",
+        )
+
+    create_folder()
+    print(f"The configuration is set up in {folder}. Run alr again to start your run.")
+    return 0
+
+
+def _setup_notice(folder: Path) -> str:
+    """Say what setting up the configuration creates and where."""
+    paths = [folder, *(folder / name for name in default_file_names())]
+    listing = "\n".join(f"  {path}" for path in paths)
+    return f"alr needs to set up its configuration before it can run. It will create:\n{listing}"
+
+
+def _read_answer(prompt: str) -> str:
+    """Ask on the terminal and return the reply; the end of input counts as an empty reply.
+
+    The prompt is printed here and input() gets none: without the readline
+    module, input() writes its prompt to stderr, and a refusal must be the
+    first thing on stderr.
+    """
+    print(prompt, end="", flush=True)
+    try:
+        return input()
+    except EOFError:
+        # End the question's line, so the next message does not follow the prompt on it.
+        print()
+        return ""
+
+
+def _terminal_attached() -> bool:
+    """Report whether a person can answer: stdin and stdout are both terminals."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def wants_tui(args: argparse.Namespace) -> bool:
     """Report whether this run opens the full-screen view: a terminal, no --plain, no dry run."""
     if args.plain or args.dry_run:
         return False
 
-    return sys.stdin.isatty() and sys.stdout.isatty()
+    return _terminal_attached()
 
 
 def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int:
