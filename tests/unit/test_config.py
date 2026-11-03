@@ -1,6 +1,7 @@
 """config.yaml: parse and validate."""
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -439,23 +440,22 @@ def test_a_config_that_is_not_text_is_refused(tmp_path: Path) -> None:
     assert "cannot be read" in caught.value.message
 
 
-def test_two_loads_racing_both_succeed(tmp_path: Path) -> None:
+def test_two_loads_racing_both_succeed_and_keep_the_winners_edits(
+    tmp_path: Path,
+) -> None:
     folder = config_dir(tmp_path)
-
-    def other_alr_wins_a_prompt(message: str) -> None:
-        # The other process creates its file between our check and our copy.
-        (folder / "prompts").mkdir(parents=True)
-        (folder / "prompts" / "task_review.md").write_text(
-            "the other one's", encoding="utf-8"
-        )
-
-    config = load(tmp_path, create=True, say=other_alr_wins_a_prompt)
-
     review = folder / "prompts" / "task_review.md"
-    assert review.read_text(encoding="utf-8") == "the other one's"
-    assert (folder / "prompts" / "task_remediation.md").is_file()
-    assert (folder / "config.yaml").is_file()
+
+    def other_alr_wins_and_the_user_edits(message: str) -> None:
+        # The other process finishes its whole creation between our check and our rename.
+        load(tmp_path, create=True, say=collect([]))
+        review.write_text("edited after the other one's creation", encoding="utf-8")
+
+    config = load(tmp_path, create=True, say=other_alr_wins_and_the_user_edits)
+
+    assert review.read_text(encoding="utf-8") == "edited after the other one's creation"
     assert config.task_review_prompt == str(review)
+    assert sorted(path.name for path in folder.parent.iterdir()) == ["alr"]
 
 
 def test_the_default_prints_to_stderr(
@@ -468,24 +468,69 @@ def test_the_default_prints_to_stderr(
     assert str(config_dir(tmp_path)) in captured.err
 
 
-def test_a_failed_copy_never_leaves_a_config_without_its_prompts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def copy_files_then(
+    monkeypatch: pytest.MonkeyPatch, copies_allowed: int, then: Callable[[], None]
 ) -> None:
+    """Make the copy helper call `then` once `copies_allowed` copies are done."""
     real_copyfile = shutil.copyfile
     copies: list[str] = []
 
-    def copy_twice_then_fail(source: Path, target: Path) -> None:
-        if len(copies) == 2:
-            raise OSError(28, "No space left on device")
+    def copy_then_act(source: Path, target: Path) -> None:
+        if len(copies) == copies_allowed:
+            then()
 
         copies.append(Path(target).name)
         real_copyfile(source, target)
 
-    monkeypatch.setattr("alr.config.shutil.copyfile", copy_twice_then_fail)
+    monkeypatch.setattr("alr.config.shutil.copyfile", copy_then_act)
+
+
+def raise_disk_full() -> None:
+    raise OSError(28, "No space left on device")
+
+
+def raise_interrupt() -> None:
+    raise KeyboardInterrupt
+
+
+def test_a_failed_copy_leaves_no_folder_and_no_staging_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copy_files_then(monkeypatch, 2, raise_disk_full)
 
     with pytest.raises(RefusedError) as caught:
         load(tmp_path, create=True, say=collect([]))
 
     assert caught.value.reason == CONFIG_UNWRITABLE
     assert "No space left" in caught.value.message
-    assert not (config_dir(tmp_path) / "config.yaml").exists()
+    assert list((tmp_path / ".local").iterdir()) == []
+
+
+def test_an_interrupt_mid_copy_leaves_no_folder_and_no_staging_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copy_files_then(monkeypatch, 2, raise_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        load(tmp_path, create=True, say=collect([]))
+
+    assert list((tmp_path / ".local").iterdir()) == []
+
+
+def test_a_reader_never_sees_the_folder_before_it_is_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = config_dir(tmp_path)
+    real_copyfile = shutil.copyfile
+    seen: list[bool] = []
+
+    def look_before_each_copy(source: Path, target: Path) -> None:
+        seen.append(folder.exists())
+        real_copyfile(source, target)
+
+    monkeypatch.setattr("alr.config.shutil.copyfile", look_before_each_copy)
+
+    load(tmp_path, create=True, say=collect([]))
+
+    assert seen == [False] * len(DEFAULT_FILES)
+    assert (folder / "config.yaml").is_file()

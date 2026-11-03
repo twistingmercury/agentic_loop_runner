@@ -1,6 +1,6 @@
 """The user config folder, ~/.local/alr: create it on first run, then parse and validate config.yaml."""
 
-import os
+import errno
 import shutil
 import sys
 import tempfile
@@ -143,19 +143,37 @@ def _read_folder(folder: Path) -> Config:
 
 
 def _create_folder(folder: Path, say: Callable[[str], None]) -> None:
-    """Say what is about to be created, then create the folder with the default files."""
+    """Say what is about to be created, then create the folder with the default files.
+
+    The folder appears all at once or not at all, so a killed run or a second
+    alr starting at the same moment never sees it without its config.yaml.
+    """
     with as_file(files("alr") / "defaults") as source:
         names = _default_names(source)
         say(f"alr: first run: creating {folder} with {', '.join(names)}")
         try:
-            folder.mkdir(parents=True, exist_ok=True)
-            for name in names:
-                _copy_if_absent(source / name, folder / name)
+            folder.parent.mkdir(parents=True, exist_ok=True)
+            _create_all_at_once(source, names, folder)
         except OSError as error:
             raise RefusedError(
                 CONFIG_UNWRITABLE,
                 f"cannot create {folder}: {error.strerror or error}",
             ) from error
+
+
+def _create_all_at_once(source: Path, names: list[str], folder: Path) -> None:
+    """Build the folder in a staging folder beside it, then rename it into place.
+
+    The staging folder shares the target's parent so the rename stays on one
+    filesystem, which is what makes it a single step. It is removed whatever
+    happens, a KeyboardInterrupt included.
+    """
+    staging = Path(tempfile.mkdtemp(dir=folder.parent, prefix=".alr-create-"))
+    try:
+        _copy_defaults(source, names, staging)
+        _rename_unless_taken(staging, folder)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _default_names(source: Path) -> list[str]:
@@ -171,21 +189,25 @@ def _default_names(source: Path) -> list[str]:
     return names
 
 
-def _copy_if_absent(source: Path, target: Path) -> None:
-    """Copy a file into place unless one is already there.
+def _copy_defaults(source: Path, names: list[str], staging: Path) -> None:
+    """Copy every shipped file into the staging folder, making its subfolders."""
+    for name in names:
+        target = staging / name
+        target.parent.mkdir(exist_ok=True)
+        shutil.copyfile(source / name, target)
 
-    The copy goes through a temporary file beside the target, so a reader never
-    sees half a file, and the target is checked again just before the move, so
-    a second alr starting at the same time loses nothing.
+
+def _rename_unless_taken(staging: Path, folder: Path) -> None:
+    """Rename the staging folder to the target, accepting that another alr got there first.
+
+    The winner's folder is whole (it was renamed in the same way), so the
+    loser discards its copy and reads the winner's, which may hold edits.
     """
-    target.parent.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=target.parent, prefix=".create-") as staging:
-        staged = Path(staging) / target.name
-        shutil.copyfile(source, staged)
-        if target.exists():
-            return
-
-        os.replace(staged, target)
+    try:
+        staging.rename(folder)
+    except OSError as error:
+        if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+            raise
 
 
 def _refuse(path: Path, problem: str) -> RefusedError:
