@@ -98,11 +98,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 
     try:
         # Before anything else a real run does, so no later refusal hides the question.
-        if _needs_config_setup(args):
-            return _set_up_config()
-
-        if args.dry_run:
-            _refuse_missing_config_folder()
+        if not config_folder_exists():
+            return _handle_missing_config_folder(args.dry_run)
 
         tasks_file = resolve_dir(args.dir)
         config = load()
@@ -167,56 +164,44 @@ def _install_skill() -> int:
     return 0
 
 
-def _needs_config_setup(args: argparse.Namespace) -> bool:
-    """Report whether this is a real run on a machine with no config folder.
+def _handle_missing_config_folder(dry_run: bool) -> int:
+    """Offer the setup on a real run at a terminal, and refuse everywhere else.
 
-    A dry run never asks and never writes (requirement 9).
+    A dry run never asks and never writes (requirement 9), and without a
+    terminal nobody can answer, so both refuse instead of offering the setup.
     """
-    return not args.dry_run and not config_folder_exists()
+    if dry_run or not _terminal_attached():
+        raise _setup_missing("run alr in a terminal once to create it")
 
-
-def _refuse_missing_config_folder() -> None:
-    """Refuse a dry run when the config folder is missing, as a real run without a terminal does.
-
-    A dry run never asks and never writes, so it cannot offer the setup.
-    """
-    if config_folder_exists():
-        return
-
-    raise RefusedError(
-        CONFIG_SETUP_MISSING,
-        f"the config setup is missing ({config_dir()}); "
-        "run alr in a terminal once to create it",
-    )
+    return _set_up_config()
 
 
 def _set_up_config() -> int:
     """Ask before creating the config folder, then stop so the user starts the run themselves.
 
     Nothing is created without a typed yes. The questions and answers go to
-    stdout, so a refusal stays the first thing on stderr. Without a terminal
-    nobody can answer, so alr refuses instead of asking or writing.
+    stdout, so a refusal stays the first thing on stderr.
     """
-    folder = config_dir()
-    missing = f"the config setup is missing ({folder})"
-    if not _terminal_attached():
-        raise RefusedError(
-            CONFIG_SETUP_MISSING,
-            f"{missing}; run alr in a terminal once to create it",
-        )
-
     print(_setup_notice())
     answer = _read_answer("Create them? [y/N] ")
     if answer.strip().lower() not in _YES_ANSWERS:
         print("Nothing was created.")
-        raise RefusedError(
-            CONFIG_SETUP_MISSING,
-            f"{missing}; run alr again and answer y to create it",
-        )
+        raise _setup_missing("run alr again and answer y to create it")
 
     create_folder()
-    print(f"The configuration is set up in {folder}. Run alr again to start your run.")
+    print(
+        f"The configuration is set up in {config_dir()}. "
+        "Run alr again to start your run."
+    )
     return 0
+
+
+def _setup_missing(advice: str) -> RefusedError:
+    """Build the refusal for a config folder that is not set up, ending in what to do about it."""
+    return RefusedError(
+        CONFIG_SETUP_MISSING,
+        f"the config setup is missing ({config_dir()}); {advice}",
+    )
 
 
 def _setup_notice() -> str:

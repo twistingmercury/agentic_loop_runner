@@ -2,7 +2,7 @@
 
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -17,7 +17,12 @@ from alr.config import (
     load,
     parse,
 )
-from alr.errors import CONFIG_UNWRITABLE, INVALID_CONFIG, RefusedError
+from alr.errors import (
+    CONFIG_SETUP_MISSING,
+    CONFIG_UNWRITABLE,
+    INVALID_CONFIG,
+    RefusedError,
+)
 
 DOCUMENTED = """\
 version: 1.0.0
@@ -372,6 +377,16 @@ def test_load_reads_an_existing_folder(tmp_path: Path) -> None:
     assert config.task_review_max_rounds == 4
 
 
+def test_load_names_a_missing_config_folder(tmp_path: Path) -> None:
+    with pytest.raises(RefusedError) as caught:
+        load(tmp_path)
+
+    assert caught.value.reason == CONFIG_SETUP_MISSING
+    assert (
+        caught.value.message == f"the config folder is missing ({config_dir(tmp_path)})"
+    )
+
+
 # Both look at the folder first, and a run asks config_folder_exists before it loads.
 LOOKS_AT_THE_FOLDER = [load, config_folder_exists]
 
@@ -428,7 +443,7 @@ def test_an_unwritable_home_is_refused(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def locked_folder(tmp_path: Path):
+def locked_folder(tmp_path: Path) -> Iterator[Path]:
     """A folder with no permissions, restored afterwards so pytest can clean up."""
     if os.geteuid() == 0:
         pytest.skip("root can search any folder")

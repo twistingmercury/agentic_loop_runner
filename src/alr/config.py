@@ -10,7 +10,13 @@ from typing import Any
 
 import yaml
 
-from alr.errors import CONFIG_UNWRITABLE, INVALID_CONFIG, RefusedError, quote
+from alr.errors import (
+    CONFIG_SETUP_MISSING,
+    CONFIG_UNWRITABLE,
+    INVALID_CONFIG,
+    RefusedError,
+    quote,
+)
 
 CONFIG_FILE = "config.yaml"
 
@@ -122,9 +128,10 @@ def load(home: Path | None = None) -> Config:
 
     This never writes. Callers check the folder exists first: a real run asks
     before creating it (see create_folder) and a dry run refuses without it.
+    A folder that is gone anyway, or a file or link in its place, is refused.
     """
     folder = config_dir(home)
-    _folder_exists(folder)
+    _refuse_unless_folder_exists(folder)
     return _read_folder(folder)
 
 
@@ -176,6 +183,17 @@ def parse(text: str, folder: Path) -> Config:
             remediation, "task_remediation", folder, path
         ),
     )
+
+
+def _refuse_unless_folder_exists(folder: Path) -> None:
+    """Refuse a missing config folder by name, so a missing config.yaml is never blamed for it.
+
+    A file or link in the folder's place is refused by _folder_exists.
+    """
+    if _folder_exists(folder):
+        return
+
+    raise RefusedError(CONFIG_SETUP_MISSING, f"the config folder is missing ({folder})")
 
 
 def _folder_exists(folder: Path) -> bool:
