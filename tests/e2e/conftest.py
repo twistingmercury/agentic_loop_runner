@@ -3,6 +3,7 @@
 import os
 import sys
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -66,3 +67,19 @@ def _isolate_git(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Test")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "test@example.com")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(repo.parent))
+
+
+@pytest.fixture(autouse=True)
+def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """Give every test an empty home folder of its own.
+
+    A real run creates ~/.local/alr on first run, so a shared home would make
+    the first test to run see a first-run line that no later test sees.
+
+    This uses its own MonkeyPatch, not the monkeypatch fixture, so it does not
+    change when a test's own patches are undone.
+    """
+    folder = tmp_path_factory.mktemp("home")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("HOME", str(folder))
+        yield folder

@@ -969,3 +969,79 @@ def test_a_default_without_dir_never_reads_the_current_folder(
     cli.apply_sandbox_default(args, SandboxDefault("yolo", ""))
 
     assert args.yolo is True
+
+
+BAD_CONFIG = "version: 1.0.0\nnot_a_key: 1\n"
+YOLO_CONFIG = """\
+version: 1.0.0
+defaults:
+  sandbox:
+    permissiveness:
+      default: yolo
+  prompts:
+    task_review:
+      prompt: ./prompts/task_review.md
+      max_task_review_rounds: 1
+    task_remediation:
+      prompt: ./prompts/task_remediation.md
+"""
+
+
+def _write_config(home: Path, text: str) -> None:
+    """Replace config.yaml in the folder the home fixture already created."""
+    (home / ".local" / "alr" / "config.yaml").write_text(text, encoding="utf-8")
+
+
+def test_a_real_run_creates_the_config_and_says_so(
+    folder: Path,
+    fresh_home: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = cli.main(["-d", str(folder), "--yolo"])
+
+    captured = capsys.readouterr()
+    config_folder = fresh_home / ".local" / "alr"
+    assert code == 0
+    assert (config_folder / "config.yaml").is_file()
+    assert f"creating {config_folder}" in captured.err
+    assert "creating" not in captured.out
+    assert len(sessions) == 1
+
+
+def test_dry_run_creates_nothing(folder: Path, fresh_home: Path) -> None:
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+    assert not (fresh_home / ".local").exists()
+
+
+@pytest.mark.parametrize("flag", ["--version", "--install-skill"])
+def test_version_and_install_skill_do_not_load_the_config(
+    flag: str, fresh_home: Path
+) -> None:
+    cli.main([flag])
+
+    assert not (fresh_home / ".local").exists()
+
+
+def test_a_bad_config_refuses_with_exit_3_before_any_task(
+    folder: Path,
+    home: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_config(home, BAD_CONFIG)
+
+    code = cli.main(["-d", str(folder), "--yolo"])
+
+    assert code == 3
+    assert capsys.readouterr().err.startswith("error: refused: invalid-config: ")
+    assert sessions == []
+
+
+def test_a_config_default_reaches_the_run(
+    folder: Path, home: Path, sessions: list[list[str]]
+) -> None:
+    _write_config(home, YOLO_CONFIG)
+
+    assert cli.main(["-d", str(folder)]) == 0
+    assert sessions == [["--dangerously-skip-permissions"]]

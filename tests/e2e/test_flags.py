@@ -8,6 +8,7 @@ from e2e_helpers import (
     Result,
     run_alr,
     run_args,
+    without_first_run_line,
     write_tasks_yaml,
 )
 
@@ -71,7 +72,10 @@ def test_non_terminal_defaults_to_plain(tmp_path: Path, fake_claude: Path) -> No
     default, default_saved = run_two_tasks(tmp_path / "default")
 
     assert plain.code == 0, plain
-    assert default == plain
+    assert default.code == plain.code
+    assert default.out == plain.out
+    # Both runs share one home, so only the first one prints the first-run line.
+    assert without_first_run_line(default.err) == without_first_run_line(plain.err)
     assert default_saved == plain_saved
 
 
@@ -81,7 +85,7 @@ def test_plain_is_accepted_and_the_run_is_plain(
     res, saved = run_two_tasks(tmp_path / "plain", "--plain")
 
     assert res.code == 0, res
-    assert res.err == ""
+    assert without_first_run_line(res.err) == ""
     # Plain output: each prompt echoed, then the session's own result line.
     assert res.out.count('{"state":"completed","error":""}\n') == 2
     assert "1: First task\n\nDo the first thing.\n" in res.out

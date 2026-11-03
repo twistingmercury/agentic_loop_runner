@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from alr.config import SandboxDefault
+from alr.config import SandboxDefault, load
 from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
 from alr.engine.sandbox import (
     bypass_args,
@@ -84,6 +84,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 
     try:
         tasks_file = resolve_dir(args.dir)
+        # A dry run writes nothing (requirement 9), so only a real run creates the folder.
+        config = load(create=not args.dry_run)
+        apply_sandbox_default(args, config.sandbox)
         answer = resolve_permissions(
             args.dir, args.sandbox_settings, args.yolo, args.sandbox
         )
@@ -301,8 +304,7 @@ def apply_sandbox_default(
     large default needs a run folder to write its preset into, so with no
     --dir it fills in nothing and the view asks.
 
-    Nothing calls this yet: Task 4 of the config directory plan runs it at
-    startup, before resolve_permissions.
+    _main runs this at startup, before resolve_permissions.
     """
     if default is None:
         return

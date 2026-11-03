@@ -79,6 +79,23 @@ def run_alr(
     return Result(done.returncode, done.stdout, done.stderr)
 
 
+FIRST_RUN_PREFIX = "alr: first run: "
+
+
+def without_first_run_line(err: str) -> str:
+    """Drop the line a real run prints on stderr when it creates the config folder.
+
+    Every test gets a new home folder, so every real run prints it. Tests about
+    something else look past it; test_config_dir.py tests the line itself.
+    """
+    kept = [
+        line
+        for line in err.splitlines(keepends=True)
+        if not line.startswith(FIRST_RUN_PREFIX)
+    ]
+    return "".join(kept)
+
+
 def write_tasks_yaml(folder: Path, content: str) -> Path:
     path = folder / "tasks.yaml"
     path.write_text(content, encoding="utf-8")

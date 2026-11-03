@@ -9,6 +9,7 @@ from e2e_helpers import (
     run_args,
     run_dry_run,
     shared_block,
+    without_first_run_line,
     write_tasks_yaml,
 )
 
@@ -149,7 +150,8 @@ def test_dry_run_refuses_a_dangling_logs_symlink_like_a_real_run(
     assert dry.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
     assert dry.out == ""
     assert real.code == 3, real
-    assert real.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
+    real_first_line = without_first_run_line(real.err).splitlines()[0]
+    assert real_first_line.startswith("error: refused: log-unwritable: ")
     assert "File exists" in real.err
     assert "File exists" in dry.err
     assert logs.is_symlink()
