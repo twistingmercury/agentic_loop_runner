@@ -32,6 +32,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from alr import cli
 from alr.engine import proc
 from alr.engine.presets import Preset, preset_path, render, switches_for
 from alr.engine.stop import Stop
@@ -760,6 +761,46 @@ async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
     app.screen.query_one("#path", Input).value = str(folder)
     await pilot.click("#ok")
     await until(lambda: not isinstance(app.screen, ModalScreen))
+
+
+async def test_a_picked_folders_sandbox_json_beats_a_yolo_config_default(
+    work_dir: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = home / ".local" / "alr" / "config.yaml"
+    config.write_text(
+        "version: 1.0.0\n"
+        "defaults:\n"
+        "  sandbox:\n"
+        "    permissiveness:\n"
+        "      default: yolo\n"
+        "  prompts:\n"
+        "    task_review:\n"
+        "      prompt: ./prompts/task_review.md\n"
+        "      max_task_review_rounds: 1\n"
+        "    task_remediation:\n"
+        "      prompt: ./prompts/task_remediation.md\n",
+        encoding="utf-8",
+    )
+    seen: list[RunSettings] = []
+
+    def run_app(settings: RunSettings) -> int:
+        seen.append(settings)
+        return 0
+
+    monkeypatch.setattr("alr.cli.wants_tui", lambda args: True)
+    monkeypatch.setattr("alr.cli.run_app", run_app)
+    cli.main([])
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    sandbox_file = write_file(work_dir / "run" / "sandbox.json", "{}")
+    app = AlrApp(seen[0])
+    async with app.run_test() as pilot:
+        await until(lambda: isinstance(app.screen, FolderDialog))
+        app.screen.query_one("#path", Input).value = str(Path(tasks_file).parent)
+        await pilot.click("#ok")
+        await until(lambda: not isinstance(app.screen, ModalScreen))
+
+        assert app.settings.permissions is Permissions.SANDBOX
+        assert app.settings.sandbox_file == sandbox_file
 
 
 @pytest.mark.usefixtures("fake_claude")

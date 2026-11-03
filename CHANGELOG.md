@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A config folder, `~/.local/alr`, with a `config.yaml` and the prompt files in
+  `prompts/`. The first time you run alr on a machine without it, alr lists what
+  it would create and asks `Create them? [y/N]`. Answer `y` and it creates the
+  folder and stops, so you run alr again to start your run. Answer anything else,
+  run without a terminal, or use `--dry-run`, and alr refuses with
+  `config-setup-missing` and creates nothing. So a script on a machine nobody has
+  set up gets that refusal, not defaults. Later runs never overwrite the files,
+  and the folder is created all at once, so it never exists half made. A key alr
+  does not know, a bad value, or a `version` newer than 1.x is refused as
+  `invalid-config`; so is a folder alr cannot create, as `config-unwritable`.
+  `config.yaml` can set a default sandbox (`tight`, `large`, `yolo`, or `custom`
+  with a `sandbox_file`) under `defaults.sandbox`; the file alr ships leaves it
+  out, so nothing changes until you add it. It applies only when you pass `--dir`
+  and no permission flag, and the run folder has no `sandbox.json`; without
+  `--dir` the permissions dialog asks, with Tight pre-selected. The order is:
+  command-line flag, then the run folder, then `config.yaml`, then alr's own
+  default. The prompt paths and the review cap are read and checked now but
+  nothing uses them yet. (#36)
+
 ## [0.3.0] - 2026-11-02
 
 ### Added

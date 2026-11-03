@@ -1,0 +1,8 @@
+version: 1.0.0
+defaults:
+  prompts:
+    task_review:
+      prompt: ./prompts/task_review.md
+      max_task_review_rounds: 1
+    task_remediation:
+      prompt: ./prompts/task_remediation.md

@@ -11,6 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from alr.config import (
+    SandboxDefault,
+    config_dir,
+    config_folder_exists,
+    create_folder,
+    load,
+    paths_to_create,
+)
 from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
 from alr.engine.sandbox import (
     bypass_args,
@@ -19,7 +27,13 @@ from alr.engine.sandbox import (
     settings_args,
 )
 from alr.engine.stop import Stop
-from alr.errors import AlrError, RunCancelledError, UsageError
+from alr.errors import (
+    CONFIG_SETUP_MISSING,
+    AlrError,
+    RefusedError,
+    RunCancelledError,
+    UsageError,
+)
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
 from alr.skillinstall import install
@@ -28,6 +42,10 @@ from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
 
 _INTERRUPTED = "error: interrupted"
+# The config's sandbox modes that are not presets (see alr.config).
+_YOLO = "yolo"
+_CUSTOM = "custom"
+_YES_ANSWERS = ("y", "yes")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,7 +97,13 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return _install_skill()
 
     try:
+        # Before anything else a real run does, so no later refusal hides the question.
+        if not config_folder_exists():
+            return _handle_missing_config_folder(args.dry_run)
+
         tasks_file = resolve_dir(args.dir)
+        config = load()
+        apply_sandbox_default(args, config.sandbox)
         answer = resolve_permissions(
             args.dir, args.sandbox_settings, args.yolo, args.sandbox
         )
@@ -140,12 +164,79 @@ def _install_skill() -> int:
     return 0
 
 
+def _handle_missing_config_folder(dry_run: bool) -> int:
+    """Offer the setup on a real run at a terminal, and refuse everywhere else.
+
+    A dry run never asks and never writes (requirement 9), and without a
+    terminal nobody can answer, so both refuse instead of offering the setup.
+    """
+    if dry_run or not _terminal_attached():
+        raise _setup_missing("run alr in a terminal once to create it")
+
+    return _set_up_config()
+
+
+def _set_up_config() -> int:
+    """Ask before creating the config folder, then stop so the user starts the run themselves.
+
+    Nothing is created without a typed yes. The questions and answers go to
+    stdout, so a refusal stays the first thing on stderr.
+    """
+    print(_setup_notice())
+    answer = _read_answer("Create them? [y/N] ")
+    if answer.strip().lower() not in _YES_ANSWERS:
+        print("Nothing was created.")
+        raise _setup_missing("run alr again and answer y to create it")
+
+    create_folder()
+    print(
+        f"The configuration is set up in {config_dir()}. "
+        "Run alr again to start your run."
+    )
+    return 0
+
+
+def _setup_missing(advice: str) -> RefusedError:
+    """Build the refusal for a config folder that is not set up, ending in what to do about it."""
+    return RefusedError(
+        CONFIG_SETUP_MISSING,
+        f"the config setup is missing ({config_dir()}); {advice}",
+    )
+
+
+def _setup_notice() -> str:
+    """Say every folder and file setting up the configuration creates, and where."""
+    listing = "\n".join(f"  {path}" for path in paths_to_create())
+    return f"alr needs to set up its configuration before it can run. It will create:\n{listing}"
+
+
+def _read_answer(prompt: str) -> str:
+    """Ask on the terminal and return the reply; the end of input counts as an empty reply.
+
+    The prompt is printed here and input() gets none: without the readline
+    module, input() writes its prompt to stderr, and a refusal must be the
+    first thing on stderr.
+    """
+    print(prompt, end="", flush=True)
+    try:
+        return input()
+    except EOFError:
+        # End the question's line, so the next message does not follow the prompt on it.
+        print()
+        return ""
+
+
+def _terminal_attached() -> bool:
+    """Report whether a person can answer: stdin and stdout are both terminals."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def wants_tui(args: argparse.Namespace) -> bool:
     """Report whether this run opens the full-screen view: a terminal, no --plain, no dry run."""
     if args.plain or args.dry_run:
         return False
 
-    return sys.stdin.isatty() and sys.stdout.isatty()
+    return _terminal_attached()
 
 
 def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int:
@@ -284,6 +375,51 @@ def resolve_permissions(
         return Answer(sandbox_settings, skip, None)
 
     return Answer(folder_sandbox(dir) or "", skip, None)
+
+
+def apply_sandbox_default(
+    args: argparse.Namespace, default: SandboxDefault | None
+) -> None:
+    """Fill in the permission flag nobody passed from the config's sandbox default.
+
+    It sets the same fields the real flags set, so the dry run, the view, and
+    start need no change. A flag wins, and so does the run folder's
+    sandbox.json; with either, or with no default, nothing changes. With no
+    --dir there is no run folder to look in yet, and the folder the user picks
+    in the view may hold its own sandbox.json, so no mode fills in anything
+    and the view asks, with Tight pre-selected.
+
+    _main runs this at startup, before resolve_permissions.
+    """
+    if default is None:
+        return
+
+    if not args.dir:
+        return
+
+    if _permission_chosen(args):
+        return
+
+    if default.mode == _YOLO:
+        args.yolo = True
+        return
+
+    if default.mode == _CUSTOM:
+        args.sandbox_settings = default.sandbox_file
+        return
+
+    args.sandbox = default.mode
+
+
+def _permission_chosen(args: argparse.Namespace) -> bool:
+    """Report whether a flag or the run folder's sandbox.json already chose the permissions.
+
+    The caller has checked that --dir was given.
+    """
+    if args.sandbox is not None or args.sandbox_settings or args.yolo:
+        return True
+
+    return folder_sandbox(args.dir) is not None
 
 
 def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> Answer:

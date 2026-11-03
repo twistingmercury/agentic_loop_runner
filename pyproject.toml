@@ -36,4 +36,4 @@ extend-exclude = ["docs"]
 select = ["F", "N"]
 
 [tool.setuptools.package-data]
-alr = ["skills/**/*"]
+alr = ["skills/**/*", "defaults/**/*"]

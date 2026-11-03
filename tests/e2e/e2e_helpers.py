@@ -12,11 +12,13 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pexpect
 import pytest
 import yaml
 
@@ -77,6 +79,64 @@ def run_alr(
         stdin=subprocess.DEVNULL,
     )
     return Result(done.returncode, done.stdout, done.stderr)
+
+
+SETUP_PROMPT = "[y/N] "
+YES = "y\n"
+NO = "n\n"
+# Ctrl-D at an empty line ends the input.
+END_OF_INPUT = "\x04"
+
+# Runs the command that follows the file name, with its stderr sent to that file.
+_STDERR_TO_FILE = 'stderr_file=$1; shift; exec "$@" 2>"$stderr_file"'
+
+
+@dataclass(frozen=True)
+class TerminalResult:
+    """What a run with a terminal showed: the terminal's text, and stderr kept apart."""
+
+    code: int
+    shown: str
+    err: str
+
+
+def run_alr_in_terminal(
+    *args: str,
+    keys: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: float = 30.0,
+) -> TerminalResult:
+    """Run the real alr command with a terminal on stdin and stdout.
+
+    With keys, they are typed once the setup question is on screen. Without,
+    nothing is typed, so a run that asked anyway would wait and time out.
+    A terminal mixes stderr into what it shows, so stderr goes to a file:
+    tests need to see what came first on it.
+    """
+    with tempfile.TemporaryDirectory() as folder:
+        stderr_file = Path(folder) / "stderr"
+        child = pexpect.spawn(
+            "/bin/sh",
+            ["-c", _STDERR_TO_FILE, "sh", str(stderr_file), find_alr(), *args],
+            env={**os.environ, **(env or {})},
+            encoding="utf-8",
+            timeout=timeout,
+        )
+        shown = ""
+        if keys is not None:
+            child.expect_exact(SETUP_PROMPT)
+            shown = child.before + child.after
+            child.send(keys)
+
+        child.expect(pexpect.EOF)
+        shown += child.before
+        child.close()
+        err = stderr_file.read_text(encoding="utf-8")
+
+    assert child.exitstatus is not None, (
+        f"alr was stopped by signal {child.signalstatus}"
+    )
+    return TerminalResult(child.exitstatus, shown.replace("\r\n", "\n"), err)
 
 
 def write_tasks_yaml(folder: Path, content: str) -> Path:
