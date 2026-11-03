@@ -185,9 +185,11 @@ def test_dry_run_in_a_terminal_refuses_without_asking_or_creating(
 
     res = run_alr_in_terminal("--dry-run", f"--dir={tmp_path}")
 
-    assert res.code != 0, res
+    assert res.code == 3, res
     assert SETUP_PROMPT not in res.shown
-    assert "config-setup-missing" in res.err
+    assert res.shown == ""
+    assert res.err.startswith(REFUSED)
+    assert len(res.err.splitlines()) == 1
     assert list(home.iterdir()) == []
 
 
@@ -198,8 +200,10 @@ def test_dry_run_without_a_terminal_refuses_and_creates_nothing(
 
     res = run_alr("--dry-run", f"--dir={tmp_path}")
 
-    assert res.code != 0, res
-    assert "config-setup-missing" in res.err
+    assert res.code == 3, res
+    assert res.out == ""
+    assert res.err.startswith(REFUSED)
+    assert len(res.err.splitlines()) == 1
     assert list(home.iterdir()) == []
 
 
