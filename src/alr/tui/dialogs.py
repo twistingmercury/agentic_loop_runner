@@ -114,11 +114,15 @@ def _failed_line(task: Task) -> str:
     return f"{line}: {task.error.splitlines()[0]}"
 
 
-class SummaryDialog(_Dialog[None]):
-    """How the run ended; the app stays open behind it."""
+class SummaryDialog(_Dialog[bool]):
+    """How the run ended. After a clean run its button is Exit and answers True; otherwise Close keeps the app open."""
+
+    # Enter acts at once, so a clean run needs no tab to reach Exit.
+    AUTO_FOCUS = "#close"
 
     def __init__(self, outcome: str, seconds: float, error: str | None) -> None:
         super().__init__()
+        self._exits = outcome == "done"
         self._text = f"Run {outcome} in {format_elapsed(seconds)}"
         if error and outcome != "done":
             self._text += f"\n{error}"
@@ -127,10 +131,10 @@ class SummaryDialog(_Dialog[None]):
         with Vertical(id="dialog"):
             yield Label("Run finished")
             yield Static(self._text, id="message")
-            yield Button("Close", id="close")
+            yield Button("Exit" if self._exits else "Close", id="close")
 
     def on_button_pressed(self) -> None:
-        self.dismiss(None)
+        self.dismiss(self._exits)
 
 
 class FileViewer(_Dialog[None]):

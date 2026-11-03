@@ -1938,6 +1938,39 @@ async def test_a_clean_run_finishes_done_with_a_summary(work_dir: Path) -> None:
 
 
 @pytest.mark.usefixtures("fake_claude")
+async def test_enter_on_a_clean_runs_summary_exits_alr_with_code_0(
+    work_dir: Path,
+) -> None:
+    app = AlrApp(_settings(work_dir, WORKING_TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        await pilot.press("enter")
+        await until(lambda: not app.is_running)
+
+    assert app.exit_code == 0
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_enter_on_a_failed_runs_summary_closes_it_and_keeps_alr_open(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_module, "run", _crashing_run)
+    app = AlrApp(_settings(work_dir, WORKING_TASKS))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.screen.query("#close"))
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.is_running
+        assert not app.screen.query("#close")
+        assert app.exit_code == 1
+
+
+@pytest.mark.usefixtures("fake_claude")
 async def test_a_failed_check_on_start_shows_an_error_and_stays_ready(
     work_dir: Path,
 ) -> None:

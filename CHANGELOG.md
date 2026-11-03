@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The e2e tests run in parallel, one worker per CPU, so `./build/build.sh` is
   faster (the e2e step went from 82 seconds to 7).
+- The run summary focuses its button. After a clean run the button is Exit and
+  Enter ends alr; after a failed or stopped run it is Close and the app stays
+  open.
 
 ## [0.4.0] - 2026-11-03
 
