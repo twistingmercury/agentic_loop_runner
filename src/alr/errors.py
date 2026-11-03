@@ -13,6 +13,7 @@ FAILED_TASKS_MESSAGE = (
 )
 
 FAILED_TASKS = "failed-tasks"
+CONFIG_UNWRITABLE = "config-unwritable"
 INVALID_CONFIG = "invalid-config"
 INVALID_TASK_FILE = "invalid-task-file"
 INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"

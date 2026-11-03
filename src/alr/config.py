@@ -1,12 +1,18 @@
-"""The user config file, ~/.local/alr/config.yaml: parse and validate it."""
+"""The user config folder, ~/.local/alr: create it on first run, then parse and validate config.yaml."""
 
+import os
+import shutil
+import sys
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from alr.errors import INVALID_CONFIG, RefusedError, quote
+from alr.errors import CONFIG_UNWRITABLE, INVALID_CONFIG, RefusedError, quote
 
 CONFIG_FILE = "config.yaml"
 
@@ -47,6 +53,34 @@ def config_dir(home: Path | None = None) -> Path:
     return (home or Path.home()) / ".local" / "alr"
 
 
+def print_to_stderr(message: str) -> None:
+    """Say what alr is about to do on stderr, so stdout stays the run's own output."""
+    print(message, file=sys.stderr)
+
+
+def load(
+    home: Path | None = None,
+    *,
+    create: bool,
+    say: Callable[[str], None] = print_to_stderr,
+) -> Config:
+    """Read the config, creating the folder with its default files on first run.
+
+    With create=False (a dry run never writes, requirement 9) a missing folder
+    is not created; the copy shipped in the package is read instead.
+    """
+    folder = config_dir(home)
+    _refuse_foreign(folder)
+    if folder.exists():
+        return _read_folder(folder)
+
+    if not create:
+        return _read_packaged()
+
+    _create_folder(folder, say)
+    return _read_folder(folder)
+
+
 def parse(text: str, folder: Path) -> Config:
     """Turn config.yaml's text into a Config, refusing anything alr does not understand.
 
@@ -74,6 +108,84 @@ def parse(text: str, folder: Path) -> Config:
             remediation, "task_remediation", folder, path
         ),
     )
+
+
+def _refuse_foreign(folder: Path) -> None:
+    """Never touch what is not a plain folder: the user put a link or file there on purpose."""
+    if folder.is_symlink():
+        raise RefusedError(INVALID_CONFIG, f"{folder} is a symlink; remove it yourself")
+
+    if folder.exists() and not folder.is_dir():
+        raise RefusedError(INVALID_CONFIG, f"{folder} is a file; remove it yourself")
+
+
+def _read_packaged() -> Config:
+    """Read the config shipped in the package, for a run that must not write."""
+    with as_file(files("alr") / "defaults") as source:
+        return _read_folder(source)
+
+
+def _read_folder(folder: Path) -> Config:
+    """Read the config.yaml inside a folder, which must already hold one."""
+    path = folder / CONFIG_FILE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise _refuse(
+            path,
+            "the file is missing; restore it, or move the folder away "
+            "so alr can create it again",
+        ) from error
+    except (OSError, UnicodeDecodeError) as error:
+        raise _refuse(path, f"cannot be read: {error}") from error
+
+    return parse(text, folder)
+
+
+def _create_folder(folder: Path, say: Callable[[str], None]) -> None:
+    """Say what is about to be created, then create the folder with the default files."""
+    with as_file(files("alr") / "defaults") as source:
+        names = _default_names(source)
+        say(f"alr: first run: creating {folder} with {', '.join(names)}")
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            for name in names:
+                _copy_if_absent(source / name, folder / name)
+        except OSError as error:
+            raise RefusedError(
+                CONFIG_UNWRITABLE,
+                f"cannot create {folder}: {error.strerror or error}",
+            ) from error
+
+
+def _default_names(source: Path) -> list[str]:
+    """List the shipped files relative to their folder, config.yaml last.
+
+    Copying config.yaml last means a folder holding one never lacks the prompt
+    files it points at.
+    """
+    found = (path for path in source.rglob("*") if path.is_file())
+    names = sorted(path.relative_to(source).as_posix() for path in found)
+    names.remove(CONFIG_FILE)
+    names.append(CONFIG_FILE)
+    return names
+
+
+def _copy_if_absent(source: Path, target: Path) -> None:
+    """Copy a file into place unless one is already there.
+
+    The copy goes through a temporary file beside the target, so a reader never
+    sees half a file, and the target is checked again just before the move, so
+    a second alr starting at the same time loses nothing.
+    """
+    target.parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=target.parent, prefix=".create-") as staging:
+        staged = Path(staging) / target.name
+        shutil.copyfile(source, staged)
+        if target.exists():
+            return
+
+        os.replace(staged, target)
 
 
 def _refuse(path: Path, problem: str) -> RefusedError:

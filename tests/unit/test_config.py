@@ -1,11 +1,12 @@
 """config.yaml: parse and validate."""
 
+import shutil
 from pathlib import Path
 
 import pytest
 
-from alr.config import Config, SandboxDefault, config_dir, parse
-from alr.errors import INVALID_CONFIG, RefusedError
+from alr.config import Config, SandboxDefault, config_dir, load, parse
+from alr.errors import CONFIG_UNWRITABLE, INVALID_CONFIG, RefusedError
 
 DOCUMENTED = """\
 version: 1.0.0
@@ -266,3 +267,225 @@ def test_parse_refuses(tmp_path: Path, text: str, problem: str) -> None:
     assert caught.value.reason == INVALID_CONFIG
     assert str(folder / "config.yaml") in caught.value.message
     assert problem in caught.value.message
+
+
+DEFAULT_FILES = ("config.yaml", "prompts/task_review.md", "prompts/task_remediation.md")
+
+
+def collect(said: list[str]):
+    """Return a `say` callback that records what it is told."""
+
+    def say(message: str) -> None:
+        said.append(message)
+
+    return say
+
+
+def test_first_run_says_then_creates(tmp_path: Path) -> None:
+    said: list[str] = []
+    folder_seen_when_said: list[bool] = []
+
+    def say(message: str) -> None:
+        said.append(message)
+        folder_seen_when_said.append(config_dir(tmp_path).exists())
+
+    config = load(tmp_path, create=True, say=say)
+
+    folder = config_dir(tmp_path)
+    assert len(said) == 1
+    assert str(folder) in said[0]
+    for name in DEFAULT_FILES:
+        assert name in said[0]
+        assert (folder / name).is_file()
+    assert folder_seen_when_said == [False]
+    assert config.sandbox is None
+    assert config.task_review_max_rounds == 1
+    assert config.task_review_prompt == str(folder / "prompts" / "task_review.md")
+
+
+def test_first_run_creates_a_missing_dot_local(tmp_path: Path) -> None:
+    assert not (tmp_path / ".local").exists()
+
+    load(tmp_path, create=True, say=collect([]))
+
+    assert (tmp_path / ".local" / "alr" / "config.yaml").is_file()
+
+
+def test_first_run_leaves_no_staging_files_behind(tmp_path: Path) -> None:
+    load(tmp_path, create=True, say=collect([]))
+
+    folder = config_dir(tmp_path)
+    left = sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*"))
+    assert left == [
+        "config.yaml",
+        "prompts",
+        "prompts/task_remediation.md",
+        "prompts/task_review.md",
+    ]
+
+
+def test_second_run_says_nothing_and_changes_nothing(tmp_path: Path) -> None:
+    load(tmp_path, create=True, say=collect([]))
+    prompt = config_dir(tmp_path) / "prompts" / "task_review.md"
+    prompt.write_text("my own review prompt", encoding="utf-8")
+    said: list[str] = []
+
+    load(tmp_path, create=True, say=collect(said))
+
+    assert said == []
+    assert prompt.read_text(encoding="utf-8") == "my own review prompt"
+
+
+def test_create_false_writes_nothing(tmp_path: Path) -> None:
+    said: list[str] = []
+
+    config = load(tmp_path, create=False, say=collect(said))
+
+    assert said == []
+    assert list(tmp_path.iterdir()) == []
+    assert config.task_review_max_rounds == 1
+    assert Path(config.task_review_prompt).is_file()
+    assert Path(config.task_remediation_prompt).is_file()
+
+
+def test_create_false_reads_an_existing_folder(tmp_path: Path) -> None:
+    load(tmp_path, create=True, say=collect([]))
+    config_file = config_dir(tmp_path) / "config.yaml"
+    config_file.write_text(
+        config_file.read_text(encoding="utf-8").replace(
+            "max_task_review_rounds: 1", "max_task_review_rounds: 4"
+        ),
+        encoding="utf-8",
+    )
+
+    config = load(tmp_path, create=False, say=collect([]))
+
+    assert config.task_review_max_rounds == 4
+
+
+def test_a_file_at_the_folder_is_refused_and_kept(tmp_path: Path) -> None:
+    folder = config_dir(tmp_path)
+    folder.parent.mkdir()
+    folder.write_text("precious", encoding="utf-8")
+    said: list[str] = []
+
+    with pytest.raises(RefusedError) as caught:
+        load(tmp_path, create=True, say=collect(said))
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert str(folder) in caught.value.message
+    assert "is a file; remove it yourself" in caught.value.message
+    assert said == []
+    assert folder.read_text(encoding="utf-8") == "precious"
+
+
+@pytest.mark.parametrize("create", [True, False])
+def test_a_symlink_at_the_folder_is_refused_and_kept(
+    tmp_path: Path, create: bool
+) -> None:
+    # A complete config folder, so only the link itself can cause the refusal.
+    elsewhere = tmp_path / "elsewhere"
+    load(elsewhere, create=True, say=collect([]))
+    real = config_dir(elsewhere)
+    home = tmp_path / "home"
+    folder = config_dir(home)
+    folder.parent.mkdir(parents=True)
+    folder.symlink_to(real)
+    before = sorted(path.name for path in real.iterdir())
+
+    with pytest.raises(RefusedError) as caught:
+        load(home, create=create, say=collect([]))
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert "is a symlink; remove it yourself" in caught.value.message
+    assert folder.is_symlink()
+    assert sorted(path.name for path in real.iterdir()) == before
+
+
+def test_an_unwritable_home_is_refused(tmp_path: Path) -> None:
+    (tmp_path / ".local").write_text("in the way", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        load(tmp_path, create=True, say=collect([]))
+
+    assert caught.value.reason == CONFIG_UNWRITABLE
+    assert str(config_dir(tmp_path)) in caught.value.message
+    assert (tmp_path / ".local").read_text(encoding="utf-8") == "in the way"
+
+
+def test_an_existing_folder_without_config_is_refused(tmp_path: Path) -> None:
+    folder = config_dir(tmp_path)
+    folder.mkdir(parents=True)
+    said: list[str] = []
+
+    with pytest.raises(RefusedError) as caught:
+        load(tmp_path, create=True, say=collect(said))
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert str(folder / "config.yaml") in caught.value.message
+    assert said == []
+    assert list(folder.iterdir()) == []
+
+
+def test_a_config_that_is_not_text_is_refused(tmp_path: Path) -> None:
+    folder = config_dir(tmp_path)
+    folder.mkdir(parents=True)
+    (folder / "config.yaml").write_bytes(b"\xff\xfe")
+
+    with pytest.raises(RefusedError) as caught:
+        load(tmp_path, create=True, say=collect([]))
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert "cannot be read" in caught.value.message
+
+
+def test_two_loads_racing_both_succeed(tmp_path: Path) -> None:
+    folder = config_dir(tmp_path)
+
+    def other_alr_wins_a_prompt(message: str) -> None:
+        # The other process creates its file between our check and our copy.
+        (folder / "prompts").mkdir(parents=True)
+        (folder / "prompts" / "task_review.md").write_text(
+            "the other one's", encoding="utf-8"
+        )
+
+    config = load(tmp_path, create=True, say=other_alr_wins_a_prompt)
+
+    review = folder / "prompts" / "task_review.md"
+    assert review.read_text(encoding="utf-8") == "the other one's"
+    assert (folder / "prompts" / "task_remediation.md").is_file()
+    assert (folder / "config.yaml").is_file()
+    assert config.task_review_prompt == str(review)
+
+
+def test_the_default_prints_to_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    load(tmp_path, create=True)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert str(config_dir(tmp_path)) in captured.err
+
+
+def test_a_failed_copy_never_leaves_a_config_without_its_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_copyfile = shutil.copyfile
+    copies: list[str] = []
+
+    def copy_twice_then_fail(source: Path, target: Path) -> None:
+        if len(copies) == 2:
+            raise OSError(28, "No space left on device")
+
+        copies.append(Path(target).name)
+        real_copyfile(source, target)
+
+    monkeypatch.setattr("alr.config.shutil.copyfile", copy_twice_then_fail)
+
+    with pytest.raises(RefusedError) as caught:
+        load(tmp_path, create=True, say=collect([]))
+
+    assert caught.value.reason == CONFIG_UNWRITABLE
+    assert "No space left" in caught.value.message
+    assert not (config_dir(tmp_path) / "config.yaml").exists()
