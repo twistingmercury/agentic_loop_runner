@@ -107,6 +107,7 @@ def test_each_preset_is_read(tmp_path: Path, mode: str) -> None:
 
 def test_custom_reads_its_sandbox_file_relative_to_the_folder(tmp_path: Path) -> None:
     folder = make_folder(tmp_path)
+    (folder / "mine.json").write_text("{}", encoding="utf-8")
     text = replace("default: tight", "default: custom\n      sandbox_file: ./mine.json")
 
     config = parse(text, folder)
@@ -356,20 +357,6 @@ def test_config_folder_exists_follows_the_folder(tmp_path: Path) -> None:
     assert config_folder_exists(tmp_path) is True
 
 
-def test_load_without_a_folder_reads_the_packaged_copy_and_writes_nothing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    config = load(tmp_path)
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
-    assert list(tmp_path.iterdir()) == []
-    assert config.task_review_max_rounds == 1
-    assert Path(config.task_review_prompt).is_file()
-    assert Path(config.task_remediation_prompt).is_file()
-
-
 def test_load_reads_an_existing_folder(tmp_path: Path) -> None:
     create_folder(tmp_path)
     config_file = config_dir(tmp_path) / "config.yaml"
@@ -609,3 +596,36 @@ def test_a_reader_never_sees_the_folder_before_it_is_whole(
 
     assert seen == [False] * len(DEFAULT_FILES)
     assert (folder / "config.yaml").is_file()
+
+
+def test_a_missing_custom_sandbox_file_names_the_config_the_key_and_the_path(
+    tmp_path: Path,
+) -> None:
+    folder = make_folder(tmp_path)
+    text = replace("default: tight", "default: custom\n      sandbox_file: ./mine.json")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(text, folder)
+
+    message = str(caught.value)
+    assert INVALID_CONFIG in message
+    assert "config.yaml" in message
+    assert "defaults.sandbox.permissiveness.sandbox_file" in message
+    assert str(folder / "mine.json") in message
+    assert "--sandbox-settings" not in message
+
+
+def test_an_unreadable_prompt_file_is_refused_at_startup(tmp_path: Path) -> None:
+    folder = make_folder(tmp_path)
+    prompt = folder / "prompts" / "task_review.md"
+    # A link to itself cannot be opened, even by root, who ignores file modes.
+    prompt.unlink()
+    prompt.symlink_to(prompt)
+
+    with pytest.raises(RefusedError) as caught:
+        parse(DOCUMENTED, folder)
+
+    message = str(caught.value)
+    assert "config.yaml" in message
+    assert "defaults.prompts.task_review.prompt" in message
+    assert str(prompt) in message

@@ -82,15 +82,12 @@ def default_file_names() -> list[str]:
 def load(home: Path | None = None) -> Config:
     """Read the config from the config folder.
 
-    This never writes. A real run asks before creating the folder (see
-    create_folder) and a dry run writes nothing (requirement 9), so when the
-    folder is missing the copy shipped in the package is read instead.
+    This never writes. Callers check the folder exists first: a real run asks
+    before creating it (see create_folder) and a dry run refuses without it.
     """
     folder = config_dir(home)
-    if _folder_exists(folder):
-        return _read_folder(folder)
-
-    return _read_packaged()
+    _folder_exists(folder)
+    return _read_folder(folder)
 
 
 def create_folder(home: Path | None = None) -> None:
@@ -165,12 +162,6 @@ def _refuse_foreign(folder: Path) -> None:
 
     if folder.exists() and not folder.is_dir():
         raise RefusedError(INVALID_CONFIG, f"{folder} is a file; remove it yourself")
-
-
-def _read_packaged() -> Config:
-    """Read the config shipped in the package, for a run that must not write."""
-    with as_file(files("alr") / "defaults") as source:
-        return _read_folder(source)
 
 
 def _read_folder(folder: Path) -> Config:
@@ -348,26 +339,32 @@ def _sandbox_file(
     if not given:
         raise _refuse(path, f"default: {_CUSTOM} needs a sandbox_file")
 
-    return str(_absolute(permissiveness["sandbox_file"], "sandbox_file", folder, path))
+    key = "defaults.sandbox.permissiveness.sandbox_file"
+    sandbox_path = _absolute(permissiveness["sandbox_file"], key, folder, path)
+    _refuse_unreadable(sandbox_path, key, path)
+    return str(sandbox_path)
 
 
 def _prompt_path(section: dict[str, Any], name: str, folder: Path, path: Path) -> str:
-    """Return a prompt file's absolute path, refusing one that is not there."""
+    """Return a prompt file's absolute path, refusing one that cannot be read."""
     prompt = _required(section, "prompt", path, name)
-    prompt_path = _absolute(prompt, f"{name} prompt", folder, path)
-    try:
-        is_file = prompt_path.is_file()
-    except OSError as error:
-        raise _refuse(
-            path, f"{name} prompt {prompt_path} cannot be checked: {error}"
-        ) from error
-
-    if not is_file:
-        raise _refuse(
-            path, f"{name} prompt {quote(str(prompt))} is not a file: {prompt_path}"
-        )
-
+    key = f"defaults.prompts.{name}.prompt"
+    prompt_path = _absolute(prompt, key, folder, path)
+    _refuse_unreadable(prompt_path, key, path)
     return str(prompt_path)
+
+
+def _refuse_unreadable(file_path: Path, key: str, path: Path) -> None:
+    """Refuse a file the config names when alr cannot open it.
+
+    Opening it, not just checking it exists, catches a file without read
+    permission or a folder in its place, at startup rather than mid-run.
+    """
+    try:
+        file_path.open("rb").close()
+    except OSError as error:
+        reason = error.strerror or str(error)
+        raise _refuse(path, f"{key} {file_path} cannot be read: {reason}") from error
 
 
 def _absolute(value: Any, name: str, folder: Path, path: Path) -> Path:

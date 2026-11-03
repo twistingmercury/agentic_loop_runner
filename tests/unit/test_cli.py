@@ -1273,15 +1273,21 @@ def test_an_existing_config_folder_is_never_asked_about(
     assert sessions == [["--dangerously-skip-permissions"]]
 
 
-def test_dry_run_neither_asks_nor_creates(
+def test_dry_run_refuses_a_missing_config_folder_without_asking_or_creating(
     folder: Path,
     fresh_home: Path,
     terminal: None,
+    capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _fail_if_asked(monkeypatch)
 
-    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+    code = cli.main(["-d", str(folder), "--dry-run", "--plain"])
+
+    captured = capsys.readouterr()
+    assert code == RefusedError.exit_code
+    assert captured.err.startswith(REFUSED_SETUP)
+    assert captured.out == ""
     assert not (fresh_home / ".local").exists()
 
 

@@ -164,24 +164,28 @@ def test_a_yolo_default_runs_without_a_flag(
     ]
 
 
-def test_dry_run_neither_asks_nor_creates(tmp_path: Path, home: Path) -> None:
+def test_dry_run_in_a_terminal_refuses_without_asking_or_creating(
+    tmp_path: Path, home: Path
+) -> None:
     write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
     res = run_alr_in_terminal("--dry-run", f"--dir={tmp_path}")
 
-    assert res.code == 0, res
+    assert res.code != 0, res
     assert SETUP_PROMPT not in res.shown
-    assert res.err == ""
+    assert "config-setup-missing" in res.err
     assert list(home.iterdir()) == []
 
 
-def test_dry_run_without_a_terminal_creates_nothing(tmp_path: Path, home: Path) -> None:
+def test_dry_run_without_a_terminal_refuses_and_creates_nothing(
+    tmp_path: Path, home: Path
+) -> None:
     write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
     res = run_alr("--dry-run", f"--dir={tmp_path}")
 
-    assert res.code == 0, res
-    assert res.err == ""
+    assert res.code != 0, res
+    assert "config-setup-missing" in res.err
     assert list(home.iterdir()) == []
 
 

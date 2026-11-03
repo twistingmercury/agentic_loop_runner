@@ -101,6 +101,9 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if _needs_config_setup(args):
             return _set_up_config()
 
+        if args.dry_run:
+            _refuse_missing_config_folder()
+
         tasks_file = resolve_dir(args.dir)
         config = load()
         apply_sandbox_default(args, config.sandbox)
@@ -170,6 +173,21 @@ def _needs_config_setup(args: argparse.Namespace) -> bool:
     A dry run never asks and never writes (requirement 9).
     """
     return not args.dry_run and not config_folder_exists()
+
+
+def _refuse_missing_config_folder() -> None:
+    """Refuse a dry run when the config folder is missing, as a real run without a terminal does.
+
+    A dry run never asks and never writes, so it cannot offer the setup.
+    """
+    if config_folder_exists():
+        return
+
+    raise RefusedError(
+        CONFIG_SETUP_MISSING,
+        f"the config setup is missing ({config_dir()}); "
+        "run alr in a terminal once to create it",
+    )
 
 
 def _set_up_config() -> int:
