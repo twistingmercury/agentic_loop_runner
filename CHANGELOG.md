@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A config folder, `~/.local/alr`, with a `config.yaml` and the prompt files in
+  `prompts/`. The first real run says what it will create and where, then
+  creates it with the default files; later runs never overwrite them, and
+  `--dry-run` never creates it. A key alr does not know is refused, and so is a
+  `version` newer than 1.x. The file can set a default sandbox (`tight`,
+  `large`, `yolo`, or `custom` with a `sandbox_file`) that applies when no
+  permission flag and no `sandbox.json` in the run folder choose one. The
+  order is: command-line flag, then the run folder, then `config.yaml`, then
+  alr's own default. The prompt paths and the review cap are read and checked
+  now but nothing uses them yet. (#36)
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
