@@ -54,8 +54,8 @@ def test_view_runs_a_task_to_done(tmp_path: Path, fake_claude: Path) -> None:
     try:
         child.send("s")
         child.expect("Run done")
-        # Ctrl-C quits when nothing is running; the summary is a modal, which hides plain keys.
-        child.send(CTRL_C)
+        # The summary's Exit button has focus, so Enter ends alr.
+        child.send("\r")
         child.expect(pexpect.EOF)
     finally:
         child.close(force=True)

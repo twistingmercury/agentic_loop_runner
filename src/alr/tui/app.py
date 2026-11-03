@@ -612,7 +612,15 @@ class AlrApp(App[None]):
             f"{self.outcome} in {format_elapsed(event.seconds)}"
         )
         self._refresh()
-        self.push_screen(SummaryDialog(self.outcome, event.seconds, event.error))
+        summary = SummaryDialog(self.outcome, event.seconds, event.error)
+        self.push_screen(summary, self._exit_if_asked)
+
+    def _exit_if_asked(self, exit_now: bool | None) -> None:
+        """Leave alr when the summary's Exit was pressed; Close and Escape keep the view open."""
+        if not exit_now:
+            return
+
+        self.exit()
 
 
 def _activity_pane() -> ActivityPane:

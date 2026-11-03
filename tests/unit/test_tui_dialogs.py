@@ -10,6 +10,7 @@ from helpers import write_nested_file
 from textual.app import App
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
+    Button,
     Checkbox,
     Input,
     Label,
@@ -685,6 +686,31 @@ async def test_enter_confirms_the_reset() -> None:
         await pilot.pause()
 
         assert host.result is True
+
+
+async def _press_enter_on_summary(outcome: str) -> tuple[str, bool, object]:
+    """Show a summary, press Enter once; return the button's label, whether it had focus, and the answer."""
+    host = Host()
+    async with host.run_test() as pilot:
+        host.push_screen(SummaryDialog(outcome, 1.0, "boom"), host.record)
+        await pilot.pause()
+        label = str(host.screen.query_one("#close", Button).label)
+        focused = host.focused is not None and host.focused.id == "close"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    return label, focused, host.result
+
+
+async def test_a_clean_run_summary_focuses_exit_and_enter_answers_true() -> None:
+    assert await _press_enter_on_summary("done") == ("Exit", True, True)
+
+
+@pytest.mark.parametrize("outcome", ["failed", "stopped"])
+async def test_a_failed_or_stopped_summary_focuses_close_and_enter_answers_false(
+    outcome: str,
+) -> None:
+    assert await _press_enter_on_summary(outcome) == ("Close", True, False)
 
 
 def test_summary_dialog_shows_the_run_time_in_minutes_and_seconds() -> None:
