@@ -242,7 +242,9 @@ def _create_all_at_once(source: Path, names: list[str], folder: Path) -> None:
 
     The staging folder shares the target's parent so the rename stays on one
     filesystem, which is what makes it a single step. It is removed whatever
-    happens, a KeyboardInterrupt included.
+    happens, a KeyboardInterrupt included. tempfile.mkdtemp makes the staging
+    folder mode 0700 and the rename keeps it, so the config folder is private
+    to the user.
     """
     staging = Path(tempfile.mkdtemp(dir=folder.parent, prefix=".alr-create-"))
     try:
@@ -255,8 +257,9 @@ def _create_all_at_once(source: Path, names: list[str], folder: Path) -> None:
 def _default_names(source: Path) -> list[str]:
     """List the shipped files relative to their folder, config.yaml last.
 
-    Copying config.yaml last means a folder holding one never lacks the prompt
-    files it points at.
+    The order only decides the order of the setup list the user sees. It does
+    not protect a half-made folder: the atomic rename in _create_all_at_once
+    guarantees the folder appears whole or not at all.
     """
     found = (path for path in source.rglob("*") if path.is_file())
     names = sorted(path.relative_to(source).as_posix() for path in found)
@@ -277,7 +280,9 @@ def _rename_unless_taken(staging: Path, folder: Path) -> None:
     """Rename the staging folder to the target, accepting that another alr got there first.
 
     The winner's folder is whole (it was renamed in the same way), so the
-    loser discards its copy and reads the winner's, which may hold edits.
+    loser just discards its copy and returns. It reads nothing: the caller
+    exits 0 and tells the user to run alr again, which then finds the
+    winner's folder, which may hold edits.
     """
     try:
         staging.rename(folder)
