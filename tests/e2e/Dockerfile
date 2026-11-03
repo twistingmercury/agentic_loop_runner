@@ -26,4 +26,6 @@ COPY --chown=tester:tester tests/e2e/ .
 USER 65532:65532
 
 # The cache is useless in a throwaway container and the workdir is not writable.
-CMD ["pytest", "-p", "no:cacheprovider"]
+# Every test builds its own tmp_path and HOME, so they share nothing and can run
+# on one worker per CPU.
+CMD ["pytest", "-p", "no:cacheprovider", "-n", "auto"]
