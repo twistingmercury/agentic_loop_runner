@@ -67,6 +67,8 @@ def test_yes_sets_up_the_folder_and_starts_no_run(
         "config.yaml",
         "prompts/task_review.md",
         "prompts/task_remediation.md",
+        "sandboxes/tight.json",
+        "sandboxes/large.json",
     ):
         assert (folder / name).is_file()
         assert str(folder / name) in res.shown
@@ -89,6 +91,7 @@ def test_the_prompt_names_every_folder_it_will_create(
     assert str(home / ".local") in listed
     assert str(config_folder) in listed
     assert str(config_folder / "prompts") in listed
+    assert str(config_folder / "sandboxes") in listed
 
 
 @pytest.mark.parametrize(

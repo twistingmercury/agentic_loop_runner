@@ -286,7 +286,13 @@ def test_parse_refuses(tmp_path: Path, text: str, problem: str) -> None:
     assert problem in caught.value.message
 
 
-DEFAULT_FILES = ("config.yaml", "prompts/task_review.md", "prompts/task_remediation.md")
+DEFAULT_FILES = (
+    "config.yaml",
+    "prompts/task_review.md",
+    "prompts/task_remediation.md",
+    "sandboxes/tight.json",
+    "sandboxes/large.json",
+)
 
 
 def test_create_folder_writes_the_default_files(tmp_path: Path) -> None:
@@ -319,6 +325,9 @@ def test_create_folder_leaves_no_staging_files_behind(tmp_path: Path) -> None:
         "prompts",
         "prompts/task_remediation.md",
         "prompts/task_review.md",
+        "sandboxes",
+        "sandboxes/large.json",
+        "sandboxes/tight.json",
     ]
 
 

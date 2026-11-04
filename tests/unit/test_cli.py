@@ -1116,8 +1116,11 @@ def test_the_setup_notice_lists_every_folder_and_file_in_creation_order(
         str(local),
         str(config_folder),
         str(config_folder / "prompts"),
+        str(config_folder / "sandboxes"),
         str(config_folder / "prompts" / "task_remediation.md"),
         str(config_folder / "prompts" / "task_review.md"),
+        str(config_folder / "sandboxes" / "large.json"),
+        str(config_folder / "sandboxes" / "tight.json"),
         str(config_folder / "config.yaml"),
     ]
 
