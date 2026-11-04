@@ -32,6 +32,7 @@
 **Files:** `src/alr/plain/start.py`, `src/alr/plain/dryrun.py`, `src/alr/plain/report.py`, `src/alr/engine/loop.py` (`reset_failed`), `src/alr/record/runlog.py`, `src/alr/errors.py`, `src/alr/tui/app.py` (`_open_file`), `src/alr/tui/prepare.py`; tests `tests/unit/test_plain_start.py`, `test_plain_dryrun.py`, `test_runlog.py`, `test_tui_app.py`, `test_tui_prepare.py`, and the e2e tests whose dry-run exit changes (`test_dry_run.py`, `test_gates.py`, `test_loop.py`).
 
 **Required behaviour (ADR-025, implementation notes):**
+
 - Order in `start` and in the view's `prepare`: read the file, repository checks, apply `--reset-failed` in memory, the failed-tasks check on that list, open the run log (a failure is `log-unwritable`), then save the reset to disk. If the save fails, close the log, remove the run folder it made, and refuse with the new reason `task-file-unwritable` (constant `TASK_FILE_UNWRITABLE`, exit 3, message keeps the text `failed to save tasks to ...`).
 - `RunLog.open` removes the run folder it just created when opening `run.jsonl` fails (F8). Add `RunLog.discard()` for the case above: close and remove the folder (and only an empty or just-created one).
 - The view's `_open_file` applies `--reset-failed` to the in-memory list only (so Start is enabled); the disk write happens inside `prepare`, in the order above (F4). Quitting without pressing Start leaves the file untouched.
@@ -48,6 +49,7 @@
 **Files:** `src/alr/tui/app.py`, `src/alr/tui/prepare.py`; tests `tests/unit/test_tui_app.py`; e2e `tests/e2e/test_tui.py` only if it asserts these codes.
 
 **Required behaviour:**
+
 - One `Stop` object on the app. The SIGTERM handler sets `signum = SIGTERM`, then stops like the user's Stop; `prepare` puts the same object into `RunOptions.stop`; `_finish_or_fail` reads it. A user's Stop button or Ctrl-C keeps SIGINT (130).
 - SIGTERM with no run going exits 143 (`app.exit_code` is set from the `Stop`).
 - A second Stop press while the engine is still stopping sets `exit_code` to the stop's code before it exits the app, so a stopped run never exits 0.
@@ -61,6 +63,7 @@
 **Files:** `src/alr/engine/loop.py`, `src/alr/engine/commit.py`; tests `tests/unit/test_commit.py`, `tests/unit/test_loop.py`; e2e `tests/e2e/test_commit.py` / `test_commit_run.py`.
 
 **Required behaviour:**
+
 - Record `HEAD` before `git commit`. When the commit step is cancelled, look at `HEAD` again (shielded from the cancel): if it moved, the commit landed, so save the tasks that commit covers as `completed` (the task in `task` mode; every task that ran in `run` mode), then re-raise the stop. If it did not move, behave as today.
 - In `run` mode a stop before the commit lands (during a session, a gate, or the commit itself with `HEAD` unmoved) does not write `tasks.yaml` at all: drop the cancel-path `_finish_deferred` save (the file is still as the run found it; mutation 10j/10m showed that save is redundant).
 - `_save` keeps `CommitFailedError` (exit 4) when a commit failure and a save failure happen together (put both texts in the message). When a `run`-mode commit succeeded but the final save failed, raise an error that names the commit hash and says tasks.yaml was not updated, so a driver does not blindly rerun.
@@ -74,6 +77,7 @@
 **Files:** `src/alr/tasks.py`, `src/alr/engine/loop.py`, `src/alr/tui/panes.py`, `src/alr/tui/app.py`; tests `test_tasks_parse.py`, `test_loop.py`, `test_tui_panes.py`, `test_tui_app.py`.
 
 **Required behaviour:**
+
 - A task `name` containing a NUL or any other control character except tab is rejected at load with `name: must not contain control characters` (the task id is named, as for line breaks). Add the characters `\x1c`, `\x1d`, `\x1e` to the tests.
 - The view gives `passed` rows their own symbol (`●`, distinct from `✔`); when a `run`-mode run ends other than completed, passed rows return to pending (`·`) and the row of a task saved `failed` shows `✖`.
 - In `loop.run`'s `finally`, when an exception is already propagating and `run_done` raises `RunLogError`, the original error propagates (add the log error as a note with `add_note`); a `RunLogError` with no other error still ends the run as today.
@@ -87,6 +91,7 @@
 **Files:** `tests/unit/test_loop.py`, `test_plain_record.py`, `test_stream_frontend.py`, `test_commit.py`, `test_runlog.py`, `test_tui_app.py`, `tests/e2e/test_outcomes.py`. No production change.
 
 Add a test for each, and prove it by mutation (break the code, watch it fail, restore):
+
 1. `run_started` and `task_finished` in the run ledger say `"state":"passed"` for a `run`-mode run (T1); an e2e test reads `run.jsonl` for it.
 2. The view's `run_git` gives the trimmed first git line as the commit failure reason (T2): through `StreamFrontEnd`, not only `FirstLine`.
 3. `git check-ignore` failing through the real `_ignored` raises `RefusedError` with reason `git-error` (not a hand-built error).

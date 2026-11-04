@@ -29,7 +29,7 @@
 
 The input classes the spec implies but no obvious test covers, most likely first. Each has its test in the task that owns the code.
 
-1. A task name full of shell syntax (`fix "auth"; $(touch pwned) \`id\``) reaches a commit action only as data through `ALR_TASK_NAME` and runs nothing (Task 2, and again in Task 6).
+1. A task name full of shell syntax (`fix "auth"; $(touch pwned) \`id\``) reaches a commit action only as data through`ALR_TASK_NAME` and runs nothing (Task 2, and again in Task 6).
 2. A rerun after an `after_run` failure, with every task already completed, runs `after_run` again (Task 3).
 3. A run folder path with spaces, or given relative, still gives absolute `ALR_TASK_FILE` and `ALR_LOG_DIR` (Task 2).
 4. SIGINT during an `after_run` action exits 130, leaves every task `completed`, and does not exit 4 (Task 3).
@@ -40,20 +40,20 @@ The input classes the spec implies but no obvious test covers, most likely first
 
 ## File structure
 
-| File | Change |
-|---|---|
-| `src/alr/tasks.py` | `Gate` → `Action`; `Shared.gates` → `after_task` + `after_run`; `RUN_SCOPE`; migration errors; `RunResult.RUN_FAILED`; drop `PASSED` |
-| `src/alr/engine/gates.py` → `engine/actions.py` | `run_gates` → `run_actions`; `action_env` |
-| `src/alr/engine/loop.py` | run `after_task` per task, `after_run` at the end; delete all commit code |
-| `src/alr/engine/frontend.py` | `run_action`, `action_finished`; drop `commit_started`, `run_git`, `committed` |
-| `src/alr/engine/commit.py` | **deleted** |
-| `src/alr/errors.py` | `CommitFailedError` → `AfterRunFailedError` (exit 4); drop five refusal reasons |
-| `src/alr/record/events.py`, `record/runlog.py` | `ActionStarted/Finished`; drop `CommitStarted`, `Committed`; log fields |
-| `src/alr/plain/*`, `src/alr/stream/frontend.py` | rename, env, drop git and repo code |
-| `src/alr/cli.py`, `src/alr/main.py` | `--action-timeout`; refuse old flags; drop `CommitMode` |
-| `src/alr/tui/*` | drop Commit box; `ActionsDialog` with two lists; pane "Actions"; settings and progress |
-| `src/alr/skills/gralph-docs-writer/*`, `README.md`, `CHANGELOG.md`, `docs/design/03_system_architecture.md` | docs |
-| `tests/unit/test_commit.py`, `tests/e2e/test_commit*.py` | **deleted**; `test_gates.py` → `test_actions.py` (unit and e2e) |
+| File                                                                                                        | Change                                                                                                                               |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/alr/tasks.py`                                                                                          | `Gate` → `Action`; `Shared.gates` → `after_task` + `after_run`; `RUN_SCOPE`; migration errors; `RunResult.RUN_FAILED`; drop `PASSED` |
+| `src/alr/engine/gates.py` → `engine/actions.py`                                                             | `run_gates` → `run_actions`; `action_env`                                                                                            |
+| `src/alr/engine/loop.py`                                                                                    | run `after_task` per task, `after_run` at the end; delete all commit code                                                            |
+| `src/alr/engine/frontend.py`                                                                                | `run_action`, `action_finished`; drop `commit_started`, `run_git`, `committed`                                                       |
+| `src/alr/engine/commit.py`                                                                                  | **deleted**                                                                                                                          |
+| `src/alr/errors.py`                                                                                         | `CommitFailedError` → `AfterRunFailedError` (exit 4); drop five refusal reasons                                                      |
+| `src/alr/record/events.py`, `record/runlog.py`                                                              | `ActionStarted/Finished`; drop `CommitStarted`, `Committed`; log fields                                                              |
+| `src/alr/plain/*`, `src/alr/stream/frontend.py`                                                             | rename, env, drop git and repo code                                                                                                  |
+| `src/alr/cli.py`, `src/alr/main.py`                                                                         | `--action-timeout`; refuse old flags; drop `CommitMode`                                                                              |
+| `src/alr/tui/*`                                                                                             | drop Commit box; `ActionsDialog` with two lists; pane "Actions"; settings and progress                                               |
+| `src/alr/skills/gralph-docs-writer/*`, `README.md`, `CHANGELOG.md`, `docs/design/03_system_architecture.md` | docs                                                                                                                                 |
+| `tests/unit/test_commit.py`, `tests/e2e/test_commit*.py`                                                    | **deleted**; `test_gates.py` → `test_actions.py` (unit and e2e)                                                                      |
 
 ---
 
@@ -62,12 +62,15 @@ The input classes the spec implies but no obvious test covers, most likely first
 A pure rename plus the new keys. No behavior changes yet: `after_run` is parsed and saved but nothing runs it.
 
 **Files:**
+
 - Modify: `src/alr/tasks.py`, `src/alr/engine/frontend.py`, `src/alr/engine/loop.py`, `src/alr/record/events.py`, `src/alr/record/runlog.py`, `src/alr/plain/frontend.py`, `src/alr/plain/dryrun.py`, `src/alr/plain/start.py`, `src/alr/stream/frontend.py`, `src/alr/stream/parser.py`, `src/alr/cli.py`, `src/alr/tui/*.py`
 - Rename: `src/alr/engine/gates.py` → `src/alr/engine/actions.py`; `tests/unit/test_gates.py` → `tests/unit/test_actions.py`; `tests/e2e/test_gates.py` → `tests/e2e/test_actions.py`
 - Test: `tests/unit/test_tasks_parse.py`, `tests/unit/test_tasks_save.py`, `tests/unit/test_cli.py`, plus every unit test that names a gate
 
 **Interfaces:**
+
 - Produces:
+
   ```python
   @dataclass
   class Action:
@@ -86,21 +89,22 @@ A pure rename plus the new keys. No behavior changes yet: `after_run` is parsed 
 
   RUN_SCOPE = Task(id=0, name="after the run", prompt="")
   ```
+
   Rename table (apply everywhere, source and tests; `git grep -n -i gate` must come back empty except the migration messages when done):
 
-  | Old | New |
-  |---|---|
-  | `Gate`, `gate.cmd` | `Action`, `action.command` |
-  | `Shared.gates`, `TaskList.gate_list()` | `Shared.after_task`, `TaskList.after_task_list()` |
-  | `run_gates`, `run_gate`, `gate_finished` | `run_actions`, `run_action`, `action_finished` |
-  | `GateStarted`, `GateFinished` | `ActionStarted`, `ActionFinished` |
-  | `gate_limit`, `gate_failure`, `DEFAULT_GATE_TIMEOUT` | `action_limit`, `action_failure`, `DEFAULT_ACTION_TIMEOUT` |
-  | `RunOptions.gate_timeout`, `RunSettings.gate_timeout`, `Info.gate_timeout` | `action_timeout` (same for the log field `gate_timeout` → `action_timeout`) |
-  | log event `gate_finished` | `action_finished` |
-  | `--gate-timeout`, `GatesDialog`, `GatesPane`, menu `gates` | `--action-timeout`, `ActionsDialog`, `ActionsPane`, menu `actions` |
-  | plain output `gate: <cmd>`; dry run `gate: <cmd>: <limit> (<source>)` | `action: <cmd>`; dry run `after_task: <cmd>: <limit> (<source>)` then `after_run: <cmd>: <limit> (<source>)` |
-  | message "task N: ...: stopped during gate X" | "...stopped during action X" |
-  | `"gate X timed out after L"`, `"gate X failed: E"` | `"action X timed out after L"`, `"action X failed: E"` |
+| Old                                                                        | New                                                                                                          |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `Gate`, `gate.cmd`                                                         | `Action`, `action.command`                                                                                   |
+| `Shared.gates`, `TaskList.gate_list()`                                     | `Shared.after_task`, `TaskList.after_task_list()`                                                            |
+| `run_gates`, `run_gate`, `gate_finished`                                   | `run_actions`, `run_action`, `action_finished`                                                               |
+| `GateStarted`, `GateFinished`                                              | `ActionStarted`, `ActionFinished`                                                                            |
+| `gate_limit`, `gate_failure`, `DEFAULT_GATE_TIMEOUT`                       | `action_limit`, `action_failure`, `DEFAULT_ACTION_TIMEOUT`                                                   |
+| `RunOptions.gate_timeout`, `RunSettings.gate_timeout`, `Info.gate_timeout` | `action_timeout` (same for the log field `gate_timeout` → `action_timeout`)                                  |
+| log event `gate_finished`                                                  | `action_finished`                                                                                            |
+| `--gate-timeout`, `GatesDialog`, `GatesPane`, menu `gates`                 | `--action-timeout`, `ActionsDialog`, `ActionsPane`, menu `actions`                                           |
+| plain output `gate: <cmd>`; dry run `gate: <cmd>: <limit> (<source>)`      | `action: <cmd>`; dry run `after_task: <cmd>: <limit> (<source>)` then `after_run: <cmd>: <limit> (<source>)` |
+| message "task N: ...: stopped during gate X"                               | "...stopped during action X"                                                                                 |
+| `"gate X timed out after L"`, `"gate X failed: E"`                         | `"action X timed out after L"`, `"action X failed: E"`                                                       |
 
   The `Activity` arrow text `→ gate <cmd>` becomes `→ action <cmd>`.
 
@@ -161,6 +165,7 @@ Expected: PASS (ruff clean, all unit tests green). Fix any leftover `gate` name:
 git add -A
 git commit -s -m "Rename gates to actions and add the after_task and after_run lists"
 ```
+
 (Commit body ends with the `Co-Authored-By` trailer the harness gives.)
 
 ---
@@ -168,12 +173,15 @@ git commit -s -m "Rename gates to actions and add the after_task and after_run l
 ### Task 2: The `ALR_*` environment on every action
 
 **Files:**
+
 - Modify: `src/alr/engine/actions.py`, `src/alr/engine/frontend.py`, `src/alr/engine/loop.py` (`RunOptions.log_dir`), `src/alr/plain/frontend.py`, `src/alr/stream/frontend.py`, `src/alr/plain/start.py`, `src/alr/tui/prepare.py`
 - Test: `tests/unit/test_actions.py`, `tests/unit/test_stream_frontend.py`, `tests/unit/test_plain_start.py`
 
 **Interfaces:**
+
 - Consumes: `Action`, `run_actions` (Task 1)
 - Produces:
+
   ```python
   # engine/actions.py
   def action_env(task: Task | None, tasks_file: str, log_dir: str) -> dict[str, str]:
@@ -182,6 +190,7 @@ git commit -s -m "Rename gates to actions and add the after_task and after_run l
   # FrontEnd protocol
   async def run_action(self, task: Task, action: Action, env: Mapping[str, str]) -> str | None: ...
   ```
+
   `RunOptions` gains `log_dir: str` (absolute `<run folder>/logs`). `run_actions(task, actions, override, front_end, env)` passes `env` to `front_end.run_action`.
 
 - [ ] **Step 1: Write the failing tests** for `action_env`:
@@ -231,12 +240,15 @@ git commit -s -m "Give every action the ALR_TASK_FILE and ALR_LOG_DIR variables,
 ### Task 3: Run the `after_run` actions; exit 4 means they failed
 
 **Files:**
+
 - Modify: `src/alr/engine/loop.py`, `src/alr/errors.py`, `src/alr/tasks.py` (`RunResult`), `src/alr/record/runlog.py`, `src/alr/plain/frontend.py`, `src/alr/stream/frontend.py`, `src/alr/tui/panes.py` (id 0 rows), `src/alr/engine/actions.py`
 - Test: `tests/unit/test_loop.py`, `tests/unit/test_runlog.py`, `tests/unit/test_errors.py`, `tests/unit/test_tui_panes.py`
 
 **Interfaces:**
+
 - Consumes: `run_actions`, `action_env` (Task 2), `RUN_SCOPE` (Task 1)
 - Produces:
+
   ```python
   # errors.py
   class AfterRunFailedError(RunError):
@@ -246,6 +258,7 @@ git commit -s -m "Give every action the ALR_TASK_FILE and ALR_LOG_DIR variables,
   class RunResult(StrEnum):
       COMPLETED = "completed"; FAILED = "failed"; RUN_FAILED = "run_failed"; STOPPED = "stopped"
   ```
+
   `CommitFailedError` stays until Task 4 deletes it; do not reuse its name.
 
 - [ ] **Step 1: Write the failing tests** in `tests/unit/test_loop.py` (use the file's fake front end; extend it so `run_action` records the `(task_id, command, env)` it saw and can be told to fail a command):
@@ -357,11 +370,13 @@ git commit -s -m "Run the after_run actions at the end of a run; exit 4 means on
 ### Task 4: Delete the git code and `--commit`
 
 **Files:**
+
 - Delete: `src/alr/engine/commit.py`, `tests/unit/test_commit.py`, `tests/e2e/test_commit.py`, `tests/e2e/test_commit_run.py`, `tests/e2e/test_commit_safety.py`
 - Modify: `src/alr/engine/loop.py`, `src/alr/engine/frontend.py`, `src/alr/engine/proc.py`, `src/alr/errors.py`, `src/alr/tasks.py` (drop `PASSED`), `src/alr/record/events.py`, `src/alr/record/runlog.py`, `src/alr/plain/{frontend,start,report,dryrun}.py`, `src/alr/stream/frontend.py`, `src/alr/cli.py`, `src/alr/tui/{app,panes,progress,prepare,checks,settings}.py`
 - Test: `tests/unit/test_cli.py`, `tests/unit/test_errors.py`, `tests/unit/test_loop.py`, `tests/unit/test_plain_*.py`, `tests/unit/test_tui_*.py`, `tests/unit/test_import_boundaries.py`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 1 to 3.
 - Produces: no `CommitMode`, `Repo`, `Guard`, `commit`, `commit_all`, `head`, `recheck_ignored`, `work_tree_root`, `repo_for`, `CommitStarted`, `Committed`, `commit_started`, `run_git`, `committed`, `CommitFailedError`, `RunResult.COMMIT_FAILED`, `PASSED`, `_defers_saving`, `_commit_*`, `_finish_deferred*`, `_save_committed`, `_save_if_landed`, `_head_after_stop`, `_landed_since`, `_guard`, `_shown`; refusal constants `DIRTY_TREE`, `TASK_FILE_VISIBLE`, `LOG_FOLDER_VISIBLE`, `GIT_ERROR`, `LOCKED`. In `proc.py`, the `new_session`, `die_with_parent`, `gentle` options and `_prctl` code go too if nothing else uses them (check with `git grep` first; `gentle` is also used by `finish`, which sessions call: keep what is still called, delete the rest).
 
@@ -415,12 +430,15 @@ git commit -s -m "Remove --commit and all git code; a commit is an action"
 ### Task 5: The Actions dialog with two lists
 
 **Files:**
+
 - Modify: `src/alr/tui/dialogs.py`, `src/alr/tui/app.py`, `src/alr/tui/settings.py`, `src/alr/tui/prepare.py`, `src/alr/tui/panes.py`, `src/alr/tui/progress.py`
 - Test: `tests/unit/test_tui_dialogs.py`, `tests/unit/test_tui_app.py`, `tests/unit/test_tui_settings.py`, `tests/unit/test_tui_prepare.py`, `tests/unit/test_tui_panes.py`, `tests/unit/test_tui_progress.py`, `tests/unit/test_tui_layout.py`
 
 **Interfaces:**
+
 - Consumes: `Action`, `RunSettings` (Task 1), no commit box (Task 4).
 - Produces:
+
   ```python
   # settings.py
   after_task: list[Action] | None = None   # None until edited in the view
@@ -430,6 +448,7 @@ git commit -s -m "Remove --commit and all git code; a commit is an action"
   class ActionsDialog(_Dialog[tuple[list[Action], list[Action]]]):
       """Add and remove the file's after_task and after_run actions in two lists."""
   ```
+
   The dialog dismisses with `(after_task, after_run)`; Escape dismisses with `None`; `Done` with both empty is a decision that there are none.
 
 - [ ] **Step 1: Write the failing tests.** In `test_tui_dialogs.py` (Textual `run_test` pilot, like the existing gates dialog tests): the dialog shows the labels `After each task` and `After the run`; typing a command and pressing Add puts it in the focused list; Remove deletes the highlighted entry of the focused list; `Done` returns both lists; an empty command shows `an action needs a command`; a bad timeout shows the same error text as today. In `test_tui_app.py`: the `(a)ctions` button and the `a` binding open the dialog; the strip has no `#commit` widget; Start saves both lists into `tasks.yaml` when they were edited; an undecided `after_task` opens the dialog at launch and `after_run` alone never does. In `test_tui_panes.py`: the pane title is `Actions` and a result line reads `<id>. <cmd> passed|failed|timed out`, with no hash line. In `test_tui_progress.py`: the step label is `action N of M: <cmd>` with M the `after_task` count; `after_run` actions read `after run: <cmd>`.
@@ -458,10 +477,12 @@ git commit -s -m "Replace the Gates dialog with an Actions dialog holding both l
 ### Task 6: End-to-end tests with real `git commit` actions
 
 **Files:**
+
 - Create: `tests/e2e/test_commit_actions.py`
 - Modify: `tests/e2e/test_actions.py` (renamed in Task 1), `tests/e2e/test_outcomes.py`, `tests/e2e/test_flags.py`, `tests/e2e/test_tui.py`, `tests/e2e/e2e_helpers.py`, `tests/e2e/testdata/fake_claude.py` if a fake needs a file change per task
 
 **Interfaces:**
+
 - Consumes: the installed wheel's `alr` binary, `e2e_helpers` (read it first: it builds a run folder, a git repo, and runs `alr --plain`). E2E tests share nothing with the unit tests.
 
 - [ ] **Step 1: Write the tests** (each is black box: write `tasks.yaml`, run `alr --plain --dir <d> --yolo`, check exit code, stdout, `git log`, and `tasks.yaml`). Use the helpers' names for repo setup:
@@ -545,6 +566,7 @@ git commit -s -m "Test commits as real actions end to end"
 ### Task 7: Docs, the skill, and the ADR status
 
 **Files:**
+
 - Modify: `src/alr/skills/gralph-docs-writer/SKILL.md`, `src/alr/skills/gralph-docs-writer/templates/tasks_template.yaml`, `README.md`, `CHANGELOG.md`, `docs/design/02_architectural_decisions.md`, `docs/design/03_system_architecture.md`, `docs/design/01_requirements.md` if it mentions commit modes
 
 Use the technical-writer agent for the prose, and the `/design-docs-writer` skill for `docs/design/`. The content below is fixed; the wording is theirs.
@@ -566,6 +588,7 @@ Use the technical-writer agent for the prose, and the `/design-docs-writer` skil
 ```
 
 `SKILL.md` documents both keys, the four variables (`ALR_TASK_ID` and `ALR_TASK_NAME` only for `after_task`), the commit-last rule, the rule that an `after_run` failure exits 4 and leaves tasks completed, and removes every mention of `gates`, `cmd`, and `--commit`.
+
 - [ ] **Step 2: README and CHANGELOG.** README: replace the gates and commit sections with actions. CHANGELOG, under a new `Unreleased` heading, lists the breaking changes: `--commit` removed; `shared.gates` → `after_task`, `cmd` → `action`; `--gate-timeout` → `--action-timeout`; exit 4 now means an `after_run` action failed; `commit_failed`, `committed`, and the `commit` log field gone; log event `gate_finished` → `action_finished`; the commit lock and refusal reasons gone. The version bump is a separate release step, not part of this plan.
 - [ ] **Step 3: ADRs.** Add to ADR-026's text, in the lifecycle bullets: "`after_run` runs at the end of every run that has no failed task, including a run where every task was already completed, so a rerun after an `after_run` failure retries it." Set ADR-026 to Accepted; set ADR-014 and ADR-024 to `Superseded by ADR-026` in their sections and in the Decision Summary; add a one-line "Amended by ADR-026" note to ADR-008, ADR-015, ADR-019, and ADR-025 (its exit table row 4 and the commit parts). Bump the document's frontmatter `version`, `date`, `notes`.
 - [ ] **Step 4: `03_system_architecture.md`** loses the commit component and gains the actions description; keep its diagrams as Mermaid.

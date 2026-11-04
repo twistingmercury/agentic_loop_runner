@@ -27,39 +27,39 @@ Each architectural decision is recorded as an ADR with the following structure:
 
 ## Decision Summary
 
-| ADR #                                                                              | Title                                                               | Status   | Date       |
-|------------------------------------------------------------------------------------|---------------------------------------------------------------------|----------|------------|
-| [001](#adr-001-port-gralph-to-python-drop-in-compatible)                           | Port gralph to Python, drop-in compatible (goal superseded by 022)  | Accepted | 2026-10-04 |
-| [002](#adr-002-engine-first-the-tui-is-the-next-design)                            | Engine first; the TUI is the next design                            | Accepted | 2026-10-04 |
-| [003](#adr-003-an-async-engine)                                                    | An async engine                                                     | Accepted | 2026-10-04 |
-| [004](#adr-004-one-engine-two-front-ends)                                          | One engine, two front ends                                          | Accepted | 2026-10-04 |
-| [005](#adr-005-pyyaml-nodes-and-hand-written-validation-no-pydantic)               | PyYAML nodes and hand-written validation, no pydantic               | Accepted | 2026-10-04 |
-| [006](#adr-006-port-the-tests-first-with-a-fake-claude-on-path)                    | Port the tests first, with a fake claude on PATH                    | Accepted | 2026-10-04 |
-| [007](#adr-007-compatible-in-use-python-native-inside)                             | Compatible in use, Python-native inside (goal superseded by 022)    | Accepted | 2026-10-04 |
-| [008](#adr-008-the-shared-prompt-and-gates-live-in-the-task-file)                  | The shared prompt and gates live in the task file                   | Accepted | 2026-10-06 |
-| [009](#adr-009-the-run-folders-sandboxjson-answers-the-permission-choice)          | The run folder's sandbox.json answers the permission choice         | Accepted | 2026-10-06 |
-| [010](#adr-010-unit-tests-under-make-test-e2e-tests-in-a-container)                | Unit tests under `make test`, e2e tests in a container              | Accepted | 2026-10-06 |
-| [011](#adr-011-the-unit-tests-keep-one-case-per-branch)                            | The unit tests keep one case per branch                             | Accepted | 2026-10-06 |
-| [012](#adr-012-the-tui-runs-the-engine-in-process-as-a-textual-worker)             | The TUI runs the engine in-process as a Textual worker              | Accepted | 2026-10-07 |
-| [013](#adr-013-setup-in-modal-dialogs-over-one-main-window-with-an-explicit-start) | Setup in modal dialogs over one main window, with an explicit Start | Accepted | 2026-10-07 |
-| [014](#adr-014-commits-in-the-tui-per-task-or-after-all-tasks-when-there-is-a-work-tree) | Commits in the TUI: per task or after all tasks, when there is a work tree | Superseded by ADR-026 | 2026-10-07 |
-| [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)   | Logging is a toggle, on by default; the gate timeout has no dialog  | Accepted | 2026-10-07 |
-| [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)               | `--install-skill` installs the bundled skill and exits              | Accepted | 2026-10-07 |
-| [017](#adr-017-the-task-file-is-always-the-run-folders-tasksyaml)    | The task file is always the run folder's tasks.yaml                | Accepted | 2026-10-07 |
-| [018](#adr-018-failed-tasks-are-reset-from-the-menu-or-with---reset-failed)    | Failed tasks are reset from the menu or with --reset-failed         | Accepted | 2026-10-07 |
-| [019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes) | The run log always goes in the run folder's logs folder, in both modes | Accepted | 2026-10-07 |
-| [020](#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column) | The view shows a ticking status line and a Time column | Accepted | 2026-10-08 |
-| [021](#adr-021-the-bypass-flag-is---yolo) | The bypass flag is `--yolo` | Accepted | 2026-10-08 |
-| [022](#adr-022-alr-has-evolved-beyond-gralph) | alr has evolved beyond gralph | Accepted | 2026-10-08 |
-| [023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output) | Plain mode records gate, git, and session-stderr output | Accepted | 2026-10-08 |
-| [024](#adr-024-one---commit-flag-with-three-modes-none-task-and-run) | One `--commit` flag with three modes: none, task, and run | Superseded by ADR-026 | 2026-10-08 |
-| [025](#adr-025-every-outcome-has-an-exit-code-and-a-reason) | Every outcome has an exit code and a reason | Accepted | 2026-10-08 |
-| [026](#adr-026-commits-are-actions-the-task-file-has-after_task-and-after_run) | Commits are actions: the task file has `after_task` and `after_run` | Accepted | 2026-10-11 |
-| [027](#adr-027-sandbox-presets-alr-writes-the-run-folders-sandboxjson) | Sandbox presets: alr writes the run folder's `sandbox.json` | Accepted | 2026-10-29 |
-| [028](#adr-028-publish-releases-to-pypi-with-trusted-publishing-and-manual-approval) | Publish releases to PyPI with trusted publishing and manual approval | Proposed | 2026-10-30 |
-| [029](#adr-029-a-task-may-carry-its-own-actions-run-before-sharedafter_task) | A task may carry its own `actions`, run before `shared.after_task` | Accepted | 2026-11-01 |
-| [030](#adr-030-a-task-may-opt-in-to-a-task-review-and-a-task-remediation) | A task may opt in to a task review and a task remediation | Proposed | 2026-11-02 |
-| [031](#adr-031-a-user-config-directory-with-a-config-file-and-prompt-files) | A user config directory with a config file and prompt files | Accepted | 2026-11-03 |
+| ADR #                                                                                    | Title                                                                      | Status                | Date         |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------- | ------------ |
+| [001](#adr-001-port-gralph-to-python-drop-in-compatible)                                 | Port gralph to Python, drop-in compatible (goal superseded by 022)         | Accepted              | 2026-10-04   |
+| [002](#adr-002-engine-first-the-tui-is-the-next-design)                                  | Engine first; the TUI is the next design                                   | Accepted              | 2026-10-04   |
+| [003](#adr-003-an-async-engine)                                                          | An async engine                                                            | Accepted              | 2026-10-04   |
+| [004](#adr-004-one-engine-two-front-ends)                                                | One engine, two front ends                                                 | Accepted              | 2026-10-04   |
+| [005](#adr-005-pyyaml-nodes-and-hand-written-validation-no-pydantic)                     | PyYAML nodes and hand-written validation, no pydantic                      | Accepted              | 2026-10-04   |
+| [006](#adr-006-port-the-tests-first-with-a-fake-claude-on-path)                          | Port the tests first, with a fake claude on PATH                           | Accepted              | 2026-10-04   |
+| [007](#adr-007-compatible-in-use-python-native-inside)                                   | Compatible in use, Python-native inside (goal superseded by 022)           | Accepted              | 2026-10-04   |
+| [008](#adr-008-the-shared-prompt-and-gates-live-in-the-task-file)                        | The shared prompt and gates live in the task file                          | Accepted              | 2026-10-06   |
+| [009](#adr-009-the-run-folders-sandboxjson-answers-the-permission-choice)                | The run folder's sandbox.json answers the permission choice                | Accepted              | 2026-10-06   |
+| [010](#adr-010-unit-tests-under-make-test-e2e-tests-in-a-container)                      | Unit tests under `make test`, e2e tests in a container                     | Accepted              | 2026-10-06   |
+| [011](#adr-011-the-unit-tests-keep-one-case-per-branch)                                  | The unit tests keep one case per branch                                    | Accepted              | 2026-10-06   |
+| [012](#adr-012-the-tui-runs-the-engine-in-process-as-a-textual-worker)                   | The TUI runs the engine in-process as a Textual worker                     | Accepted              | 2026-10-07   |
+| [013](#adr-013-setup-in-modal-dialogs-over-one-main-window-with-an-explicit-start)       | Setup in modal dialogs over one main window, with an explicit Start        | Accepted              | 2026-10-07   |
+| [014](#adr-014-commits-in-the-tui-per-task-or-after-all-tasks-when-there-is-a-work-tree) | Commits in the TUI: per task or after all tasks, when there is a work tree | Superseded by ADR-026 | 2026-10-07   |
+| [015](#adr-015-logging-is-a-toggle-on-by-default-the-gate-timeout-has-no-dialog)         | Logging is a toggle, on by default; the gate timeout has no dialog         | Accepted              | 2026-10-07   |
+| [016](#adr-016---install-skill-installs-the-bundled-skill-and-exits)                     | `--install-skill` installs the bundled skill and exits                     | Accepted              | 2026-10-07   |
+| [017](#adr-017-the-task-file-is-always-the-run-folders-tasksyaml)                        | The task file is always the run folder's tasks.yaml                        | Accepted              | 2026-10-07   |
+| [018](#adr-018-failed-tasks-are-reset-from-the-menu-or-with---reset-failed)              | Failed tasks are reset from the menu or with --reset-failed                | Accepted              | 2026-10-07   |
+| [019](#adr-019-the-run-log-always-goes-in-the-run-folders-logs-folder-in-both-modes)     | The run log always goes in the run folder's logs folder, in both modes     | Accepted              | 2026-10-07   |
+| [020](#adr-020-the-view-shows-a-ticking-status-line-and-a-time-column)                   | The view shows a ticking status line and a Time column                     | Accepted              | 2026-10-08   |
+| [021](#adr-021-the-bypass-flag-is---yolo)                                                | The bypass flag is `--yolo`                                                | Accepted              | 2026-10-08   |
+| [022](#adr-022-alr-has-evolved-beyond-gralph)                                            | alr has evolved beyond gralph                                              | Accepted              | 2026-10-08   |
+| [023](#adr-023-plain-mode-records-gate-git-and-session-stderr-output)                    | Plain mode records gate, git, and session-stderr output                    | Accepted              | 2026-10-08   |
+| [024](#adr-024-one---commit-flag-with-three-modes-none-task-and-run)                     | One `--commit` flag with three modes: none, task, and run                  | Superseded by ADR-026 | 2026-10-08   |
+| [025](#adr-025-every-outcome-has-an-exit-code-and-a-reason)                              | Every outcome has an exit code and a reason                                | Accepted              | 2026-10-08   |
+| [026](#adr-026-commits-are-actions-the-task-file-has-after_task-and-after_run)           | Commits are actions: the task file has `after_task` and `after_run`        | Accepted              | 2026-10-11   |
+| [027](#adr-027-sandbox-presets-alr-writes-the-run-folders-sandboxjson)                   | Sandbox presets: alr writes the run folder's `sandbox.json`                | Accepted              | 2026-10-29   |
+| [028](#adr-028-publish-releases-to-pypi-with-trusted-publishing-and-manual-approval)     | Publish releases to PyPI with trusted publishing and manual approval       | Proposed              | 2026-10-30   |
+| [029](#adr-029-a-task-may-carry-its-own-actions-run-before-sharedafter_task)             | A task may carry its own `actions`, run before `shared.after_task`         | Accepted              | 2026-11-01   |
+| [030](#adr-030-a-task-may-opt-in-to-a-task-review-and-a-task-remediation)                | A task may opt in to a task review and a task remediation                  | Proposed              | 2026-11-02   |
+| [031](#adr-031-a-user-config-directory-with-a-config-file-and-prompt-files)              | A user config directory with a config file and prompt files                | Accepted              | 2026-11-03   |
 
 ## Inherited Decisions
 
@@ -67,22 +67,22 @@ These gralph decisions apply to `alr` unchanged. Their full text is in gralph's
 `docs/architecture/02_architectural_decisions.md` at v0.12.0. Where a later gralph ADR amends one of them, the last
 column says which `alr` ADR carries the change.
 
-| gralph ADR | Title                                                         | Amended by                       |
-|------------|---------------------------------------------------------------|----------------------------------|
-| ADR-001    | Claude Code only, no agent abstraction                        |                                  |
-| ADR-002    | YAML task file + shared prompt, strict parsing                | ADR-008: one file                |
-| ADR-003    | One fresh session per task, no retry                          | ADR-030: an opted-in task gets more sessions |
-| ADR-004    | The runner owns task state, atomic writes                     |                                  |
-| ADR-005    | Outcome from JSON result line, not exit code                  |                                  |
-| ADR-006    | Failed task blocks run until manual reset                     |                                  |
-| ADR-007    | Unix only, process group lifecycle management                 |                                  |
-| ADR-013    | The runner runs the gates after a completed session           | ADR-026: `shared.after_task`     |
-| ADR-014    | Sessions run in Claude Code's sandbox; bypass only on request | ADR-009: found in the run folder; ADR-021: the flag is `--yolo` |
-| ADR-015    | The runner commits a completed task on request                | ADR-026: a commit is an action   |
-| ADR-016    | The runner logs a run on request                              | ADR-008: no `prompt_file`; ADR-019: the ledger and the run folder |
-| ADR-019    | One gate list per task file                                   | ADR-008: `shared.gates`; ADR-026: `shared.after_task` |
-| ADR-020    | The shared prompt and gates live in the task file             | ADR-008 is `alr`'s version; ADR-026: actions |
-| ADR-021    | The run folder's sandbox.json answers the permission choice   | ADR-009 is `alr`'s version       |
+| gralph ADR   | Title                                                           | Amended by                                                        |
+| ------------ | --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| ADR-001      | Claude Code only, no agent abstraction                          |                                                                   |
+| ADR-002      | YAML task file + shared prompt, strict parsing                  | ADR-008: one file                                                 |
+| ADR-003      | One fresh session per task, no retry                            | ADR-030: an opted-in task gets more sessions                      |
+| ADR-004      | The runner owns task state, atomic writes                       |                                                                   |
+| ADR-005      | Outcome from JSON result line, not exit code                    |                                                                   |
+| ADR-006      | Failed task blocks run until manual reset                       |                                                                   |
+| ADR-007      | Unix only, process group lifecycle management                   |                                                                   |
+| ADR-013      | The runner runs the gates after a completed session             | ADR-026: `shared.after_task`                                      |
+| ADR-014      | Sessions run in Claude Code's sandbox; bypass only on request   | ADR-009: found in the run folder; ADR-021: the flag is `--yolo`   |
+| ADR-015      | The runner commits a completed task on request                  | ADR-026: a commit is an action                                    |
+| ADR-016      | The runner logs a run on request                                | ADR-008: no `prompt_file`; ADR-019: the ledger and the run folder |
+| ADR-019      | One gate list per task file                                     | ADR-008: `shared.gates`; ADR-026: `shared.after_task`             |
+| ADR-020      | The shared prompt and gates live in the task file               | ADR-008 is `alr`'s version; ADR-026: actions                      |
+| ADR-021      | The run folder's sandbox.json answers the permission choice     | ADR-009 is `alr`'s version                                        |
 
 gralph's ADR-008 (Docker-first CI) is already met by this repository's own build. ADR-009 to ADR-012, ADR-017, and
 ADR-018 cover the skill, the TUI, releases, and the wizard, and are left to later designs. gralph's ADR-022 (no check of
@@ -1223,14 +1223,14 @@ identical.
 
 *The contract.*
 
-| Outcome | Exit | Log | Reason |
-|---|---|---|---|
-| Completed | 0 | `run_finished` result `completed` | none |
-| A task or gate failed | 1 | result `failed` | the gate's or session's own text, in `error` |
-| Usage error (a bad flag) | 2 | none | argparse's message |
-| Refused to start | 3 | none | first stderr line: `error: refused: <reason>: <message>` |
-| A commit failed | 4 | result `commit_failed`; the task is `failed` | `error`: `commit failed: <first line of git's or the hook's output>`; from the pre-add re-check, `commit failed: task file visible: <path>` or `commit failed: log folder visible: <logs dir>`; or `commit failed: <git's message>` when git cannot answer the re-check |
-| Stopped | 130 (SIGINT), 143 (SIGTERM) | result `stopped` | none |
+| Outcome                  | Exit                        | Log                                          | Reason                                                                                                                                                                                                                                                                  |
+| ------------------------ | --------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Completed                | 0                           | `run_finished` result `completed`            | none                                                                                                                                                                                                                                                                    |
+| A task or gate failed    | 1                           | result `failed`                              | the gate's or session's own text, in `error`                                                                                                                                                                                                                            |
+| Usage error (a bad flag) | 2                           | none                                         | argparse's message                                                                                                                                                                                                                                                      |
+| Refused to start         | 3                           | none                                         | first stderr line: `error: refused: <reason>: <message>`                                                                                                                                                                                                                |
+| A commit failed          | 4                           | result `commit_failed`; the task is `failed` | `error`: `commit failed: <first line of git's or the hook's output>`; from the pre-add re-check, `commit failed: task file visible: <path>` or `commit failed: log folder visible: <logs dir>`; or `commit failed: <git's message>` when git cannot answer the re-check |
+| Stopped                  | 130 (SIGINT), 143 (SIGTERM) | result `stopped`                             | none                                                                                                                                                                                                                                                                    |
 
 Refusal reasons: `dirty-tree`, `task-file-visible`, `log-folder-visible`, `failed-tasks`, `invalid-task-file`,
 `invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `git-error`, `locked` (another committing run holds
@@ -1502,11 +1502,11 @@ switches always produce the same bytes.
 
 *The presets and switches.*
 
-| Switch                  | Tight | Large | What it sets in `sandbox`                                   |
-|-------------------------|-------|-------|-------------------------------------------------------------|
-| Reach the web           | off   | on    | `network.allowedDomains`: the fixed list below               |
-| Run Docker              | off   | on    | `excludedCommands: ["docker *"]`                             |
-| Hide credential folders | on    | on    | `filesystem.denyRead`: the fixed list below                  |
+| Switch                    | Tight   | Large   | What it sets in `sandbox`                                     |
+| ------------------------- | ------- | ------- | ------------------------------------------------------------- |
+| Reach the web             | off     | on      | `network.allowedDomains`: the fixed list below                |
+| Run Docker                | off     | on      | `excludedCommands: ["docker *"]`                              |
+| Hide credential folders   | on      | on      | `filesystem.denyRead`: the fixed list below                   |
 
 - The credential list is `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/.netrc`, and `~/.claude`.
 - The web list is `github.com`, `*.githubusercontent.com`, `crates.io`, `*.crates.io`, `pypi.org`,
@@ -1805,18 +1805,18 @@ Today a task is `completed` when its session reports success and its actions pas
 
 Words used below (the owner's, settled in the design talk):
 
-| Term | Meaning |
-|---|---|
-| **task** | One entry in `tasks.yaml`, as today |
-| **task session** | The Claude session that does the work; "session" in older ADRs means this |
-| **task review** | A fresh Claude session that inspects the result against the rules and writes the findings file |
-| **finding** | One rule violation: file, line, rule, why it matters |
-| **findings file** | The YAML file the task review writes and alr reads |
-| **task remediation** | A Claude session that fixes the findings from a task review |
-| **task review round** | One task review followed by one task remediation |
-| **max task review rounds** | The cap on how many task review rounds a task gets |
-| **actions** | alr's existing term (ADR-026, ADR-029); the build and tests are actions |
-| **unresolved finding** | A finding still open after the last task review |
+| Term                       | Meaning                                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| **task**                   | One entry in `tasks.yaml`, as today                                                            |
+| **task session**           | The Claude session that does the work; "session" in older ADRs means this                      |
+| **task review**            | A fresh Claude session that inspects the result against the rules and writes the findings file |
+| **finding**                | One rule violation: file, line, rule, why it matters                                           |
+| **findings file**          | The YAML file the task review writes and alr reads                                             |
+| **task remediation**       | A Claude session that fixes the findings from a task review                                    |
+| **task review round**      | One task review followed by one task remediation                                               |
+| **max task review rounds** | The cap on how many task review rounds a task gets                                             |
+| **actions**                | alr's existing term (ADR-026, ADR-029); the build and tests are actions                        |
+| **unresolved finding**     | A finding still open after the last task review                                                |
 
 **Decision:**
 

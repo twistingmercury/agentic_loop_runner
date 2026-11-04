@@ -40,10 +40,12 @@ Inputs the spec implies that no obvious test covers, most likely first. Each has
 ### Task 1: Parse a task's `actions`
 
 **Files:**
+
 - Modify: `src/alr/tasks.py` (`Task`, `TaskList`, `_parse_task`, `_check_actions`, `_check_action`)
 - Test: `tests/unit/test_tasks_parse.py`
 
 **Interfaces:**
+
 - Produces: `Task.actions: list[Action]` (default empty), and `TaskList.actions_for(task: Task) -> list[Action]` returning `task.actions + self.after_task_list()`. Tasks 3, 4, and 5 use both.
 - Changes: `_check_actions(label: str, node: yaml.Node) -> list[Action]`, where `label` is the full prefix for messages (`shared.after_task` or `tasks[0] (id 1): actions`). `_optional_actions` passes `f"shared.{key}"`.
 
@@ -131,7 +133,7 @@ In `src/alr/tasks.py`:
 - `_check_actions(label, node)` uses `label` in both messages; `_check_action` is unchanged. `_optional_actions` calls it with `f"shared.{key}"`.
 - `_parse_task` reads `actions` with a new helper `_task_actions(where: str, fields: dict[str, yaml.Node]) -> list[Action]` that returns `[]` when the key is absent and otherwise `_check_actions(f"{where}: actions", node)`. Call it after the `after_task`/`after_run` refusal loop, and update that loop's message to the verbatim text in Global Constraints.
 - After those checks, a new `_check_task_keys(where: str, fields: dict[str, yaml.Node]) -> None` refuses any key outside the six known ones with the verbatim unknown-key message. The comment says why: a dropped key would run the task without its checks and the next save would erase it.
-- Docstrings follow the code: `_check_actions` no longer says "under shared.<key>" (it checks any action list, named by `label`), and `Action`'s docstring names the three places a list can sit.
+- Docstrings follow the code: `_check_actions` no longer says `"under shared.<key>"` (it checks any action list, named by `label`), and `Action`'s docstring names the three places a list can sit.
 
 - [ ] **Step 4: Run the whole parse module**
 
@@ -150,10 +152,12 @@ git commit -s -m "Parse a task's own actions list"
 ### Task 2: Save a task's `actions`
 
 **Files:**
+
 - Modify: `src/alr/tasks.py` (`_task_entry`)
 - Test: `tests/unit/test_tasks_save.py`
 
 **Interfaces:**
+
 - Consumes: `Task.actions` from Task 1.
 - Produces: a saved file whose task carries `actions` between `prompt` and `state` when non-empty, and no `actions` key otherwise.
 
@@ -205,10 +209,12 @@ git commit -s -m "Save a task's own actions back to the file"
 ### Task 3: Run a task's actions before the shared ones
 
 **Files:**
+
 - Modify: `src/alr/engine/loop.py` (`_run_task`)
 - Test: `tests/unit/test_actions.py`
 
 **Interfaces:**
+
 - Consumes: `TaskList.actions_for(task)` from Task 1.
 - Produces: the run behaviour Tasks 6 and 7 document and test end to end.
 
@@ -302,10 +308,12 @@ git commit -s -m "Run a task's own actions before the shared after_task actions"
 ### Task 4: Dry run prints per-task action limits
 
 **Files:**
+
 - Modify: `src/alr/plain/dryrun.py` (`_print_action_limits`)
 - Test: `tests/unit/test_plain_dryrun.py`
 
 **Interfaces:**
+
 - Consumes: `Task.actions` from Task 1; `_print_list_limits(out, key, actions, override)` as it exists.
 - Produces: the `task <id> actions:` lines Task 7 checks end to end.
 
@@ -391,11 +399,13 @@ git commit -s -m "Print a task's own action limits in the dry run"
 ### Task 5: The progress line counts both lists
 
 **Files:**
+
 - Modify: `src/alr/tui/progress.py` (`Progress.__init__`, `feed`)
 - Modify: `src/alr/tui/app.py` (`_start_ticking`, the keyword name only)
 - Test: `tests/unit/test_tui_progress.py`
 
 **Interfaces:**
+
 - Consumes: `Task.actions` from Task 1; `TaskStarted.task` already carries a copy of the task.
 - Changes: `Progress.__init__(self, total_tasks: int, shared_action_count: int, clock=...)`. The old name `action_count` goes; update the four constructor calls in `tests/unit/test_tui_progress.py` and the one in `app.py`.
 
@@ -445,12 +455,14 @@ git commit -s -m "Count a task's own actions in the progress line"
 ### Task 6: Skill, template, README, changelog
 
 **Files:**
+
 - Modify: `src/alr/skills/alr-task-file/SKILL.md` (the actions section, lines 35 to 82, and step 5 of the procedure, lines 112 to 130)
 - Modify: `src/alr/skills/alr-task-file/templates/tasks_template.yaml` (the task entry)
 - Modify: `README.md` (the Actions section, lines 130 to 170, and the `--dry-run` row at line 87)
 - Modify: `CHANGELOG.md` (`[Unreleased]`)
 
 **Interfaces:**
+
 - Consumes: the behaviour from Tasks 1 to 5. No code.
 
 - [ ] **Step 1: The skill**
@@ -510,10 +522,12 @@ git commit -s -m "Document a task's own actions in the skill, template, README, 
 ### Task 7: End-to-end tests
 
 **Files:**
+
 - Test: `tests/e2e/test_actions.py`
 - Test: `tests/e2e/e2e_helpers.py` (a task block with actions)
 
 **Interfaces:**
+
 - Consumes: `shared_block`, `write_tasks_yaml`, `run_alr`, `run_args`, `run_dry_run`, `run_log`, `read_tasks_yaml`, `task_states`, `task_errors` as they exist. These tests are black-box against the wheel and share nothing with the unit tests.
 
 - [ ] **Step 1: Add a helper**
@@ -577,17 +591,19 @@ git commit -s -m "Cover a task's own actions end to end"
 ### Task 8: Design documents and the wiki
 
 **Files:**
+
 - Modify: `docs/design/02_architectural_decisions.md` (ADR-029 status to Accepted; frontmatter version, date, notes)
 - Modify: `docs/design/01_requirements.md` (requirements 2, 4, and the Action enforcement row; frontmatter)
 - Modify: `docs/design/03_system_architecture.md` (the parse bullets at lines 189 to 198, the run bullet at 228, the dry-run bullet at 297, the progress bullet at 347; frontmatter)
 - Modify, in the wiki clone at `/home/jeremy/dev/agentic_loop_runner.wiki/` (absolute path; a subagent's working directory resets between calls): `Actions.md` (a new section after "The two lists"; drop "alr won't accept them on a single task"; the variables table at lines 90 to 95 says `after_task` in its "Set for" column, make it "a task's own and `after_task`"), `Write-a-task-file.md` (add `actions` to the task fields; say any other task key is refused), `Plain-mode-and-the-run-log.md` (line 66, "Each `after_task:` or `after_run:` line" gains the `task <id> actions:` line)
 
 **Interfaces:**
+
 - Consumes: the built behaviour. The wiki is a separate repository: edit and commit in the local clone; the owner pushes it.
 
 - [ ] **Step 1: ADR-029 to Accepted**
 
-Change its status line to `**Status:** Accepted. It amends ADR-026: ...` keeping the rest of the sentence. Bump the frontmatter to version 46, today's date, and a note that starts `ADR-029 is Accepted: a task's own actions are built and documented. Earlier: `.
+Change its status line to `**Status:** Accepted. It amends ADR-026: ...` keeping the rest of the sentence. Bump the frontmatter to version 46, today's date, and a note that starts `ADR-029 is Accepted: a task's own actions are built and documented. Earlier:`.
 
 - [ ] **Step 2: Requirements**
 

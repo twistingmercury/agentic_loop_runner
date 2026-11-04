@@ -29,25 +29,27 @@
 
 ## File Structure
 
-| File | Change |
-|---|---|
-| `src/alr/engine/proc.py` | `start` takes `new_session` and `die_with_parent` |
-| `src/alr/plain/frontend.py`, `src/alr/stream/frontend.py` | `_run_command` passes both for git |
-| `src/alr/engine/commit.py` | `git_dir`, `held_lock`, `recheck_ignored`; `_commit_changes` re-checks first |
-| `src/alr/engine/loop.py` | `RunOptions.run_dir` |
-| `src/alr/plain/start.py`, `src/alr/plain/dryrun.py`, `src/alr/tui/prepare.py` | take and release the lock; pass `run_dir` |
-| `tests/unit/test_proc.py`, `test_commit.py`, `test_plain_start.py`, `test_plain_dryrun.py`, `test_tui_prepare.py`; `tests/e2e/test_commit_safety.py` | tests named in each task |
-| `README.md`, `CHANGELOG.md`, `docs/design/02,03` | Task 4 |
+| File                                                                                                                                                 | Change                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `src/alr/engine/proc.py`                                                                                                                             | `start` takes `new_session` and `die_with_parent`                            |
+| `src/alr/plain/frontend.py`, `src/alr/stream/frontend.py`                                                                                            | `_run_command` passes both for git                                           |
+| `src/alr/engine/commit.py`                                                                                                                           | `git_dir`, `held_lock`, `recheck_ignored`; `_commit_changes` re-checks first |
+| `src/alr/engine/loop.py`                                                                                                                             | `RunOptions.run_dir`                                                         |
+| `src/alr/plain/start.py`, `src/alr/plain/dryrun.py`, `src/alr/tui/prepare.py`                                                                        | take and release the lock; pass `run_dir`                                    |
+| `tests/unit/test_proc.py`, `test_commit.py`, `test_plain_start.py`, `test_plain_dryrun.py`, `test_tui_prepare.py`; `tests/e2e/test_commit_safety.py` | tests named in each task                                                     |
+| `README.md`, `CHANGELOG.md`, `docs/design/02,03`                                                                                                     | Task 4                                                                       |
 
 ---
 
 ### Task 1: Git runs in its own session and dies with alr
 
 **Files:**
+
 - Modify: `src/alr/engine/proc.py` (`start`), `src/alr/plain/frontend.py` and `src/alr/stream/frontend.py` (`_run_command`)
 - Test: `tests/unit/test_proc.py`
 
 **Interfaces:**
+
 - Produces: `proc.start(..., new_session: bool = False, die_with_parent: bool = False)`. With `new_session` the child calls `setsid` (it is its own group leader too, so `_signal_group(pid)` still reaches it). With `die_with_parent` on Linux the child gets SIGTERM when alr dies (SIGTERM, not SIGKILL, so git removes its `index.lock`); elsewhere the flag does nothing.
 
 - [ ] **Step 1: Write the failing tests**
@@ -161,10 +163,12 @@ git commit -m "Start git in its own session and have the kernel stop it if alr d
 ### Task 2: A lock refuses a second committing run
 
 **Files:**
+
 - Modify: `src/alr/engine/commit.py`, `src/alr/plain/start.py`, `src/alr/plain/dryrun.py`, `src/alr/tui/prepare.py`
 - Test: `tests/unit/test_commit.py`, `tests/unit/test_plain_start.py`, `tests/unit/test_plain_dryrun.py`, `tests/unit/test_tui_prepare.py`
 
 **Interfaces:**
+
 - Consumes: `RefusedError`, `LOCKED` (stage 1).
 - Produces: `Repo.git_dir: str` (absolute), filled by `find_repo` from `git rev-parse --absolute-git-dir`.
 - Produces: `held_lock(repo: Repo | None) -> ContextManager[None]`: a no-op for `None`; otherwise takes `<git_dir>/alr.lock` with `flock(LOCK_EX | LOCK_NB)` and releases on exit; a held lock raises `RefusedError(LOCKED, "another alr run is committing in this repository")`.
@@ -306,10 +310,12 @@ git commit -m "Refuse a second committing run with a flock the kernel releases w
 ### Task 3: Re-check the ignore rules before every `git add -A`
 
 **Files:**
+
 - Modify: `src/alr/engine/commit.py` (`recheck_ignored`, `_commit_changes`, `commit`, `commit_all`), `src/alr/engine/loop.py` (`RunOptions.run_dir`), `src/alr/plain/start.py`, `src/alr/tui/prepare.py`
 - Test: `tests/unit/test_commit.py`
 
 **Interfaces:**
+
 - Produces: `RunOptions.run_dir: str | None = None`, the run's own log folder (`None` when logging is off).
 - Produces: `recheck_ignored(repo, tasks_file, run_dir) -> str | None`, the reason (`task file visible: <path>` or `log folder visible: <path>`) or `None`.
 - Produces: `commit(repo, task, front_end, guard)` and `commit_all(repo, tasks, front_end, guard)` where `guard: Callable[[], Awaitable[str | None]]` runs before `git add -A`; a returned reason is the commit's failure and nothing is staged.
@@ -401,17 +407,18 @@ git commit -m "Re-check the task file and log folder are ignored before every gi
 ### Task 4: e2e, documentation, and closing ADR-025
 
 **Files:**
+
 - Create: `tests/e2e/test_commit_safety.py`
 - Modify: `README.md`, `CHANGELOG.md`, `docs/design/02_architectural_decisions.md` (status), `docs/design/03_system_architecture.md`
 
 - [ ] **Step 1: e2e tests** (black-box, run against the wheel in the container; model on `test_commit_run.py` and `test_signal.py`)
 
-| Test | Arrangement | Assertion |
-|---|---|---|
-| `test_second_committing_run_is_refused` | start one `--commit run` alr with a blocking fake claude; start a second in the same repo | second exits 3, stderr first line starts `error: refused: locked: `, no second `logs/` folder |
-| `test_lock_is_free_after_a_kill` | start a committing run, `SIGKILL` it, start another | the second runs and exits 0 |
-| `test_unignored_task_file_fails_the_commit` | a gate rewrites `.gitignore` | exit 4; stderr has `task file visible` |
-| `test_sigkill_during_a_commit_hook_lands_no_commit` | a `pre-commit` hook that signals ready, then sleeps 5 s; `SIGKILL` alr while it sleeps | after 7 s, `git log` still shows only `init` (skip off Linux) |
+| Test                                                | Arrangement                                                                               | Assertion                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `test_second_committing_run_is_refused`             | start one `--commit run` alr with a blocking fake claude; start a second in the same repo | second exits 3, stderr first line starts `error: refused: locked:`, no second `logs/` folder |
+| `test_lock_is_free_after_a_kill`                    | start a committing run, `SIGKILL` it, start another                                       | the second runs and exits 0                                                                  |
+| `test_unignored_task_file_fails_the_commit`         | a gate rewrites `.gitignore`                                                              | exit 4; stderr has `task file visible`                                                       |
+| `test_sigkill_during_a_commit_hook_lands_no_commit` | a `pre-commit` hook that signals ready, then sleeps 5 s; `SIGKILL` alr while it sleeps    | after 7 s, `git log` still shows only `init` (skip off Linux)                                |
 
 - [ ] **Step 2:** `make build` passes with all of them.
 - [ ] **Step 3: Docs.** Delegate to the `technical writer`: the README documents the lock (`locked` refusal), the pre-add re-check (exit 4 reasons), and the limit on platforms without `PR_SET_PDEATHSIG`; the CHANGELOG `[Unreleased]` gets an Added/Changed entry; `03_system_architecture.md` describes the guards (use `/design-docs-writer`, bump the frontmatter). In `02_architectural_decisions.md` change ADR-025 from `Proposed` to `Accepted` in both its status line and the Decision Summary row, and bump the frontmatter.

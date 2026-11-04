@@ -38,31 +38,33 @@ These are inputs the spec implies and no single task's happy path exercises. Eac
 
 ## File Structure
 
-| File | Change |
-|---|---|
-| `src/alr/errors.py` | `exit_code` on every class; new `RefusedError`, `CommitFailedError`; `FailedTasksError` becomes a refusal |
-| `src/alr/tasks.py` | new `RunResult`, `PASSED`; line-break check on task names |
-| `src/alr/engine/stop.py` | new: `Stop`, which signal stopped the run |
-| `src/alr/engine/frontend.py` | `run_done` gets `result` and `exit_code`; new `FirstLine` helper |
-| `src/alr/engine/loop.py` | result and exit mapping; commit failure raises `CommitFailedError`; `run`-mode lifecycle |
-| `src/alr/engine/commit.py` | refusals raise `RefusedError`; `commit` returns git's reason |
-| `src/alr/record/events.py`, `record/runlog.py` | `RunDone` fields; `run_finished` `result` and `exit`; `commit` mode field |
-| `src/alr/plain/*.py`, `src/alr/stream/frontend.py` | `run_done` and `run_git` changes; refusal order in `start` |
-| `src/alr/cli.py` | map `exit_code`; signal exit codes; missing flag is exit 2 |
-| `src/alr/tui/*.py` | `passed` rows; refusal text without its prefix; drop redundant mount lookup |
-| `tests/unit/*`, `tests/e2e/test_outcomes.py` | tests named in each task |
-| `README.md`, `CHANGELOG.md`, `src/alr/skills/...`, `docs/design/01,03` | Task 9 |
+| File                                                                   | Change                                                                                                    |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `src/alr/errors.py`                                                    | `exit_code` on every class; new `RefusedError`, `CommitFailedError`; `FailedTasksError` becomes a refusal |
+| `src/alr/tasks.py`                                                     | new `RunResult`, `PASSED`; line-break check on task names                                                 |
+| `src/alr/engine/stop.py`                                               | new: `Stop`, which signal stopped the run                                                                 |
+| `src/alr/engine/frontend.py`                                           | `run_done` gets `result` and `exit_code`; new `FirstLine` helper                                          |
+| `src/alr/engine/loop.py`                                               | result and exit mapping; commit failure raises `CommitFailedError`; `run`-mode lifecycle                  |
+| `src/alr/engine/commit.py`                                             | refusals raise `RefusedError`; `commit` returns git's reason                                              |
+| `src/alr/record/events.py`, `record/runlog.py`                         | `RunDone` fields; `run_finished` `result` and `exit`; `commit` mode field                                 |
+| `src/alr/plain/*.py`, `src/alr/stream/frontend.py`                     | `run_done` and `run_git` changes; refusal order in `start`                                                |
+| `src/alr/cli.py`                                                       | map `exit_code`; signal exit codes; missing flag is exit 2                                                |
+| `src/alr/tui/*.py`                                                     | `passed` rows; refusal text without its prefix; drop redundant mount lookup                               |
+| `tests/unit/*`, `tests/e2e/test_outcomes.py`                           | tests named in each task                                                                                  |
+| `README.md`, `CHANGELOG.md`, `src/alr/skills/...`, `docs/design/01,03` | Task 9                                                                                                    |
 
 ---
 
 ### Task 1: Exit codes live on the error classes
 
 **Files:**
+
 - Modify: `src/alr/errors.py`
 - Modify: `src/alr/cli.py` (`_main`, `_install_skill`, `_run`, `_report_missing` callers)
 - Test: `tests/unit/test_errors.py`, `tests/unit/test_cli.py`
 
 **Interfaces:**
+
 - Produces: `AlrError.exit_code: int` (default 1); `UsageError.exit_code == 2`; `RefusedError(reason: str, message: str)` with `.reason`, `.message`, `exit_code == 3`, `str(exc) == f"refused: {reason}: {message}"`; `CommitFailedError(RunError)` with `exit_code == 4`; `FailedTasksError(task_list)` is a `RefusedError` with reason `failed-tasks`.
 - Produces: reason constants in `errors.py`: `DIRTY_TREE`, `TASK_FILE_VISIBLE`, `LOG_FOLDER_VISIBLE`, `FAILED_TASKS`, `INVALID_TASK_FILE`, `LOCKED` (the strings above).
 
@@ -184,7 +186,7 @@ In `cli.py`, replace every `return 1` that reports an `AlrError` with `return ex
 
 - [ ] **Step 4: Run to verify they pass**, then `make test`, then `make build`.
 
-Expected: the new tests pass. Eleven existing e2e tests assert exit 1 for usage errors and now expect 2 (`test_dir.py::test_dir_missing_tasks_file`, `test_dry_run.py::test_dry_run_missing_dir_flag` and `..._with_reset_failed_is_refused`, `test_flags.py::test_missing_tasks`, `test_gates.py` bad `--gate-timeout` (two cases), `test_sandbox.py` permission-flag cases (five)); update them. Existing tests that assert the `FailedTasksError` message or `error: ` text for a failed-task file now fail on the `refused: failed-tasks: ` prefix; update their expected text (only the prefix changes).
+Expected: the new tests pass. Eleven existing e2e tests assert exit 1 for usage errors and now expect 2 (`test_dir.py::test_dir_missing_tasks_file`, `test_dry_run.py::test_dry_run_missing_dir_flag` and `..._with_reset_failed_is_refused`, `test_flags.py::test_missing_tasks`, `test_gates.py` bad `--gate-timeout` (two cases), `test_sandbox.py` permission-flag cases (five)); update them. Existing tests that assert the `FailedTasksError` message or `error:` text for a failed-task file now fail on the `refused: failed-tasks:` prefix; update their expected text (only the prefix changes).
 
 - [ ] **Step 5: Commit**
 
@@ -198,11 +200,13 @@ git commit -m "Give every error class its exit code and add the refusal and comm
 ### Task 2: A stop exits 130 or 143
 
 **Files:**
+
 - Create: `src/alr/engine/stop.py`
 - Modify: `src/alr/engine/loop.py` (`RunOptions.stop`), `src/alr/cli.py` (`_run`, `_with_signals`, `_stop_once`, `main`), `src/alr/plain/start.py` (pass `stop`)
 - Test: `tests/unit/test_cli.py`, new `tests/unit/test_stop.py`
 
 **Interfaces:**
+
 - Produces: `Stop` dataclass with `signum: int = signal.SIGINT` and `exit_code() -> int` (`128 + signum`).
 - Produces: `RunOptions.stop: Stop = field(default_factory=Stop)`.
 - Produces: `start(..., stop: Stop | None = None)` passes it into `RunOptions`.
@@ -278,10 +282,12 @@ git commit -m "Exit 130 on SIGINT and 143 on SIGTERM, from one record of the sig
 ### Task 3: The run log says how the run ended and which commit mode ran
 
 **Files:**
+
 - Modify: `src/alr/tasks.py` (`RunResult`), `src/alr/engine/frontend.py` (`run_done`), `src/alr/engine/loop.py` (`run`, new `_ending`), `src/alr/record/events.py` (`RunDone`), `src/alr/record/runlog.py` (`Info.commit`, `_run_done`, drop `_failed`), `src/alr/plain/frontend.py`, `src/alr/stream/frontend.py`, `src/alr/plain/start.py` (`_info`), `src/alr/tui/prepare.py` (`_open_log`)
 - Test: `tests/unit/test_runlog.py`, `tests/unit/test_loop.py`, `tests/unit/test_plain_record.py`, `tests/unit/test_tui_app.py`, `tests/unit/test_tui_progress.py`, `tests/unit/test_tui_prepare.py`
 
 **Interfaces:**
+
 - Produces: `RunResult(StrEnum)` in `alr/tasks.py`: `COMPLETED="completed"`, `FAILED="failed"`, `COMMIT_FAILED="commit_failed"`, `STOPPED="stopped"`.
 - Produces: `FrontEnd.run_done(error: str | None, seconds: float, result: RunResult, exit_code: int) -> None`.
 - Produces: `RunDone(error, seconds, result: RunResult = RunResult.COMPLETED, exit_code: int = 0)`.
@@ -397,10 +403,12 @@ git commit -m "Record how a run ended and which commit mode ran in the run log"
 ### Task 4: Refusals exit 3, before anything is written
 
 **Files:**
+
 - Modify: `src/alr/engine/commit.py` (`check_clean`, `_check_task_file`, `check_log_dir`), `src/alr/plain/report.py` (`load_tasks_report`), `src/alr/plain/start.py` (order), `src/alr/engine/loop.py` (`reset_failed` stays; callers reorder), `src/alr/tui/prepare.py`, `src/alr/tui/app.py` (`_error_text`)
 - Test: `tests/unit/test_commit.py`, `tests/unit/test_plain_start.py`, `tests/unit/test_plain_dryrun.py`, `tests/unit/test_tui_prepare.py`
 
 **Interfaces:**
+
 - Consumes: `RefusedError`, reason constants (Task 1).
 - Produces: `check_clean`, `_check_task_file`, `check_log_dir` raise `RefusedError` with `DIRTY_TREE`, `TASK_FILE_VISIBLE`, `LOG_FOLDER_VISIBLE`. The git probe failures (`git rev-parse`, `git status`, `git check-ignore` failing) also raise `RefusedError`, reason `GIT_ERROR`; `RepoError` is then unused and is deleted.
 - Produces: `load_tasks_report` raises `RefusedError(INVALID_TASK_FILE, <the existing text>)` for an unreadable or invalid file, and `FailedTasksError` as before.
@@ -446,7 +454,7 @@ In `tests/unit/test_plain_dryrun.py`: an invalid file and a dirty tree with `com
 Run: `uv run pytest tests/unit/test_commit.py tests/unit/test_plain_start.py tests/unit/test_plain_dryrun.py -v`
 Expected: FAIL (`RepoError` raised; the order check fails).
 
-Also add, in `tests/unit/test_commit.py`, `test_a_broken_repository_is_refused_with_git_error` (change the existing `test_open_repo_broken_repository_is_an_error` and `..._status_failure_carries_gits_message` to expect `RefusedError` with reason `git-error`), in `tests/unit/test_cli.py` a bad `--sandbox-settings` file exiting 3 with first stderr line starting `error: refused: invalid-sandbox-settings: `, and in `tests/unit/test_plain_start.py` an unwritable `logs/` folder (make `logs` a regular file) raising `RefusedError` with reason `log-unwritable`.
+Also add, in `tests/unit/test_commit.py`, `test_a_broken_repository_is_refused_with_git_error` (change the existing `test_open_repo_broken_repository_is_an_error` and `..._status_failure_carries_gits_message` to expect `RefusedError` with reason `git-error`), in `tests/unit/test_cli.py` a bad `--sandbox-settings` file exiting 3 with first stderr line starting `error: refused: invalid-sandbox-settings:`, and in `tests/unit/test_plain_start.py` an unwritable `logs/` folder (make `logs` a regular file) raising `RefusedError` with reason `log-unwritable`.
 
 - [ ] **Step 3: Implement**
 
@@ -500,10 +508,12 @@ git commit -m "Refuse to start with exit 3 and a reason, before the run log or -
 ### Task 5: A failed commit exits 4 and says why (task mode)
 
 **Files:**
+
 - Modify: `src/alr/engine/frontend.py` (`FirstLine`), `src/alr/plain/frontend.py` and `src/alr/stream/frontend.py` (`run_git`, `_run_command`), `src/alr/engine/commit.py` (`commit`), `src/alr/engine/loop.py` (`_run_task`, `_run_and_save`)
 - Test: `tests/unit/test_commit.py`, `tests/unit/test_stream_frontend.py`, `tests/unit/test_loop.py`
 
 **Interfaces:**
+
 - Produces: `FirstLine` in `engine/frontend.py`: `take(line: str) -> None` keeps the first non-empty line, trimmed to 200 characters; `reason(error: str | None) -> str | None` is `None` when `error` is `None`, else the kept line, else `error`.
 - Produces: `commit(repo, task, front_end) -> str | None`, git's reason or `None` (same shape as `commit_all`).
 - Produces: a task-mode commit failure saves the task `failed` with `commit failed: <reason>` and raises `CommitFailedError`.
@@ -633,10 +643,12 @@ git commit -m "Exit 4 when a commit fails, with git's first output line as the r
 ### Task 6: `run` mode is all-or-nothing
 
 **Files:**
+
 - Modify: `src/alr/tasks.py` (`PASSED`), `src/alr/engine/loop.py` (`_run_loop`, `_run_and_save`, `_commit_after_all`), `src/alr/tui/panes.py`
 - Test: `tests/unit/test_commit.py` (the `run` tests near line 735), `tests/unit/test_tui_panes.py`
 
 **Interfaces:**
+
 - Consumes: `CommitFailedError`, `_Outcome` (Task 5), `RunOptions.stop` (Task 2).
 - Produces: `PASSED = "passed"` in `alr/tasks.py`, a log-only word never saved to `tasks.yaml`.
 - Produces: in `run` mode with a repository, `task_finished` says `passed` for a task whose gates passed, and `tasks.yaml` is written once, at the end, by `_finish_deferred`.
@@ -826,11 +838,13 @@ git commit -m "Make run mode all-or-nothing: save tasks.yaml once, after the sin
 ### Task 7: A task name cannot contain a line break
 
 **Files:**
+
 - Modify: `src/alr/tasks.py` (`_parse_task`)
 - Test: `tests/unit/test_tasks_parse.py`
 - Modify: `src/alr/skills/gralph-docs-writer/SKILL.md` (document the rule)
 
 **Interfaces:**
+
 - Consumes: `TaskFileError`, `_where` (existing). Produces: `_parse_task` rejects such a name with `tasks[i] (id N): name: must be a single line`.
 
 - [ ] **Step 1: Write the failing test**
@@ -877,6 +891,7 @@ git commit -m "Reject a task name that contains a line break"
 ### Task 8: Drop the view's redundant mount-time work-tree lookup
 
 **Files:**
+
 - Modify: `src/alr/tui/app.py` (the `_look_for_work_tree` call made on mount)
 - Test: `tests/unit/test_tui_app.py`
 
@@ -900,10 +915,12 @@ git commit -m "Drop the view's redundant mount-time work-tree lookup"
 ### Task 8b: The full-screen view exits with the same codes
 
 **Files:**
+
 - Modify: `src/alr/tui/app.py` (`outcome` handling, `_finish`, `run_app`)
 - Test: `tests/unit/test_tui_app.py`
 
 **Interfaces:**
+
 - Consumes: `RunDone.exit_code` (Task 3). Produces: `AlrApp.exit_code: int`, `run_app` returns it.
 
 - [ ] **Step 1: Write the failing tests.** Drive the app with the file's existing pilot pattern and a fake run: a clean run leaves `app.exit_code == 0`; a failed task 1; a failed commit 4; the user's Stop 130. A session where no run ever started (quit from the Ready screen) also leaves 0. A refusal at Start (dirty tree) keeps the view on the Ready screen with the refusal's message and does not exit, so there is no code to test there.
@@ -922,6 +939,7 @@ git commit -m "Exit the full-screen view with the same codes as plain mode"
 ### Task 9: One e2e test per exit code
 
 **Files:**
+
 - Create: `tests/e2e/test_outcomes.py`
 - Test helpers: `tests/e2e/e2e_helpers.py` (`run_alr`, `run_args`, `write_tasks_yaml`, `start_alr`, `shared_block`), `tests/e2e/conftest.py` (`fake_claude`, `git_repo`)
 
@@ -929,14 +947,14 @@ The suite is black-box: it never imports alr, and it shares nothing with the uni
 
 - [ ] **Step 1: Write the tests**, modelled on `test_commit_run.py` and `test_signal.py`
 
-| Test | Arrangement | Assertion |
-|---|---|---|
-| `test_completed_exits_0` | `ONE_TASK`, fake claude completes | code 0; `run.jsonl` last line `result: completed`, `exit: 0` |
-| `test_failed_task_exits_1` | fake claude reports failed | code 1; `result: failed`, `exit: 1` |
-| `test_bad_flag_exits_2` | `--gate-timeout soon` | code 2 |
-| `test_refusal_exits_3_and_writes_no_log` | git repo, dirty tree, `--commit run` | code 3; first stderr line starts `error: refused: dirty-tree: `; no `logs/` folder in the run folder |
-| `test_commit_failure_exits_4` | `pre-commit` hook that prints `no` and exits 1, `--commit task` | code 4; stderr has `commit failed: no`; `result: commit_failed`, `exit: 4`; the task is `failed` in `tasks.yaml` |
-| `test_sigint_exits_130`, `test_sigterm_exits_143` | blocked fake claude as in `test_signal.py` | codes 130 and 143; `result: stopped` with `exit` 130 or 143 |
+| Test                                              | Arrangement                                                     | Assertion                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `test_completed_exits_0`                          | `ONE_TASK`, fake claude completes                               | code 0; `run.jsonl` last line `result: completed`, `exit: 0`                                                     |
+| `test_failed_task_exits_1`                        | fake claude reports failed                                      | code 1; `result: failed`, `exit: 1`                                                                              |
+| `test_bad_flag_exits_2`                           | `--gate-timeout soon`                                           | code 2                                                                                                           |
+| `test_refusal_exits_3_and_writes_no_log`          | git repo, dirty tree, `--commit run`                            | code 3; first stderr line starts `error: refused: dirty-tree:`; no `logs/` folder in the run folder              |
+| `test_commit_failure_exits_4`                     | `pre-commit` hook that prints `no` and exits 1, `--commit task` | code 4; stderr has `commit failed: no`; `result: commit_failed`, `exit: 4`; the task is `failed` in `tasks.yaml` |
+| `test_sigint_exits_130`, `test_sigterm_exits_143` | blocked fake claude as in `test_signal.py`                      | codes 130 and 143; `result: stopped` with `exit` 130 or 143                                                      |
 
 Add one more: `test_run_mode_failed_run_leaves_nothing_completed` (two tasks, the second fails, `--commit run`): `task_states` is `["pending", "failed"]`.
 
@@ -958,6 +976,7 @@ git commit -m "Add an e2e test for each exit code"
 Delegate to the `technical writer` agent. This is documentation for behavior that now exists.
 
 **Files:**
+
 - Modify: `README.md` (exit codes table; the commit-leftovers warning for `run` mode is replaced: a failed or stopped `run` leaves nothing completed, so the leftover work can be discarded and the run repeated), `CHANGELOG.md` (`[Unreleased]`: Changed, Added), `src/alr/skills/gralph-docs-writer/SKILL.md` (task names are one line), `docs/design/01_requirements.md`, `docs/design/03_system_architecture.md` (use the `/design-docs-writer` skill; bump each frontmatter)
 
 - [ ] **Step 1:** Brief the writer with ADR-025 and this plan's task list. List the breaking changes in the CHANGELOG: a stop and a refusal no longer exit 1; `commit` in `run_started` is a string; `run` mode saves nothing until the commit lands; `task` mode's `completed` also means committed; a task name with a line break is rejected.

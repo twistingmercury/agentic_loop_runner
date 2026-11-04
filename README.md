@@ -29,17 +29,17 @@ a `tasks.yaml` list, one fresh Claude session per task. It began as the Python p
 
 Everything a user needs lives in the [wiki](https://github.com/twistingmercury/agentic_loop_runner/wiki):
 
-| To do this                                   | Read                                                                                                              |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Install alr                                  | [Install](https://github.com/twistingmercury/agentic_loop_runner/wiki/Install)                                    |
-| Make a first run                             | [Your first run](https://github.com/twistingmercury/agentic_loop_runner/wiki/Your-first-run)                      |
-| Write a task file                            | [Write a task file](https://github.com/twistingmercury/agentic_loop_runner/wiki/Write-a-task-file)                |
-| Run commands around tasks (tests, commits)   | [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions)                                    |
+| To do this                                   | Read                                                                                                                   |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Install alr                                  | [Install](https://github.com/twistingmercury/agentic_loop_runner/wiki/Install)                                         |
+| Make a first run                             | [Your first run](https://github.com/twistingmercury/agentic_loop_runner/wiki/Your-first-run)                           |
+| Write a task file                            | [Write a task file](https://github.com/twistingmercury/agentic_loop_runner/wiki/Write-a-task-file)                     |
+| Run commands around tasks (tests, commits)   | [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions)                                         |
 | Choose what sessions may touch               | [Permissions and the sandbox](https://github.com/twistingmercury/agentic_loop_runner/wiki/Permissions-and-the-sandbox) |
-| Use the full-screen view                     | [Reading the screen](https://github.com/twistingmercury/agentic_loop_runner/wiki/Reading-the-screen)              |
-| Script it, read the logs and exit codes      | [Plain mode and the run log](https://github.com/twistingmercury/agentic_loop_runner/wiki/Plain-mode-and-the-run-log) |
-| Look up a flag, an exit code, a refusal      | [Command-line reference](https://github.com/twistingmercury/agentic_loop_runner/wiki/Command-line-reference)      |
-| Recover from a failed task                   | [When a task fails](https://github.com/twistingmercury/agentic_loop_runner/wiki/When-a-task-fails)                |
+| Use the full-screen view                     | [Reading the screen](https://github.com/twistingmercury/agentic_loop_runner/wiki/Reading-the-screen)                   |
+| Script it, read the logs and exit codes      | [Plain mode and the run log](https://github.com/twistingmercury/agentic_loop_runner/wiki/Plain-mode-and-the-run-log)   |
+| Look up a flag, an exit code, a refusal      | [Command-line reference](https://github.com/twistingmercury/agentic_loop_runner/wiki/Command-line-reference)           |
+| Recover from a failed task                   | [When a task fails](https://github.com/twistingmercury/agentic_loop_runner/wiki/When-a-task-fails)                     |
 
 [CHANGELOG.md](CHANGELOG.md) records every release and every break.
 

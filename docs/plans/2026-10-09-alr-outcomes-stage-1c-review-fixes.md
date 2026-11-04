@@ -49,6 +49,7 @@
 **Files:** `src/alr/record/runlog.py` (`discard`, `_create_run_dir`), `src/alr/tasks.py` (`save_tasks`), tests `test_runlog.py`, `test_tasks_save.py` (or the file that tests `save_tasks`), `test_plain_start.py`, `test_tui_prepare.py`.
 
 **Findings:**
+
 - A `task-file-unwritable` refusal leaves an empty `logs/` when `logs/` did not exist (the run log created it with `parents=True`).
 - `save_tasks` writes `<tasks.yaml>.tmp` and replaces or unlinks it: a user's own `tasks.yaml.tmp` is overwritten, and deleted when the save fails.
 
@@ -87,6 +88,7 @@
 **Files:** `src/alr/engine/loop.py` (`_run_and_save`, `_save`, `_save_committed`), `src/alr/engine/commit.py` (`head`), tests `tests/unit/test_loop.py`, `test_commit.py`.
 
 **Findings:**
+
 - In `task` mode, with no stop, a commit that lands followed by a failed save raises `task N: name: failed to save task state: ...` without the hash, though the commit exists and the file still says `pending`. The same case after a stop, and in `run` mode, names the hash.
 - After a stop in the commit step, "git cannot say" (the HEAD read returns `None`) is untested; the `head()` contract on the no-commit and git-error paths is untested.
 
@@ -103,6 +105,7 @@
 **Findings:** control-character regex boundaries not pinned; `RunLog.discard()` error suppression untested (and the dry-run log path); plain `start` rewrites `tasks.yaml` on `--reset-failed` when nothing was failed.
 
 **Required behaviour:**
+
 - Pin the boundaries of the control-character rule: `\x00`, `\x08`, `\x09` (tab, allowed), `\x0a`, `\x1f`, `\x20` (space, allowed), `\x7f`, `\x80`, `\x9f`, `\xa0` (allowed).
 - `discard()`: an `OSError` while removing is suppressed and never hides the refusal that caused it; test it.
 - `--reset-failed` with no failed task does not write the file (byte-identical, same mtime). Fix `reset_failed`/`start` if it does.
@@ -116,6 +119,7 @@
 **Files:** `docs/design/02_architectural_decisions.md` (ADR-025, bump to version 30; update in place), `README.md`, `src/alr/skills/gralph-docs-writer/SKILL.md`, `CHANGELOG.md` (`[Unreleased]`).
 
 **Required behaviour:**
+
 - ADR-025's name-validation bullet says a line break or any other control character except tab is rejected.
 - ADR-025 stops contradicting itself on when a refusal can leave a run folder: a refusal leaves nothing behind (not even a `logs/` it created), the one exception being what the ADR already names; read the whole ADR and make every statement agree with the code after Tasks 1 to 6.
 - Check these two claims against the code on this branch and fix them only if they are wrong: the bundled `SKILL.md` says only a line break is rejected in a task name; the README's failed-tasks text ("use --reset-failed") does not match the actual message.

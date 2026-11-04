@@ -64,16 +64,16 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 
 ## System Model
 
-| Component          | Description                                                                                           |
-|--------------------|-------------------------------------------------------------------------------------------------------|
-| `alr.cli`          | Parses flags, runs the startup checks, picks the front end, sets the exit code                        |
-| `alr.tasks`        | Parses, validates, and atomically saves the task file                                                 |
-| `alr.engine`       | The shared run logic: the loop, the outcome rule, actions, session flags, process handling             |
-| `alr.plain`        | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                  |
-| `alr.record`       | The run events and the run log writer, shared by both front ends                                      |
-| `alr.stream`       | Everything only the full-screen path does: stream-json parsing and the stream front end               |
-| `alr.tui`          | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker |
-| `alr.skillinstall` | `--install-skill`: copies the bundled skill to `~/.claude/skills`                                     |
+| Component            | Description                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------- |
+| `alr.cli`            | Parses flags, runs the startup checks, picks the front end, sets the exit code                          |
+| `alr.tasks`          | Parses, validates, and atomically saves the task file                                                   |
+| `alr.engine`         | The shared run logic: the loop, the outcome rule, actions, session flags, process handling              |
+| `alr.plain`          | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                    |
+| `alr.record`         | The run events and the run log writer, shared by both front ends                                        |
+| `alr.stream`         | Everything only the full-screen path does: stream-json parsing and the stream front end                 |
+| `alr.tui`            | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker   |
+| `alr.skillinstall`   | `--install-skill`: copies the bundled skill to `~/.claude/skills`                                       |
 
 ## Key Principles
 
@@ -85,20 +85,20 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 
 ## Roadmap
 
-| Step | Scope                                                                                                      | Status        |
-| ---- | ---------------------------------------------------------------------------------------------------------- | ------------- |
-| 1    | Engine, plain mode, dry-run, and the stream path plus run log                                              | Done (v0.0.6) |
-| 2    | Textual full-screen view with setup dialogs, an Actions dialog, logging in both modes, `--install-skill` | Done          |
+| Step | Scope                                                                                                                      | Status        |
+| ---- | -------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| 1    | Engine, plain mode, dry-run, and the stream path plus run log                                                              | Done (v0.0.6) |
+| 2    | Textual full-screen view with setup dialogs, an Actions dialog, logging in both modes, `--install-skill`                   | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
-| 4    | A separate agent program that uses `alr` as a tool (ADR-022); not part of `alr`                            | Later         |
+| 4    | A separate agent program that uses `alr` as a tool (ADR-022); not part of `alr`                                            | Later         |
 
 ## Document Navigation
 
 | #   | Document                                                     | Description                           | Status  |
 | --- | ------------------------------------------------------------ | ------------------------------------- | ------- |
-| 00  | [Overview](00_overview.md)                               | This document                         | Current |
-| 01  | [Requirements](01_requirements.md)                       | Problem statement, goals, constraints | Current |
-| 02  | [Architectural Decisions](02_architectural_decisions.md) | ADR log                               | Current |
-| 03  | [System Architecture](03_system_architecture.md)         | Components, data flow, boundaries     | Current |
+| 00  | [Overview](00_overview.md)                                   | This document                         | Current |
+| 01  | [Requirements](01_requirements.md)                           | Problem statement, goals, constraints | Current |
+| 02  | [Architectural Decisions](02_architectural_decisions.md)     | ADR log                               | Current |
+| 03  | [System Architecture](03_system_architecture.md)             | Components, data flow, boundaries     | Current |
 
 **Next:** [Requirements](01_requirements.md)

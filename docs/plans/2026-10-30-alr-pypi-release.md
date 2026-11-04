@@ -42,11 +42,13 @@ Inputs the spec implies that no obvious test covers, most likely first. Each has
 ### Task 1: License and package metadata
 
 **Files:**
+
 - Create: `LICENSE`
 - Modify: `pyproject.toml` (the `[project]` table)
 - Modify: `CHANGELOG.md` (the `[Unreleased]` section)
 
 **Interfaces:**
+
 - Produces: the metadata PyPI will show. Task 2's workflow uploads whatever `build.sh` produces from this.
 
 - [ ] **Step 1: Create `LICENSE`**
@@ -125,9 +127,11 @@ git commit -s -m "Add the MIT license and the package metadata PyPI shows"
 ### Task 2: The release workflow
 
 **Files:**
+
 - Create: `.github/workflows/release.yaml`
 
 **Interfaces:**
+
 - Consumes: `./build/build.sh`, which writes `dist/alr-<version>-py3-none-any.whl` and `dist/alr-<version>.tar.gz`, taking `<version>` from `git describe --tags --abbrev=0`.
 - Produces: on an rc tag, a TestPyPI upload and a GitHub prerelease; on a final tag, a PyPI upload and a GitHub release. Task 3's runbook drives it.
 
@@ -216,19 +220,21 @@ git commit -s -m "Add the release workflow: tag to TestPyPI or PyPI after approv
 ### Task 3: Docs and the owner's runbook
 
 **Files:**
+
 - Modify: `README.md` (add an `## Install` section after the Table of Contents entry list and before `## Usage`; add `- [Install](#install)` to the Table of Contents)
 - Modify: `../agentic_loop_runner.wiki/Install.md` (the wiki clone; separate repository)
 - Modify: `../agentic_loop_runner.wiki/Contributing.md` (the "Branches and pull requests" section)
 - Create: `docs/plans/2026-10-30-alr-pypi-release-runbook.md`
 
 **Interfaces:**
+
 - Consumes: the commands the workflow makes true: `uv tool install alr`, `uv tool upgrade alr`.
 
 - [ ] **Step 1: README Install section**
 
 Casual tone, matching the wiki. Content:
 
-~~~markdown
+````markdown
 ## Install
 
 You need [uv](https://docs.astral.sh/uv/) and the `claude` CLI on your PATH.
@@ -244,7 +250,7 @@ uv tool upgrade alr
 ```
 
 Each release is also on the [releases page](https://github.com/twistingmercury/agentic_loop_runner/releases) as a wheel, and the wiki's [Install](https://github.com/twistingmercury/agentic_loop_runner/wiki/Install) page has the details. To build from source instead, see [Contributing](https://github.com/twistingmercury/agentic_loop_runner/wiki/Contributing).
-~~~
+````
 
 - [ ] **Step 2: Wiki Install page**
 

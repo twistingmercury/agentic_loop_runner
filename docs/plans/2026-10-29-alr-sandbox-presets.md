@@ -42,33 +42,35 @@ Inputs the spec implies that no obvious test covers, most likely first. Each has
 
 ## File structure
 
-| File | Change |
-|---|---|
-| `src/alr/engine/presets.py` | **new**: `Preset`, `Switches`, the two lists, `switches_for`, `render`, `write_preset`, `restore_previous`, `preset_path` |
-| `src/alr/engine/sandbox.py` | split `sandbox_args` so `settings_args(text)` is public |
-| `src/alr/errors.py` | `SANDBOX_FILE_UNWRITABLE` |
-| `src/alr/cli.py` | `--sandbox` flag; conflicts; pass the preset to the dry run, plain start, and the view |
-| `src/alr/plain/start.py` | write the preset before the `tasks.yaml` save, with rollback |
-| `src/alr/plain/dryrun.py` | the preset's `sandbox settings:` line |
-| `src/alr/tui/settings.py` | `RunSettings.preset`, `.switches`; `missing`, `session_args`, `permissions_text` |
-| `src/alr/tui/prepare.py` | write the preset in `_save_changes`, with rollback |
-| `src/alr/tui/dialogs.py` | `PermissionsDialog` rewrite; `PermissionChoice` carries the preset |
-| `src/alr/tui/app.py` | pass and apply the choice; strip label; folder pick settles the path |
-| `tests/unit/test_presets.py` | **new** |
-| `tests/unit/test_cli.py`, `test_plain_start.py` (or where `start` is tested), `test_dry_run.py`, `test_tui_settings.py`, `test_tui_prepare.py`, `test_tui_dialogs.py`, `test_tui_app.py` | per task |
-| `tests/e2e/test_sandbox.py` | `--sandbox` end to end |
-| `README.md`, `CHANGELOG.md`, `docs/design/01_requirements.md`, `03_system_architecture.md`, `02_architectural_decisions.md` (ADR-027 → Accepted) | docs |
+| File                                                                                                                                                                                     | Change                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `src/alr/engine/presets.py`                                                                                                                                                              | **new**: `Preset`, `Switches`, the two lists, `switches_for`, `render`, `write_preset`, `restore_previous`, `preset_path` |
+| `src/alr/engine/sandbox.py`                                                                                                                                                              | split `sandbox_args` so `settings_args(text)` is public                                                                   |
+| `src/alr/errors.py`                                                                                                                                                                      | `SANDBOX_FILE_UNWRITABLE`                                                                                                 |
+| `src/alr/cli.py`                                                                                                                                                                         | `--sandbox` flag; conflicts; pass the preset to the dry run, plain start, and the view                                    |
+| `src/alr/plain/start.py`                                                                                                                                                                 | write the preset before the `tasks.yaml` save, with rollback                                                              |
+| `src/alr/plain/dryrun.py`                                                                                                                                                                | the preset's `sandbox settings:` line                                                                                     |
+| `src/alr/tui/settings.py`                                                                                                                                                                | `RunSettings.preset`, `.switches`; `missing`, `session_args`, `permissions_text`                                          |
+| `src/alr/tui/prepare.py`                                                                                                                                                                 | write the preset in `_save_changes`, with rollback                                                                        |
+| `src/alr/tui/dialogs.py`                                                                                                                                                                 | `PermissionsDialog` rewrite; `PermissionChoice` carries the preset                                                        |
+| `src/alr/tui/app.py`                                                                                                                                                                     | pass and apply the choice; strip label; folder pick settles the path                                                      |
+| `tests/unit/test_presets.py`                                                                                                                                                             | **new**                                                                                                                   |
+| `tests/unit/test_cli.py`, `test_plain_start.py` (or where `start` is tested), `test_dry_run.py`, `test_tui_settings.py`, `test_tui_prepare.py`, `test_tui_dialogs.py`, `test_tui_app.py` | per task                                                                                                                  |
+| `tests/e2e/test_sandbox.py`                                                                                                                                                              | `--sandbox` end to end                                                                                                    |
+| `README.md`, `CHANGELOG.md`, `docs/design/01_requirements.md`, `03_system_architecture.md`, `02_architectural_decisions.md` (ADR-027 → Accepted)                                         | docs                                                                                                                      |
 
 ---
 
 ### Task 1: The preset module
 
 **Files:**
+
 - Create: `src/alr/engine/presets.py`
 - Modify: `src/alr/engine/sandbox.py` (`sandbox_args`), `src/alr/errors.py`
 - Test: `tests/unit/test_presets.py`, `tests/unit/test_sandbox.py`
 
 **Interfaces:**
+
 - Produces, in `alr.engine.presets`:
   - `class Preset(StrEnum)`: `TIGHT = "tight"`, `LARGE = "large"`
   - `@dataclass(frozen=True) class Switches`: `web: bool`, `docker: bool`, `hide_credentials: bool`
@@ -159,10 +161,12 @@ git commit -m "Add the sandbox preset module: Tight and Large rendered to a sett
 ### Task 2: `--sandbox` in plain mode and the dry run
 
 **Files:**
+
 - Modify: `src/alr/cli.py` (`_parser`, `_main`, `resolve_sandbox`, `session_args`), `src/alr/plain/start.py` (`start`), `src/alr/plain/dryrun.py` (`dry_run`)
 - Test: `tests/unit/test_cli.py`, the unit tests of `plain.start` and `plain.dryrun`
 
 **Interfaces:**
+
 - Consumes: Task 1's `Preset`, `Switches`, `switches_for`, `render`, `preset_path`, `write_preset`, `restore_previous`, `settings_args`.
 - Produces:
   - `_parser()` adds `--sandbox`, `choices=["tight", "large"]`, `default=None`, `metavar="<preset>"`, help: `Sandbox sessions with a preset, tight or large, written to <folder>/sandbox.json at start; replaces an existing file there`.
@@ -235,16 +239,18 @@ git commit -m "Add --sandbox tight|large: plain mode writes the preset to the ru
 ### Task 3: The view's settings and Start
 
 **Files:**
+
 - Modify: `src/alr/tui/settings.py`, `src/alr/tui/prepare.py` (`_save_changes`, `_open_log`)
 - Test: `tests/unit/test_tui_settings.py`, `tests/unit/test_tui_prepare.py`
 
 **Interfaces:**
+
 - Consumes: Task 1.
 - Produces, on `RunSettings`:
   - fields `preset: Preset | None = None` and `switches: Switches | None = None`. A preset answer is `permissions = SANDBOX`, `switches` set, `preset` set to the radio chosen, `sandbox_file = preset_path(tasks_file)` once the task file is known. A file answer has `switches is None`.
   - `missing()`: `SANDBOX` with no `sandbox_file` and no `switches` → `"choose a sandbox settings file"` (unchanged text); `SANDBOX` with switches but an empty `sandbox_file` → `"choose a run folder"` (the file path needs the folder).
   - `session_args()`: with switches, `settings_args(render(self.switches))`; else as today.
-  - `def permissions_text(self) -> str`: the strip text from Global Constraints, without the `Permissions: ` prefix (`not chosen`, `skip`, `sandbox`, `sandbox (tight)`, `sandbox (large, adjusted)`). Adjusted means `self.switches != switches_for(self.preset)`.
+  - `def permissions_text(self) -> str`: the strip text from Global Constraints, without the `Permissions:` prefix (`not chosen`, `skip`, `sandbox`, `sandbox (tight)`, `sandbox (large, adjusted)`). Adjusted means `self.switches != switches_for(self.preset)`.
 - Produces, in `prepare._save_changes`: when `settings.switches` is not None, `previous = write_preset(settings.sandbox_file, settings.switches)` first; the existing save follows; on `RefusedError` from the save, `restore_previous(settings.sandbox_file, previous)` then re-raise. The caller's existing `except RefusedError: prepared.discard(); raise` still removes the log folder for both refusals.
 
 - [ ] **Step 1: Write the failing tests**
@@ -294,17 +300,19 @@ git commit -m "Carry a sandbox preset in the view's settings and write it on Sta
 ### Task 4: The permissions dialog
 
 **Files:**
+
 - Modify: `src/alr/tui/dialogs.py` (`PermissionChoice`, `PermissionsDialog`)
 - Test: `tests/unit/test_tui_dialogs.py`
 
 **Interfaces:**
+
 - Consumes: Task 1; Task 3's `RunSettings` fields (the dialog takes a `RunSettings` and returns a `PermissionChoice`).
 - Produces:
   - `@dataclass(frozen=True) class PermissionChoice`: `permissions: Permissions`, `sandbox_file: str`, `preset: Preset | None`, `switches: Switches | None`.
   - `PermissionsDialog(settings: RunSettings)`. Widgets and ids: `RadioSet` with `RadioButton` ids `file` (label `Use the settings file {path}`; when it is shown is the note below), `tight` (`Tight sandbox   no web, no Docker, keys hidden`), `large` (`Large sandbox   web and Docker allowed`), `skip` (`Skip permissions (no sandbox)`); three `Checkbox`es ids `web` (`Sessions may reach the web`), `docker` (`Sessions may run Docker  (runs outside the sandbox with your full access)`), `hide` (`Hide credential folders (~/.ssh, ~/.aws, ~/.gnupg, ~/.config/gh, ~/.netrc, ~/.claude)`); a `Static` id `preview`; a `Static` id `note`; `OK` and `Cancel` buttons as today. The `Input` path field goes.
   - Note on the `file` radio: it is shown when a file answered (a folder file or `--sandbox-settings`), which is `settings.permissions is SANDBOX and settings.switches is None and settings.sandbox_file`, **or** when the folder has a `sandbox.json` on disk (`folder_sandbox(Path(settings.tasks_file).parent)`) even though a preset is the current answer, since the user may go back to the file. Its label shows that path.
   - Pre-selection: `file` when a file answered; `tight`/`large` when `settings.preset` is set; `skip` when `permissions is SKIP`; else `tight`. Choosing `tight`/`large` sets the checkboxes to `switches_for(...)`; the checkboxes are `disabled` when `file` or `skip` is selected.
-  - Preview: for a preset, `render(current switches)`; for `file`, the file's text as read (`Path.read_text`, errors replaced), with the header `{path} (as it is)`; for `skip`, empty. Note text: preset → `Written to {sandbox_file} when you press Start. Cancel or Quit discards it.` plus ` Replaces the file there.` when a folder file exists; file → `Nothing is written. Pick a preset to replace it.`; skip → empty.
+  - Preview: for a preset, `render(current switches)`; for `file`, the file's text as read (`Path.read_text`, errors replaced), with the header `{path} (as it is)`; for `skip`, empty. Note text: preset → `Written to {sandbox_file} when you press Start. Cancel or Quit discards it.` plus `Replaces the file there.` when a folder file exists; file → `Nothing is written. Pick a preset to replace it.`; skip → empty.
   - OK with `file` → `PermissionChoice(SANDBOX, settings.sandbox_file or the folder file, None, None)` after `check_sandbox(path)` as today (error shown in `#error`); with a preset → `PermissionChoice(SANDBOX, preset_path(settings.tasks_file) if settings.tasks_file else "", preset, Switches(from the checkboxes))`; with `skip` → `PermissionChoice(SKIP, "", None, None)`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/unit/test_tui_dialogs.py`, using the existing `host`/`record` pattern
@@ -350,10 +358,12 @@ git commit -m "Rebuild the permissions dialog around Tight and Large presets wit
 ### Task 5: Wire the view and the CLI together
 
 **Files:**
+
 - Modify: `src/alr/tui/app.py` (`ask_folder`, `ask_permissions`, `_permissions_label`, `_menu` for `sandbox`), `src/alr/cli.py` (`_open_view`, `_permissions`)
 - Test: `tests/unit/test_tui_app.py`, `tests/unit/test_cli.py`
 
 **Interfaces:**
+
 - Consumes: Tasks 3 and 4.
 - Produces:
   - `_open_view(args, tasks_file, answer: Answer)`: `RunSettings(..., sandbox_file=answer.sandbox_file, permissions=..., preset=Preset(args.sandbox) if args.sandbox else None, switches=answer.switches)`. With a preset and no `-d`, `sandbox_file` is `""` until the folder is chosen.
@@ -401,9 +411,11 @@ git commit -m "Wire sandbox presets through the view: flags, folder pick, dialog
 ### Task 6: End-to-end tests
 
 **Files:**
+
 - Modify: `tests/e2e/test_sandbox.py`
 
 **Interfaces:**
+
 - Consumes: the built wheel's `--sandbox` flag (Task 2) and the e2e helpers `run_with_flags`, `assert_sandboxed`-style parsing, `fake_claude_records`, `run_dry_run`.
 
 The e2e tests are black-box: they share nothing with the unit tests and must not import `alr`. Copy the expected Tight document into the test as a literal (`TIGHT_DOC`), parsed for comparison.
@@ -445,6 +457,7 @@ git commit -m "Cover --sandbox tight|large end to end"
 ### Task 7: Documentation
 
 **Files:**
+
 - Modify: `README.md`, `CHANGELOG.md`, `docs/design/01_requirements.md`, `docs/design/03_system_architecture.md`, `docs/design/02_architectural_decisions.md`
 
 - [ ] **Step 1: README**: add the `--sandbox <preset>` row after `--sandbox-settings` (`Sandbox sessions with a preset, tight or large; written to <folder>/sandbox.json at start, replacing an existing file`); rewrite the "A real run needs one of ..." paragraph to name the three answers and that any two exit 2; add a short "Sandbox presets" subsection under the flags: the two presets, the three switches (view only), the two lists, the on-Start write and its note, and that the folder's file is alr's to replace; add the `sandbox-file-unwritable` row to the refusal table (`The preset's sandbox.json could not be written to the run folder`); update the quick-start comment to show `alr -d .local/feature --sandbox tight`.

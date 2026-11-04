@@ -45,7 +45,7 @@ These apply to every task that says "port".
 
 ## File Structure
 
-```
+```text
 pyproject.toml                 modify: dependencies, pytest config
 build/Dockerfile               modify: install git for the commit tests
 README.md, CHANGELOG.md        modify
@@ -236,12 +236,14 @@ class RunLog:
 ### Task 1: Clear the old code, set up the project, add the shared helpers
 
 **Files:**
+
 - Delete: `src/alr/looper.py`, `src/alr/prompt.py`, `tests/test_cli.py`, `tests/test_looper.py`, `tests/test_main.py`, `tests/test_prompt.py`, `tests/test_tasks.py`, `tests/data/`
 - Modify: `pyproject.toml`
 - Create: `src/alr/errors.py`, `src/alr/gocompat.py`, `src/alr/engine/__init__.py`, `src/alr/plain/__init__.py`, `src/alr/stream/__init__.py`, `tests/unit/test_gocompat.py`
 - Rewrite as stubs: `src/alr/cli.py`, `src/alr/main.py`, `src/alr/tasks.py`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: everything listed under `alr/errors.py` and `alr/gocompat.py` in Shared Interfaces.
 
@@ -597,12 +599,14 @@ git commit -m "Clear the old alr code and add the shared error and Go-compat hel
 ### Task 2: Task file parsing and validation
 
 **Files:**
+
 - Modify: `src/alr/tasks.py`
 - Test: `tests/unit/test_tasks_parse.py`
 
 **Port from:** `gralph:src/internal/tasks/task.go` (everything except `SaveTasks`), `gralph:src/internal/tasks/task_test.go`
 
 **Interfaces:**
+
 - Consumes: `alr.errors.TaskFileError`, `alr.gocompat.parse_duration`, `alr.gocompat.goquote`.
 - Produces: `PENDING`, `FAILED`, `COMPLETED`, `Gate`, `Task`, `Task.text()`, `TaskList`, `TaskList.gate_list()`, `parse_tasks`, `parse_timeout` as listed in Shared Interfaces.
 
@@ -610,7 +614,7 @@ git commit -m "Clear the old alr code and add the shared error and Go-compat hel
 
 Port these Go tests into `tests/unit/test_tasks_parse.py`: `TestTaskString`, `TestParseTasks_Valid`, `TestParseTasks_PreservesFileOrder`, `TestParseTasks_IgnoresUnknownFields`, `TestParseTasks_MaxID`, `TestStateConstants`, `TestParseTasks_AcceptsEveryValidState`, `TestParseTasks_EmptyStateDefaultsToPending`, `TestParseTasks_DefaultsOnlyTheEmptyStates`, `TestParseTasks_DoesNotAlterNameOrPrompt`, `TestParseTasks_Errors`, `TestParseTasks_FileErrorsNameNoTask`, `TestParseTasks_ReportsFirstInvalidTask`, `TestParseTasks_AcceptsExplicitCoreTags`, `TestParseTasks_ReadsErrorField`, `TestParseTasks_TopLevelGates`, `TestParseTasks_ReadsGates`, `TestParseTasks_ReadsGateTimeout`, `TestParseTasks_GatesAbsentVersusEmpty`, `TestParseTasks_TaskLevelGatesAreAnError`, `TestTaskString_OmitsGates`, `TestParseTasks_GateErrors`, `TestParseTasks_GateErrorReportedBeforeTaskError`, `TestParseTimeout`.
 
-Go's `ParseTasks(yml) (TaskList, error)` becomes `parse_tasks(text) -> TaskList`, raising `TaskFileError`; assert on `str(exc.value)`. Go's `ParseTimeout` error becomes `ValueError`; assert on its text. Where a Go case asserts the exact text of a YAML syntax error, assert only the `failed to parse yaml tasks: ` prefix.
+Go's `ParseTasks(yml) (TaskList, error)` becomes `parse_tasks(text) -> TaskList`, raising `TaskFileError`; assert on `str(exc.value)`. Go's `ParseTimeout` error becomes `ValueError`; assert on its text. Where a Go case asserts the exact text of a YAML syntax error, assert only the `failed to parse yaml tasks:` prefix.
 
 Add the Review Focus test:
 
@@ -699,12 +703,14 @@ git commit -m "Port task file parsing and validation from gralph"
 ### Task 3: Saving the task file
 
 **Files:**
+
 - Modify: `src/alr/tasks.py`
 - Test: `tests/unit/test_tasks_save.py`
 
 **Port from:** `SaveTasks` in `gralph:src/internal/tasks/task.go`; the `TestSaveTasks_*` functions in `gralph:src/internal/tasks/task_test.go`
 
 **Interfaces:**
+
 - Consumes: `Task`, `Gate`, `TaskList`, `parse_tasks` from Task 2; `alr.gocompat.os_error_text`, `goquote`.
 - Produces: `save_tasks(path: str, task_list: TaskList) -> None`, raising `TaskFileError`.
 
@@ -790,12 +796,14 @@ git commit -m "Port atomic task file saving from gralph"
 ### Task 4: The result line rule and the session flags
 
 **Files:**
+
 - Create: `src/alr/engine/result.py`, `src/alr/engine/sandbox.py`
 - Test: `tests/unit/test_result.py`, `tests/unit/test_sandbox.py`
 
 **Port from:** `gralph:src/internal/looper/result.go`, `result_test.go`, `sandbox.go`, `sandbox_test.go`
 
 **Interfaces:**
+
 - Consumes: `alr.tasks.COMPLETED`, `FAILED`; `alr.errors.SandboxError`; `alr.gocompat.goquote`, `os_error_text`.
 - Produces: `parse_result`, `last_result_line`, `outcome`, `bypass_args`, `sandbox_args` as listed in Shared Interfaces.
 
@@ -921,12 +929,14 @@ git commit -m "Port the result line rule and the session flags from gralph"
 ### Task 5: Process handling, the front end interface, and the fake claude
 
 **Files:**
+
 - Create: `src/alr/engine/proc.py`, `src/alr/engine/frontend.py`, `tests/fakeclaude/fake_claude.py`, `tests/conftest.py`
 - Test: `tests/unit/test_proc.py`, `tests/unit/test_fake_claude.py`
 
 **Port from:** `gralph:src/internal/looper/process_tree_unix.go`, `process_tree_unix_test.go`, `readLines` in `stream.go`, `gralph:src/internal/looper/testdata/fakeclaude/main.go`, `gralph:tests/e2e/testdata/fakeclaude/main.go`, `fakeclaude_test.go`
 
 **Interfaces:**
+
 - Consumes: `alr.gocompat.exit_error`; `alr.tasks.Task`, `Gate`.
 - Produces: `alr.engine.proc.start`, `finish`, `capture`, `read_lines`; `alr.engine.frontend.FrontEnd`, `SessionResult`; the `fake_claude` and `git_repo` pytest fixtures.
 
@@ -1150,12 +1160,14 @@ git commit -m "Add process group handling, the front end interface, and the fake
 ### Task 6: The run loop and the plain session
 
 **Files:**
+
 - Create: `src/alr/engine/loop.py`, `src/alr/plain/frontend.py`, `src/alr/plain/report.py`
 - Test: `tests/unit/test_loop.py`, `tests/unit/test_plain_report.py`
 
 **Port from:** `gralph:src/internal/looper/looper.go` (`LoadPrompt`, `LoadTasks`, `LoadTasksReport`, `PrintTasks`, `Run`, `runLoop`, `runTask`, `runTaskPlain`, `claudeCmd`, `finishTask`), `looper_test.go`, `runloop_result_test.go`, `runloop_unix_test.go`
 
 **Interfaces:**
+
 - Consumes: Tasks 1 to 5.
 - Produces: `load_prompt`, `load_tasks`, `RunOptions`, `run`, `FAILED_TASKS_MESSAGE` in `alr.engine.loop`; `PlainFrontEnd` with `session_flags`, `task_skipped`, `task_started`, `run_session`, `session_finished`, `task_finished`, `run_done` in `alr.plain.frontend`; `print_tasks` and `load_tasks_report` in `alr.plain.report`. `PlainFrontEnd.run_gate`, `gate_finished`, `commit_started`, `run_git`, and `committed` are added by Tasks 7 and 8; until then they raise `NotImplementedError`.
 
@@ -1254,7 +1266,7 @@ async def _run_and_save(prompt: str, task: Task, task_list: TaskList, options: R
 
 Port `PrintTasks` and `LoadTasksReport` exactly, including the ANSI colors, the two emoji, the column widths, and the `← Needs review!` note:
 
-- `print_tasks(out, task_list)` writes the header `   {ID:>w}  {STATE:<9}  NAME`, the rule line, and one row per task as `PrintTasks` formats them. `stateWidth` is `len("completed")`.
+- `print_tasks(out, task_list)` writes the header `{ID:>w}  {STATE:<9}  NAME`, the rule line, and one row per task as `PrintTasks` formats them. `stateWidth` is `len("completed")`.
 - `load_tasks_report(out, tasks_file)` calls `load_tasks`; on `FailedTasksError` it writes `Some tasks failed previous runs:` and the table to `out`, then re-raises.
 
 - [ ] **Step 5: Write `src/alr/plain/frontend.py`**
@@ -1311,6 +1323,7 @@ git commit -m "Port the run loop and the plain session from gralph"
 ### Task 7: Gates
 
 **Files:**
+
 - Create: `src/alr/engine/gates.py`
 - Modify: `src/alr/engine/loop.py`, `src/alr/plain/frontend.py`
 - Test: `tests/unit/test_gates.py`
@@ -1318,6 +1331,7 @@ git commit -m "Port the run loop and the plain session from gralph"
 **Port from:** `gralph:src/internal/looper/gates.go`, the plain-path tests in `gates_test.go`
 
 **Interfaces:**
+
 - Consumes: `FrontEnd`, `proc.start`, `proc.finish`, `tasks.parse_timeout`, `errors.quote`, `loop.run`.
 - Produces: `first_line`, `gate_limit`, `gate_failure`, `run_gates` in `alr.engine.gates`; `PlainFrontEnd.run_gate` and `gate_finished`.
 
@@ -1422,6 +1436,7 @@ git commit -m "Port gates from gralph"
 ### Task 8: Commits
 
 **Files:**
+
 - Create: `src/alr/engine/commit.py`
 - Modify: `src/alr/engine/loop.py`, `src/alr/plain/frontend.py`
 - Test: `tests/unit/test_commit.py`
@@ -1429,6 +1444,7 @@ git commit -m "Port gates from gralph"
 **Port from:** `gralph:src/internal/looper/commit.go` (everything except `repoFor`), the tests in `commit_test.go` that do not use a report hook, `Start`, or `DryRun`
 
 **Interfaces:**
+
 - Consumes: `FrontEnd`, `proc.capture`, `proc.start`, `proc.finish`, `first_line`, `RunOptions.repo`, the `git_repo` fixture.
 - Produces: `Repo`, `open_repo`, `check_log_dir`, `commit` in `alr.engine.commit`; `PlainFrontEnd.commit_started`, `run_git`, `committed`.
 
@@ -1450,7 +1466,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'alr.engine.commit'`.
 Port `commit.go` function by function. Points where the Python differs:
 
 - Quiet git commands (`rev-parse --show-toplevel`, `status`, `check-ignore`, `diff --cached --quiet`, `rev-parse HEAD`) run through `proc.capture(["git", ...], cwd=repo.root, gentle=True)`. Only `add -A` and `commit -m <name>` go through `front_end.run_git(task, argv, repo.root)`.
-- `find_root`: run with `env={**os.environ, "LC_ALL": "C"}` and no `cwd`. `FileNotFoundError` (git not installed) returns `None`. A non-zero exit whose stderr contains `not a git repository` or `must be run in a work tree` returns `None`. Any other failure raises `RepoError(f"--commit: git rev-parse: {reason}")`, where `reason` is `gitMessage`: the first line of stderr, trimmed, without a leading `fatal: `, or the exit text from `proc.exit_text` when stderr is empty.
+- `find_root`: run with `env={**os.environ, "LC_ALL": "C"}` and no `cwd`. `FileNotFoundError` (git not installed) returns `None`. A non-zero exit whose stderr contains `not a git repository` or `must be run in a work tree` returns `None`. Any other failure raises `RepoError(f"--commit: git rev-parse: {reason}")`, where `reason` is `gitMessage`: the first line of stderr, trimmed, without a leading `fatal:`, or the exit text from `proc.exit_text` when stderr is empty.
 - `_relative(repo, path)`: `os.path.abspath`, resolve only the parent folder's symlinks (`os.path.realpath` on the nearest existing ancestor, as `resolveExisting` does), `os.path.relpath` against the root, and treat a result that is `..`, starts with `../`, or is absolute as outside the tree.
 - Error text, exact: `--commit needs the task file ignored by git or outside the repository: <rel>`; `--commit needs the log directory ignored by git or outside the repository: <dir of rel>`; `--commit needs a clean work tree; commit, stash, or remove:\n<files>`; `--commit: git status: <reason>`; `--commit: git check-ignore: <reason>`.
 - `commit(repo, task, front_end) -> tuple[str, str]`: `add -A`; if it fails return `(FAILED, f"commit failed: {error}")`. Check `git diff --cached --quiet`: exit 0 means nothing staged, return `(COMPLETED, "")`; exit 1 means staged; any other exit is a failure, `(FAILED, f"commit failed: {exit text}")`. When staged: `front_end.commit_started(task)`, then `commit -m <task.name>`; on failure `(FAILED, f"commit failed: {error}")`. On success read `git rev-parse HEAD`; when that works call `front_end.committed(task, hash)`; when it does not, call nothing and still return `(COMPLETED, "")`.
@@ -1491,6 +1507,7 @@ git commit -m "Port --commit from gralph"
 ### Task 9: The plain run and the dry run
 
 **Files:**
+
 - Create: `src/alr/plain/start.py`, `src/alr/plain/dryrun.py`
 - Modify: `src/alr/plain/report.py`
 - Test: `tests/unit/test_plain_start.py`, `tests/unit/test_plain_dryrun.py`
@@ -1498,6 +1515,7 @@ git commit -m "Port --commit from gralph"
 **Port from:** `Start`, `DryRun`, `printGateLimits` in `gralph:src/internal/looper/looper.go`; `repoFor` in `commit.go`; the `TestStart_*` and `TestDryRun_*` tests in `looper_test.go` and `commit_test.go`
 
 **Interfaces:**
+
 - Consumes: `load_prompt`, `load_tasks_report`, `print_tasks`, `run`, `RunOptions`, `PlainFrontEnd`, `open_repo`, `gate_limit`, `first_line`.
 - Produces: `repo_for(out, tasks_file, commit)` in `alr.plain.report`; `start(prompt_file, tasks_file, gate_timeout, session_args, commit)` in `alr.plain.start`; `dry_run(out, tasks_file, gate_timeout, sandbox_file, commit)` in `alr.plain.dryrun`.
 
@@ -1571,12 +1589,14 @@ git commit -m "Port the plain run and the dry run from gralph"
 ### Task 10: The stream front end
 
 **Files:**
+
 - Create: `src/alr/stream/events.py`, `src/alr/stream/parser.py`, `src/alr/stream/frontend.py`
 - Test: `tests/unit/test_stream_parser.py`, `tests/unit/test_stream_frontend.py`
 
 **Port from:** `gralph:src/internal/looper/event.go`, `stream.go`, `runCmdStream` in `gates.go`, the report branches in `gates.go` and `commit.go`; `stream_test.go`, `stream_run_test.go`, `event_test.go`, and the stream-path tests left over from `gates_test.go` and `commit_test.go`
 
 **Interfaces:**
+
 - Consumes: `FrontEnd`, `SessionResult`, `proc.start`, `proc.finish`, `proc.read_lines`, `first_line`, `run`, `RunOptions`.
 - Produces: the seven event classes and `Event` in `alr.stream.events`; `parse_stream_line` in `alr.stream.parser`; `StreamFrontEnd` in `alr.stream.frontend`.
 
@@ -1701,12 +1721,14 @@ git commit -m "Port the stream path: events, stream-json parsing, and the stream
 ### Task 11: The run log
 
 **Files:**
+
 - Create: `src/alr/stream/runlog.py`
 - Test: `tests/unit/test_runlog.py`
 
 **Port from:** `gralph:src/internal/runlog/runlog.go`, `ledger.go`, `runlog_test.go`
 
 **Interfaces:**
+
 - Consumes: the event classes from Task 10; `alr.errors.RunLogError`; `alr.durations.format_duration`; `alr.engine.gates.first_line`; `alr.tasks.FAILED`.
 - Produces: `run_dir`, `Info`, `RunLog.open`, `RunLog.record`, `RunLog.close`.
 
@@ -1751,12 +1773,14 @@ git commit -m "Port the run log writer from gralph"
 ### Task 12: The command line
 
 **Files:**
+
 - Rewrite: `src/alr/cli.py`
 - Test: `tests/unit/test_cli.py`
 
 **Port from:** `gralph:src/cmd/main/main.go` (`main`, `fatal`, `resolveDir`, `requireFile`, `validateGateTimeout`, `checkGateTimeout`, `checkLogDir`, `sessionArgs`, `validateRequiredFlags`); from `main_test.go`: `TestSessionArgs`, `TestCheckGateTimeout`, `TestCheckLogDir`, `TestResolveDir`
 
 **Interfaces:**
+
 - Consumes: `plain.start.start`, `plain.dryrun.dry_run`, `sandbox_args`, `bypass_args`, `parse_timeout`, the error classes.
 - Produces: `cli.main(argv: list[str] | None = None) -> int`, plus `resolve_dir`, `check_gate_timeout`, `check_log_dir`, `session_args`, each a plain function the tests call directly.
 
@@ -1962,12 +1986,14 @@ git commit -m "Port the command line and startup checks from gralph"
 ### Task 13: The end-to-end suite and the import boundary test
 
 **Files:**
+
 - Create: `tests/e2e/conftest.py`, `tests/e2e/test_loop.py`, `tests/e2e/test_result.py`, `tests/e2e/test_commit.py`, `tests/e2e/test_dir.py`, `tests/e2e/test_dry_run.py`, `tests/e2e/test_gates.py`, `tests/e2e/test_flags.py`, `tests/e2e/test_log_dir.py`, `tests/e2e/test_sandbox.py`, `tests/e2e/test_signal.py`, `tests/unit/test_import_boundaries.py`
 - Modify: `build/Dockerfile`
 
 **Port from:** `gralph:tests/e2e/claude_helpers_test.go`, `claude_loop_test.go`, `claude_result_test.go`, `commit_test.go`, `dir_test.go`, `dry_run_test.go`, `gates_test.go`, `gralph_test.go`, `log_dir_test.go`, `no_tui_test.go`, `sandbox_test.go`, `signal_unix_test.go`
 
 **Interfaces:**
+
 - Consumes: the installed `alr` command, the `fake_claude` and `git_repo` fixtures.
 - Produces: nothing other tasks use.
 
@@ -2012,7 +2038,7 @@ One Python file per Go file, every test function listed here:
 - `test_dir.py` from `dir_test.go`: all four.
 - `test_dry_run.py` from `dry_run_test.go`: all seven.
 - `test_gates.py` from `gates_test.go`: all eleven.
-- `test_flags.py` from `gralph_test.go`: `TestVersionFlag` (assert the one-line `alr version: ` output), `TestHelpFlag` (assert exit 0 and that each flag name appears), `TestMissingPrompt`, `TestMissingTasks`, `TestMissingBothRequiredFlags`, `TestNonexistentFiles`. From `no_tui_test.go`: `TestNonTerminal_DefaultsToPlain`, plus one new test that `--no-tui` is accepted and the run behaves the same.
+- `test_flags.py` from `gralph_test.go`: `TestVersionFlag` (assert the one-line `alr version:` output), `TestHelpFlag` (assert exit 0 and that each flag name appears), `TestMissingPrompt`, `TestMissingTasks`, `TestMissingBothRequiredFlags`, `TestNonexistentFiles`. From `no_tui_test.go`: `TestNonTerminal_DefaultsToPlain`, plus one new test that `--no-tui` is accepted and the run behaves the same.
 - `test_log_dir.py` from `log_dir_test.go`: all four.
 - `test_sandbox.py` from `sandbox_test.go`: all five.
 - `test_signal.py` from `signal_unix_test.go`: both. Use `subprocess.Popen` and `send_signal`; keep reading the pipes with `communicate`.
@@ -2103,9 +2129,11 @@ git commit -m "Port the end-to-end suite from gralph and pin the import boundari
 ### Task 14: README and changelog
 
 **Files:**
+
 - Modify: `README.md`, `CHANGELOG.md`
 
 **Interfaces:**
+
 - Consumes: the finished command.
 - Produces: nothing code uses.
 
