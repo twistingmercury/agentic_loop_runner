@@ -28,7 +28,6 @@ from alr.errors import AlrError, RefusedError
 from alr.tasks import Action, Task, parse_timeout
 from alr.tui.checks import FolderCheck, check_folder, check_sandbox
 from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
-from alr.engine.sandbox import folder_sandbox
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -138,7 +137,7 @@ class SummaryDialog(_Dialog[bool]):
 
 
 class FileViewer(_Dialog[None]):
-    """A file shown as it is on disk, read-only; or, given a preset document, that document and where Start writes it."""
+    """A file shown as it is on disk, read-only; or, given a preset document, that document, which no file holds."""
 
     DEFAULT_CSS = """
     FileViewer #dialog { width: 80%; height: 80%; }
@@ -157,11 +156,11 @@ class FileViewer(_Dialog[None]):
             yield Button("Close", id="close")
 
     def _header(self) -> str:
-        """The path, saying when a preset is written there."""
+        """The path, saying when the document is a preset that no file holds."""
         if self._preset is None:
             return self._path or "no file"
 
-        return f"{self._path} (written when you press Start)"
+        return f"{self._path} (a preset; nothing is written there)"
 
     def _text(self) -> str:
         """The preset when one is waiting for Start, otherwise the file on disk."""
@@ -267,14 +266,12 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
     def __init__(self, settings: RunSettings) -> None:
         super().__init__()
         self._settings = settings
-        self._folder_file = _folder_file(settings)
-        self._answered = _answered_file(settings)
-        self._file = self._answered or self._folder_file or ""
+        self._file = _answered_file(settings)
         self._start = self._first_radio()
 
     def _first_radio(self) -> str:
         """The id of the radio that starts pressed."""
-        if self._answered:
+        if self._file:
             return "file"
 
         if self._settings.preset is not None:
@@ -375,31 +372,13 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
         note = ""
         if pressed in _PRESET_IDS:
             preview = render(self._switches())
-            note = self._written_note()
+            note = "Nothing is written to the run folder."
         elif pressed == "file":
             preview = _file_preview(self._file)
-            note = "Nothing is written. Pick a preset to replace it."
+            note = "Nothing is written."
 
         self.query_one("#preview", Static).update(preview)
         self.query_one("#note", Static).update(note)
-
-    def _written_note(self) -> str:
-        """Say where a preset is written, and that a folder file is replaced."""
-        note = (
-            f"Written to {self._preset_file()} when you press Start."
-            " Cancel or Quit discards it."
-        )
-        if self._folder_file:
-            note += " Replaces the file there."
-
-        return note
-
-    def _preset_file(self) -> str:
-        """Where a preset goes: beside the task file, or a stand-in before a folder is chosen."""
-        if self._settings.tasks_file:
-            return preset_path(self._settings.tasks_file)
-
-        return "<folder>/sandbox.json"
 
     def on_button_pressed(self, message: Button.Pressed) -> None:
         if message.button.id == "cancel":
@@ -449,14 +428,6 @@ def _answered_file(settings: RunSettings) -> str:
         return settings.sandbox_file
 
     return ""
-
-
-def _folder_file(settings: RunSettings) -> str | None:
-    """The run folder's sandbox.json when it has one."""
-    if not settings.tasks_file:
-        return None
-
-    return folder_sandbox(str(Path(settings.tasks_file).parent))
 
 
 def _file_preview(path: str) -> str:

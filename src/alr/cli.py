@@ -19,13 +19,7 @@ from alr.config import (
     load,
     paths_to_create,
 )
-from alr.engine.presets import Preset, Switches, preset_path, render, switches_for
-from alr.engine.sandbox import (
-    bypass_args,
-    folder_sandbox,
-    sandbox_args,
-    settings_args,
-)
+from alr.engine.sandbox import bypass_args, sandbox_args, settings_args
 from alr.engine.stop import Stop
 from alr.errors import (
     CONFIG_SETUP_MISSING,
@@ -36,6 +30,7 @@ from alr.errors import (
 )
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
+from alr.sandboxes import add_missing, find, names_text, read_text
 from alr.skillinstall import install
 from alr.tasks import parse_timeout
 from alr.tui.app import run_app
@@ -71,11 +66,11 @@ _COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in share
 
 @dataclass(frozen=True)
 class Answer:
-    """What the permission flags settle: a settings file, the skip choice, or a preset's switches."""
+    """What the permission flags settle: a settings file, with the sandbox's name when it was picked by name, or the skip choice."""
 
     sandbox_file: str
     skip: bool
-    switches: Switches | None
+    sandbox_name: str
 
 
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
@@ -100,11 +95,16 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if not config_folder_exists():
             return _handle_missing_config_folder(args.dry_run)
 
+        # A dry run writes nothing (requirement 9); it reads a missing shipped file from the package instead.
+        if not args.dry_run:
+            _add_missing_sandboxes()
+
         tasks_file = resolve_dir(args.dir)
+        _note_ignored_folder_sandbox(args.dir)
         config = load(dry_run=args.dry_run)
         apply_sandbox_default(args, config.sandbox)
         answer = resolve_permissions(
-            args.dir, args.sandbox_settings, args.yolo, args.sandbox
+            args.sandbox_settings, args.yolo, args.sandbox, args.dry_run
         )
         # An explicitly empty value counts as passed, and is bad.
         if args.action_timeout is not None:
@@ -133,7 +133,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
                 tasks_file,
                 action_timeout,
                 answer.sandbox_file,
-                Preset(args.sandbox) if args.sandbox else None,
+                answer.sandbox_name,
+                _added_on_real_run(answer, args.dry_run),
             ),
             stop,
         )
@@ -146,10 +147,28 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             args.reset_failed,
             sandbox_settings=answer.sandbox_file,
             stop=stop,
-            switches=answer.switches,
         ),
         stop,
     )
+
+
+def _add_missing_sandboxes() -> None:
+    """Add the shipped sandboxes the folder lacks, saying so for each, so a file that comes back is not a surprise."""
+    for path in add_missing():
+        print(f"Added {path}")
+
+
+def _note_ignored_folder_sandbox(dir: str) -> None:
+    """Tell a user upgrading that the run folder's sandbox.json no longer answers the permission question.
+
+    The file is left alone and the run goes on as if it were absent.
+    """
+    if not dir:
+        return
+
+    path = Path(dir) / "sandbox.json"
+    if path.is_file():
+        print(f"{path} is no longer read; pick a sandbox with --sandbox <name>")
 
 
 def _install_skill() -> int:
@@ -242,26 +261,23 @@ def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int
     """Open the full-screen view with what the flags already answer."""
     # Validates a given settings file; no run starts here.
     session_args(answer, dry_run=True)
-    preset = Preset(args.sandbox) if args.sandbox else None
     sandbox_file = answer.sandbox_file
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
-        permissions=_permissions(sandbox_file, args.yolo, preset),
+        permissions=_permissions(sandbox_file, args.yolo),
         action_timeout=args.action_timeout or "",
         reset_failed=args.reset_failed,
-        preset=preset,
-        switches=answer.switches,
     )
     return run_app(settings)
 
 
-def _permissions(sandbox_file: str, skip: bool, preset: Preset | None) -> Permissions:
-    """Name the answer the flags give: skip, a sandbox from a preset or file, or none yet."""
+def _permissions(sandbox_file: str, skip: bool) -> Permissions:
+    """Name the answer the flags give: skip, a sandbox from a file, or none yet."""
     if skip:
         return Permissions.SKIP
 
-    return Permissions.SANDBOX if preset or sandbox_file else Permissions.UNSET
+    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
 
 
 class _BareMetavarFormatter(argparse.HelpFormatter):
@@ -292,7 +308,7 @@ def _parser() -> argparse.ArgumentParser:
         "--dir",
         metavar="",
         default="",
-        help="Run folder holding tasks.yaml (and optionally sandbox.json); required with --plain or --dry-run, and the full-screen view asks for it when it is missing; --sandbox-settings or --yolo overrides the folder's sandbox.json",
+        help="Run folder holding tasks.yaml; required with --plain or --dry-run, and the full-screen view asks for it when it is missing",
     )
     parser.add_argument(
         "--dry-run",
@@ -324,14 +340,13 @@ def _parser() -> argparse.ArgumentParser:
         "--sandbox-settings",
         metavar="",
         default="",
-        help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this or --yolo",
+        help="Path to a Claude Code settings JSON file; sessions run in Claude's sandbox with it. A run needs this, --sandbox, or --yolo",
     )
     parser.add_argument(
         "--sandbox",
-        choices=["tight", "large"],
         default=None,
-        metavar="<preset>",
-        help="Sandbox sessions with a preset, tight or large, written to <folder>/sandbox.json at start; replaces an existing file there",
+        metavar="<name>",
+        help="Sandbox sessions with the named file from ~/.local/alr/sandboxes/",
     )
     parser.add_argument(
         "--yolo",
@@ -359,21 +374,20 @@ def resolve_dir(dir: str) -> str:
 
 
 def resolve_permissions(
-    dir: str, sandbox_settings: str, skip: bool, preset: str | None
+    sandbox_settings: str, skip: bool, name: str | None, dry_run: bool
 ) -> Answer:
-    """Return the permissions the flags choose, taking the run folder's sandbox.json when no flag chose.
+    """Return the permissions the flags choose; --sandbox turns a name into the file it names.
 
-    The folder only ever supplies the sandboxed choice: any permission flag
-    wins, and --yolo is how a run opts out. A preset is written to the
-    folder's sandbox.json at start, so that is the file it names.
+    The conflicts are refused before the name is looked up, so a typo beside
+    --yolo is reported as the conflict it is.
     """
-    if preset is not None:
-        return _preset_answer(dir, sandbox_settings, skip, preset)
+    if name is None:
+        return Answer(sandbox_settings, skip, "")
 
-    if not dir or sandbox_settings or skip:
-        return Answer(sandbox_settings, skip, None)
+    if sandbox_settings or skip:
+        raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
 
-    return Answer(folder_sandbox(dir) or "", skip, None)
+    return Answer(str(find(name, dry_run=dry_run)), False, name)
 
 
 def apply_sandbox_default(
@@ -382,21 +396,16 @@ def apply_sandbox_default(
     """Fill in the permission flag nobody passed from the config's sandbox default.
 
     It sets the same fields the real flags set, so the dry run, the view, and
-    start need no change. A flag wins, and so does the run folder's
-    sandbox.json; with either, or with no default, nothing changes. With no
-    --dir there is no run folder to look in yet, and the folder the user picks
-    in the view may hold its own sandbox.json, so no mode fills in anything
-    and the view asks, with Tight pre-selected.
+    start need no change. A flag wins; with one, or with no default, nothing
+    changes. The default applies with or without --dir: no file in the run
+    folder can answer the question any more.
 
     _main runs this at startup, before resolve_permissions.
     """
     if default is None:
         return
 
-    if not args.dir:
-        return
-
-    if _permission_chosen(args):
+    if args.sandbox is not None or args.sandbox_settings or args.yolo:
         return
 
     if default.name == _YOLO:
@@ -404,35 +413,6 @@ def apply_sandbox_default(
         return
 
     args.sandbox = default.name
-
-
-def _permission_chosen(args: argparse.Namespace) -> bool:
-    """Report whether a flag or the run folder's sandbox.json already chose the permissions.
-
-    The caller has checked that --dir was given.
-    """
-    if args.sandbox is not None or args.sandbox_settings or args.yolo:
-        return True
-
-    return folder_sandbox(args.dir) is not None
-
-
-def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> Answer:
-    """Return the answer for --sandbox, refusing it beside another permission flag."""
-    if sandbox_settings or skip:
-        raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
-
-    # A config default can name any sandbox file, but only the presets resolve
-    # until --sandbox picks files by name (ADR-032).
-    try:
-        chosen = Preset(preset)
-    except ValueError as exc:
-        raise UsageError(f"--sandbox: {preset} is not supported yet") from exc
-
-    switches = switches_for(chosen)
-    # Without -d the path would be relative to nowhere; the view's folder pick settles it.
-    path = preset_path(str(Path(dir) / "tasks.yaml")) if dir else ""
-    return Answer(path, False, switches)
 
 
 def check_action_timeout(value: str) -> None:
@@ -458,14 +438,11 @@ def session_args(answer: Answer, dry_run: bool) -> list[str]:
     default, so nobody runs unsandboxed by accident. A dry run starts no
     session and needs neither, but its sandbox file is still checked.
     """
-    if answer.switches is not None:
-        return settings_args(render(answer.switches))
-
     if answer.sandbox_file and answer.skip:
         raise UsageError("--sandbox-settings and --yolo cannot be used together")
 
     if answer.sandbox_file:
-        return sandbox_args(answer.sandbox_file)
+        return _sandbox_flags(answer, dry_run)
 
     if answer.skip:
         return bypass_args()
@@ -474,8 +451,30 @@ def session_args(answer: Answer, dry_run: bool) -> list[str]:
         return []
 
     raise UsageError(
-        "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
+        "pass --sandbox <name>, --sandbox-settings <path>, or --yolo to run without a sandbox; "
+        f"the sandboxes are: {names_text()}"
     )
+
+
+def _sandbox_flags(answer: Answer, dry_run: bool) -> list[str]:
+    """Return the flags for a sandboxed session, reading the settings from the file or, for a dry run, the package."""
+    if _added_on_real_run(answer, dry_run):
+        # The file is not in the folder yet; check the copy a real run would add.
+        return settings_args(read_text(Path(answer.sandbox_file)))
+
+    return sandbox_args(answer.sandbox_file)
+
+
+def _added_on_real_run(answer: Answer, dry_run: bool) -> bool:
+    """Report whether a dry run names a shipped sandbox whose file a real run would add first.
+
+    A sandbox found by name but absent from the folder can only be that: find
+    refuses every other missing name.
+    """
+    if not dry_run or not answer.sandbox_name:
+        return False
+
+    return not Path(answer.sandbox_file).exists()
 
 
 def _missing_flags(tasks_file: str) -> list[str]:

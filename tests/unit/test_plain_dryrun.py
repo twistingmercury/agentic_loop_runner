@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from helpers import write_file
 
-from alr.engine.presets import Preset
 from alr.errors import FailedTasksError, RefusedError
 from alr.plain.dryrun import dry_run
 
@@ -47,10 +46,18 @@ async def _dry_run(
     tasks_file: str,
     action_timeout: str = "",
     sandbox_file: str = "",
-    preset: Preset | None = None,
+    sandbox_name: str = "",
+    added_on_real_run: bool = False,
 ) -> str:
     out = io.StringIO()
-    await dry_run(out, tasks_file, action_timeout, sandbox_file, preset)
+    await dry_run(
+        out,
+        tasks_file,
+        action_timeout,
+        sandbox_file,
+        sandbox_name,
+        added_on_real_run,
+    )
     return out.getvalue()
 
 
@@ -314,49 +321,34 @@ async def test_dry_run_creates_no_log_folder(tmp_path: Path) -> None:
     assert not (tmp_path / "logs").exists()
 
 
-async def test_dry_run_with_a_preset_names_the_file_and_writes_nothing(
+async def test_dry_run_names_a_sandbox_picked_by_name(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    path = str(tmp_path / "sandboxes" / "large.json")
+
+    got = await _dry_run(tasks_file, sandbox_file=path, sandbox_name="large")
+
+    assert f"sandbox settings: {path} (large)\n" in got
+    assert got.endswith(f"{tasks_file} is valid\n")
+
+
+async def test_dry_run_says_a_missing_shipped_sandbox_is_added_on_a_real_run(
     tmp_path: Path,
 ) -> None:
     tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
-    path = str(tmp_path / "sandbox.json")
+    path = str(tmp_path / "sandboxes" / "tight.json")
 
-    got = await _dry_run(tasks_file, sandbox_file=path, preset=Preset.LARGE)
+    got = await _dry_run(
+        tasks_file, sandbox_file=path, sandbox_name="tight", added_on_real_run=True
+    )
 
-    assert f"sandbox settings: {path} (large preset; written on a real run)\n" in got
-    assert not (tmp_path / "sandbox.json").exists()
+    assert f"sandbox settings: {path} (tight; added on a real run)\n" in got
+    assert not (tmp_path / "sandboxes").exists()
 
 
-async def test_dry_run_with_a_preset_refuses_a_directory_at_the_path(
-    tmp_path: Path,
-) -> None:
+async def test_dry_run_writes_nothing_at_the_sandbox_path(tmp_path: Path) -> None:
     tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
     path = tmp_path / "sandbox.json"
-    path.mkdir()
 
-    with pytest.raises(RefusedError) as caught:
-        await _dry_run(tasks_file, sandbox_file=str(path), preset=Preset.TIGHT)
+    await _dry_run(tasks_file, sandbox_file=str(path), sandbox_name="large")
 
-    assert caught.value.reason == "sandbox-file-unwritable"
-    assert caught.value.exit_code == 3
-    assert str(path) in caught.value.message
-    assert list(path.iterdir()) == []
-
-
-async def test_dry_run_with_a_preset_refuses_a_read_only_folder(
-    tmp_path: Path,
-) -> None:
-    if os.geteuid() == 0:
-        pytest.skip("root can write to a read-only folder")
-    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    path = locked / "sandbox.json"
-    locked.chmod(0o555)
-    try:
-        with pytest.raises(RefusedError) as caught:
-            await _dry_run(tasks_file, sandbox_file=str(path), preset=Preset.TIGHT)
-    finally:
-        locked.chmod(0o755)
-
-    assert caught.value.reason == "sandbox-file-unwritable"
     assert not path.exists()

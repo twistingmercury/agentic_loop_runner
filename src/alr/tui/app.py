@@ -239,11 +239,8 @@ class AlrApp(App[None]):
             return
 
         if self.settings.switches is not None:
-            # A preset answered already; its file goes beside whichever task file was picked.
+            # A preset answered already; its path goes beside whichever task file was picked.
             self.settings.sandbox_file = preset_path(check.tasks_file)
-        elif check.sandbox_file and self.settings.permissions is Permissions.UNSET:
-            self.settings.permissions = Permissions.SANDBOX
-            self.settings.sandbox_file = check.sandbox_file
 
         self.query_one(TasksPane).load(self._task_list)
         self._refresh()
@@ -408,9 +405,8 @@ class AlrApp(App[None]):
         self.run_worker(action[item](), exit_on_error=False)
 
     def _sandbox_viewer(self) -> FileViewer:
-        """Before Start a chosen preset is what will run, so show it; from Start on the file is the truth."""
-        waiting = self.state in (AppState.SETUP, AppState.READY)
-        if waiting and self.settings.switches is not None:
+        """A chosen preset is what will run and is written nowhere, so show it; any other answer shows its file."""
+        if self.settings.switches is not None:
             return FileViewer(
                 self.settings.sandbox_file, render(self.settings.switches)
             )

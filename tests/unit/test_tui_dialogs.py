@@ -157,6 +157,8 @@ async def test_permissions_dialog_preselects_the_file_when_the_folder_has_one(
 async def test_permissions_dialog_hides_the_file_radio_without_a_file(
     tmp_path: Path,
 ) -> None:
+    # A sandbox.json in the run folder is no longer an answer, so it is not offered.
+    write_nested_file(tmp_path / "sandbox.json", "{}")
     host = Host()
     async with host.run_test(size=BIG) as pilot:
         host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
@@ -254,7 +256,7 @@ async def test_ok_with_a_preset_and_no_folder_returns_no_path() -> None:
         host.push_screen(PermissionsDialog(RunSettings()), host.record)
         await pilot.pause()
 
-        assert "<folder>/sandbox.json" in note(host.screen)
+        assert note(host.screen) == "Nothing is written to the run folder."
         await pilot.click("#ok")
         await pilot.pause()
 
@@ -296,7 +298,7 @@ async def test_ok_with_the_file_returns_the_file_and_no_switches(
         host.push_screen(PermissionsDialog(settings), host.record)
         await pilot.pause()
 
-        assert note(host.screen) == "Nothing is written. Pick a preset to replace it."
+        assert note(host.screen) == "Nothing is written."
         await pilot.click("#ok")
         await pilot.pause()
 
@@ -326,10 +328,10 @@ async def test_ok_with_the_file_keeps_the_user_on_the_step_when_it_is_invalid(
         assert "refused" not in shown, "the dialog shows the message, not the reason"
 
 
-async def test_the_note_says_the_file_is_written_on_start_and_replaced(
+async def test_the_note_says_a_preset_is_not_written_to_the_run_folder(
     tmp_path: Path,
 ) -> None:
-    sandbox = write_nested_file(tmp_path / "sandbox.json", "{}")
+    write_nested_file(tmp_path / "sandbox.json", "{}")
     settings = settings_in(
         tmp_path,
         permissions=Permissions.SANDBOX,
@@ -342,25 +344,8 @@ async def test_the_note_says_the_file_is_written_on_start_and_replaced(
         await pilot.pause()
 
         assert selected(host.screen) == "large"
-        assert note(host.screen) == (
-            f"Written to {sandbox} when you press Start. Cancel or Quit discards it."
-            " Replaces the file there."
-        )
-        assert str(sandbox) in str(host.screen.query_one("#file", RadioButton).label)
-
-
-async def test_the_note_has_no_replace_sentence_without_a_folder_file(
-    tmp_path: Path,
-) -> None:
-    host = Host()
-    async with host.run_test(size=BIG) as pilot:
-        host.push_screen(PermissionsDialog(settings_in(tmp_path)), host.record)
-        await pilot.pause()
-
-        assert note(host.screen) == (
-            f"Written to {tmp_path / 'sandbox.json'} when you press Start."
-            " Cancel or Quit discards it."
-        )
+        assert note(host.screen) == "Nothing is written to the run folder."
+        assert not host.screen.query("#file")
 
 
 async def test_permissions_dialog_skip_returns_skip(tmp_path: Path) -> None:
@@ -526,7 +511,7 @@ async def test_file_viewer_shows_the_file_read_only(tmp_path: Path) -> None:
         assert text.text == "a: 1\n"
 
 
-async def test_file_viewer_shows_a_preset_under_a_header_saying_when_it_is_written(
+async def test_file_viewer_shows_a_preset_under_a_header_saying_nothing_is_written(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "sandbox.json"
@@ -538,7 +523,7 @@ async def test_file_viewer_shows_a_preset_under_a_header_saying_when_it_is_writt
         await pilot.pause()
 
         header = str(host.screen.query_one("#path", Label).render())
-        assert header == f"{path} (written when you press Start)"
+        assert header == f"{path} (a preset; nothing is written there)"
         text = host.screen.query_one("#text", TextArea)
         assert text.text == preset
 

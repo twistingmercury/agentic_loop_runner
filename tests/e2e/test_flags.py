@@ -25,6 +25,7 @@ def test_help_flag() -> None:
     assert res.code == 0, res
     for flag in (
         "--dir",
+        "--sandbox <name>",
         "--sandbox-settings",
         "--yolo",
         "--action-timeout",

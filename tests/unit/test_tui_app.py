@@ -763,7 +763,7 @@ async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
     await until(lambda: not isinstance(app.screen, ModalScreen))
 
 
-async def test_a_picked_folders_sandbox_json_beats_a_yolo_config_default(
+async def test_a_picked_folders_sandbox_json_changes_nothing_under_a_yolo_config_default(
     work_dir: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = home / ".local" / "alr" / "config.yaml"
@@ -791,7 +791,7 @@ async def test_a_picked_folders_sandbox_json_beats_a_yolo_config_default(
     monkeypatch.setattr("alr.cli.run_app", run_app)
     cli.main([])
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    sandbox_file = write_file(work_dir / "run" / "sandbox.json", "{}")
+    write_file(work_dir / "run" / "sandbox.json", "{}")
     app = AlrApp(seen[0])
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, FolderDialog))
@@ -799,8 +799,8 @@ async def test_a_picked_folders_sandbox_json_beats_a_yolo_config_default(
         await pilot.click("#ok")
         await until(lambda: not isinstance(app.screen, ModalScreen))
 
-        assert app.settings.permissions is Permissions.SANDBOX
-        assert app.settings.sandbox_file == sandbox_file
+        assert app.settings.permissions is Permissions.SKIP
+        assert app.settings.sandbox_file == ""
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -2217,17 +2217,23 @@ async def test_x_while_running_shows_the_file_on_disk(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    sandbox_file = write_file(work_dir / "run" / "mine.json", "{}")
+    app = AlrApp(
+        RunSettings(
+            tasks_file=tasks_file,
+            sandbox_file=sandbox_file,
+            permissions=Permissions.SANDBOX,
+            logging=False,
+        )
+    )
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
-        on_disk = Path(preset_path(tasks_file)).read_text(encoding="utf-8")
-        Path(preset_path(tasks_file)).write_text("changed on disk\n", encoding="utf-8")
+        Path(sandbox_file).write_text("changed on disk\n", encoding="utf-8")
 
         await pilot.press("x")
         await until(lambda: isinstance(app.screen, FileViewer))
 
-        assert on_disk == render(switches_for(Preset.LARGE))
         assert app.screen.query_one("#text", TextArea).text == "changed on disk\n"
 
         await pilot.press("escape")
@@ -2237,7 +2243,32 @@ async def test_x_while_running_shows_the_file_on_disk(
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_start_with_a_preset_writes_the_folder_file(work_dir: Path) -> None:
+async def test_x_while_running_shows_the_preset_that_no_file_holds(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.state is AppState.RUNNING)
+
+        await pilot.press("x")
+        await until(lambda: isinstance(app.screen, FileViewer))
+
+        text = app.screen.query_one("#text", TextArea).text
+        assert text == render(switches_for(Preset.LARGE))
+
+        await pilot.press("escape")
+        await until(lambda: not isinstance(app.screen, ModalScreen))
+        await pilot.press("ctrl+c")
+        await _finished(app)
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_start_with_a_preset_writes_nothing_to_the_run_folder(
+    work_dir: Path,
+) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     settings = _preset_settings(tasks_file, Preset.LARGE)
     app = AlrApp(settings)
@@ -2245,8 +2276,7 @@ async def test_start_with_a_preset_writes_the_folder_file(work_dir: Path) -> Non
         await pilot.press("s")
         await _finished(app)
 
-    written = Path(preset_path(tasks_file)).read_text(encoding="utf-8")
-    assert written == render(switches_for(Preset.LARGE))
+    assert not Path(preset_path(tasks_file)).exists()
 
 
 async def test_the_permissions_dialog_keeps_ok_on_screen_after_choosing_a_preset(

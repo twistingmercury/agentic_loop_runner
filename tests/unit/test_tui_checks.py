@@ -15,26 +15,18 @@ from alr.tui.checks import check_folder, check_sandbox
 TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 
 
-async def test_check_folder_returns_the_tasks_and_the_folders_sandbox(
+async def test_check_folder_returns_the_tasks_and_ignores_a_sandbox_json(
     work_dir: Path,
 ) -> None:
     folder = work_dir / "run" / "feat"
     write_nested_file(folder / "tasks.yaml", TASKS)
-    write_nested_file(folder / "sandbox.json", "{}")
+    # Not valid settings: accepting the folder must not read it.
+    write_nested_file(folder / "sandbox.json", "not json")
 
     check = await check_folder(str(folder))
 
     assert check.tasks_file == str(folder / "tasks.yaml")
-    assert check.sandbox_file == str(folder / "sandbox.json")
     assert [task.id for task in check.task_list.tasks] == [1]
-
-
-async def test_check_folder_without_a_sandbox_json_has_no_sandbox_file(
-    work_dir: Path,
-) -> None:
-    write_nested_file(work_dir / "run" / "tasks.yaml", TASKS)
-
-    assert (await check_folder(str(work_dir / "run"))).sandbox_file == ""
 
 
 async def test_check_folder_without_tasks_yaml_is_a_usage_error(work_dir: Path) -> None:

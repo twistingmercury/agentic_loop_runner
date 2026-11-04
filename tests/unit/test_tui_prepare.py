@@ -1,14 +1,13 @@
 """prepare: the checks a run starts with, run again on Start, and nothing written before they pass."""
 
-import errno
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from helpers import block_saving, write_file
 
-from alr.engine import presets as presets_module
 from alr.engine.presets import Preset, preset_path, render, switches_for
+from alr.engine.sandbox import settings_args
 from alr.engine.stop import Stop
 from alr.errors import (
     TASK_FILE_UNWRITABLE,
@@ -18,7 +17,6 @@ from alr.errors import (
 )
 from alr.record.runlog import RunLog
 from alr.tasks import Action, parse_tasks
-from alr.tui.dialogs import error_text
 from alr.tui.prepare import prepare
 from alr.tui.settings import Permissions, RunSettings
 
@@ -289,21 +287,21 @@ def _refuse_the_task_file_save(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("alr.tui.prepare.save_for_start", refuse)
 
 
-async def test_prepare_writes_the_preset_then_the_task_file(work_dir: Path) -> None:
+async def test_prepare_saves_the_task_file_and_writes_no_preset(
+    work_dir: Path,
+) -> None:
     settings = _preset_settings(work_dir, after_task=[Action(command="true")])
 
     prepared = await prepare(settings)
     prepared.close()
 
-    assert Path(settings.sandbox_file).read_text(encoding="utf-8") == render(
-        switches_for(Preset.TIGHT)
-    )
+    assert not Path(settings.sandbox_file).exists()
     assert parse_tasks(
         Path(settings.tasks_file).read_text(encoding="utf-8")
     ).shared.after_task
 
 
-async def test_prepare_writes_the_preset_even_when_the_task_file_needs_no_save(
+async def test_prepare_runs_a_preset_from_its_switches_without_a_file(
     work_dir: Path,
 ) -> None:
     settings = _preset_settings(work_dir)
@@ -311,10 +309,13 @@ async def test_prepare_writes_the_preset_even_when_the_task_file_needs_no_save(
     prepared = await prepare(settings)
     prepared.close()
 
-    assert Path(settings.sandbox_file).exists()
+    assert not Path(settings.sandbox_file).exists()
+    assert prepared.options.session_args == settings_args(
+        render(switches_for(Preset.TIGHT))
+    )
 
 
-async def test_prepare_puts_the_old_sandbox_json_back_when_the_save_fails(
+async def test_prepare_leaves_an_existing_sandbox_json_alone_when_the_save_fails(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _preset_settings(work_dir, after_task=[Action(command="true")])
@@ -327,39 +328,6 @@ async def test_prepare_puts_the_old_sandbox_json_back_when_the_save_fails(
 
     assert caught.value.reason == "task-file-unwritable"
     assert sandbox.read_bytes() == b"old"
-    assert not (work_dir / "run" / "logs").exists()
-
-
-async def test_prepare_removes_the_new_sandbox_json_when_the_save_fails(
-    work_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
-    _refuse_the_task_file_save(monkeypatch)
-
-    with pytest.raises(RefusedError):
-        await prepare(settings)
-
-    assert not Path(settings.sandbox_file).exists()
-    assert not (work_dir / "run" / "logs").exists()
-
-
-async def test_prepare_refuses_and_removes_the_run_folder_when_the_sandbox_json_cannot_be_written(
-    work_dir: Path,
-) -> None:
-    # A pending save makes the order observable: the preset goes first, so a
-    # refused preset leaves the task file as it was.
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
-    # A missing folder fails the write for any user, root included.
-    settings = replace(
-        settings, sandbox_file=str(work_dir / "missing" / "sandbox.json")
-    )
-    before = Path(settings.tasks_file).read_bytes()
-
-    with pytest.raises(RefusedError) as caught:
-        await prepare(settings)
-
-    assert caught.value.reason == "sandbox-file-unwritable"
-    assert Path(settings.tasks_file).read_bytes() == before
     assert not (work_dir / "run" / "logs").exists()
 
 
@@ -377,36 +345,3 @@ async def test_prepare_writes_nothing_for_a_file_answer(work_dir: Path) -> None:
     prepared.close()
 
     assert sandbox.read_bytes() == b'{"sandbox": {"enabled": true}}'
-
-
-async def test_prepare_still_removes_the_run_folder_when_the_restore_fails(
-    work_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
-    sandbox = Path(settings.sandbox_file)
-    sandbox.write_bytes(b'{"mine": true}')
-    _refuse_the_task_file_save(monkeypatch)
-    _fail_the_second_atomic_write(monkeypatch)
-
-    with pytest.raises(RefusedError) as caught:
-        await prepare(settings)
-
-    assert caught.value.reason == "task-file-unwritable"
-    assert "it now holds the preset" in error_text(caught.value)
-    assert sandbox.read_bytes() == render(switches_for(Preset.TIGHT)).encode("utf-8")
-    assert not (work_dir / "run" / "logs").exists()
-
-
-def _fail_the_second_atomic_write(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Let the preset write through and fail the restore that follows it."""
-    real = presets_module._replace_atomically
-    calls: list[Path] = []
-
-    def flaky(target: Path, data: bytes) -> None:
-        calls.append(target)
-        if len(calls) > 1:
-            raise OSError(errno.ENOSPC, "No space left on device")
-
-        real(target, data)
-
-    monkeypatch.setattr(presets_module, "_replace_atomically", flaky)

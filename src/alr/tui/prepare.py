@@ -13,7 +13,6 @@ from alr.engine.loop import (
     reset_in_memory,
     save_for_start,
 )
-from alr.engine.presets import restore_after_refusal, write_preset
 from alr.engine.stop import Stop
 from alr.errors import RefusedError
 from alr.record.events import Event
@@ -71,7 +70,7 @@ async def prepare(settings: RunSettings, stop: Stop | None = None) -> Prepared:
     prepared = Prepared(task_list, options, log)
     # After the log opens, so a check or the log failing never leaves the task file rewritten.
     try:
-        _save_changes(settings, task_list, reset_count)
+        _save_tasks(settings, task_list, reset_count)
     except RefusedError:
         prepared.discard()
         raise
@@ -85,20 +84,6 @@ def _log_folder(settings: RunSettings) -> Path | None:
         return None
 
     return run_dir(settings.log_folder(), datetime.now().astimezone())
-
-
-def _save_changes(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:
-    """Write the preset, then save the actions and the reset; a refused save puts the old preset back."""
-    if settings.switches is None:
-        _save_tasks(settings, task_list, reset_count)
-        return
-
-    previous = write_preset(settings.sandbox_file, settings.switches)
-    try:
-        _save_tasks(settings, task_list, reset_count)
-    except RefusedError as refusal:
-        restore_after_refusal(settings.sandbox_file, previous, refusal)
-        raise
 
 
 def _save_tasks(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:

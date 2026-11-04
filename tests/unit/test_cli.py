@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -15,8 +16,7 @@ from helpers import start_alr, wait_for_file
 
 from alr import cli
 from alr.config import SandboxDefault
-from alr.engine.presets import Preset, Switches, render, switches_for
-from alr.engine.sandbox import settings_args
+from alr.engine.sandbox import sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
 from alr.tui.settings import Permissions, RunSettings
@@ -32,7 +32,10 @@ SANDBOXED = [
 ]
 BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
 PRESET_CONFLICT = "--sandbox cannot be used with --sandbox-settings or --yolo"
-NO_PERMISSIONS = "pass --sandbox-settings <path>, or --yolo to run without a sandbox"
+NO_PERMISSIONS = (
+    "pass --sandbox <name>, --sandbox-settings <path>, or --yolo "
+    "to run without a sandbox; the sandboxes are: large, tight"
+)
 BAD_DURATION = "--action-timeout: must be a duration string such as 90s or 10m"
 ACTION_TIMEOUT_FLAG = "--action-timeout"
 
@@ -53,7 +56,7 @@ def settings(tmp_path: Path) -> str:
 def test_session_args_sandbox_file(
     settings: str, skip: bool, dry_run: bool, want: list[str]
 ) -> None:
-    assert cli.session_args(cli.Answer(settings, skip, None), dry_run) == want
+    assert cli.session_args(cli.Answer(settings, skip, ""), dry_run) == want
 
 
 @pytest.mark.parametrize(
@@ -83,7 +86,7 @@ def test_session_args_errors(
     path = str(tmp_path / file) if file else ""
 
     with pytest.raises(error) as caught:
-        cli.session_args(cli.Answer(path, skip, None), dry_run)
+        cli.session_args(cli.Answer(path, skip, ""), dry_run)
 
     assert want in str(caught.value)
 
@@ -384,7 +387,6 @@ def _capture_start(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         reset_failed: bool,
         sandbox_settings: str = "",
         stop: Stop | None = None,
-        switches: Switches | None = None,
     ) -> None:
         sessions.append(session)
 
@@ -399,21 +401,98 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 
 def _add_sandbox(folder: Path, content: str = "{}") -> Path:
+    """Put a sandbox.json in a run folder, where alr no longer looks."""
     path = folder / "sandbox.json"
     path.write_text(content, encoding="utf-8")
     return path
 
 
-def test_the_folders_sandbox_json_sandboxes_the_run(
-    folder: Path, sessions: list[list[str]]
+def _sandboxes(home: Path) -> Path:
+    """The folder the sandbox files live in."""
+    return home / ".local" / "alr" / "sandboxes"
+
+
+def _write_sandbox(home: Path, name: str, content: str = "{}") -> Path:
+    """Add a sandbox file of the user's own."""
+    path = _sandboxes(home) / f"{name}.json"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _notice(folder: Path) -> str:
+    """The line alr prints for a run folder that still holds a sandbox.json."""
+    return f"{folder}/sandbox.json is no longer read; pick a sandbox with --sandbox <name>\n"
+
+
+def _first_logged_event(folder: Path) -> dict[str, Any]:
+    """The run_started event of the one run logged in a run folder."""
+    (log,) = (folder / "logs").glob("*/run.jsonl")
+    return json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+
+
+def test_a_folders_sandbox_json_is_not_read_and_the_notice_is_printed_once(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Not valid settings: reading it would end the run with exit 3.
+    _add_sandbox(folder, "[]")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert sessions == [["--dangerously-skip-permissions"]]
+    captured = capsys.readouterr()
+    assert captured.out == _notice(folder)
+    assert captured.err == ""
+
+
+def test_a_folders_sandbox_json_no_longer_answers_the_permission_question(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     _add_sandbox(folder)
 
-    assert cli.main(["-d", str(folder)]) == 0
-    assert sessions == [SANDBOXED]
+    assert cli.main(["-d", str(folder)]) == 2
+    assert sessions == []
+    captured = capsys.readouterr()
+    assert captured.err == f"error: {NO_PERMISSIONS}\n"
+    assert captured.out == _notice(folder)
 
 
-def test_sandbox_settings_flag_wins_over_the_folder(
+def test_a_folder_without_a_sandbox_json_prints_no_notice(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_directory_named_sandbox_json_is_not_noticed(
+    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folder / "sandbox.json").mkdir()
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_dry_run_prints_the_notice_and_names_no_sandbox(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _add_sandbox(folder)
+
+    assert cli.main(["-d", str(folder), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("is no longer read") == 1
+    assert "sandbox settings:" not in out
+
+
+def test_a_named_sandbox_leaves_the_folders_sandbox_json_alone(
+    folder: Path, record: Path
+) -> None:
+    mine = '{"mine": true}'
+    _add_sandbox(folder, mine)
+
+    assert cli.main(["-d", str(folder), "--plain", "--sandbox", "large"]) == 0
+    assert (folder / "sandbox.json").read_text(encoding="utf-8") == mine
+
+
+def test_sandbox_settings_flag_runs_the_given_file_and_not_the_folders(
     folder: Path, tmp_path: Path, sessions: list[list[str]]
 ) -> None:
     _add_sandbox(folder, '{"permissions": {"deny": ["WebFetch"]}}')
@@ -424,74 +503,73 @@ def test_sandbox_settings_flag_wins_over_the_folder(
     assert sessions == [SANDBOXED]
 
 
-def test_yolo_opts_out_of_the_folders_sandbox(
-    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
-) -> None:
-    _add_sandbox(folder)
-
-    assert cli.main(["-d", str(folder), "--yolo"]) == 0
-    assert sessions == [["--dangerously-skip-permissions"]]
-    assert capsys.readouterr().err == ""
-
-
 @pytest.mark.parametrize("content", ["[]"])
-def test_a_bad_folder_file_fails_and_never_runs_unsandboxed(
+def test_a_bad_named_sandbox_file_fails_and_never_runs_unsandboxed(
     content: str,
+    home: Path,
     folder: Path,
     sessions: list[list[str]],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _add_sandbox(folder, content)
+    _write_sandbox(home, "my_sandbox", content)
 
-    assert cli.main(["-d", str(folder)]) == 3
+    assert cli.main(["-d", str(folder), "--sandbox", "my_sandbox"]) == 3
     assert sessions == []
     first_line = capsys.readouterr().err.splitlines()[0]
     assert first_line.startswith("error: refused: invalid-sandbox-settings: ")
-    assert "--sandbox-settings: must be a JSON object" in first_line
+    assert "must be a JSON object" in first_line
 
 
-def test_an_unreadable_folder_file_fails(
+def test_an_unreadable_named_sandbox_file_fails(
+    home: Path,
     folder: Path,
     sessions: list[list[str]],
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _add_sandbox(folder)
+    path = _write_sandbox(home, "my_sandbox")
     read_text = Path.read_text
 
     def refuse(self: Path, *args: Any, **kwargs: Any) -> str:
         # chmod 0 would not stop root, so the refusal is made here instead.
-        if self.name == "sandbox.json":
+        if self.name == "my_sandbox.json":
             raise PermissionError(13, "Permission denied")
 
         return read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", refuse)
 
-    assert cli.main(["-d", str(folder)]) == 3
+    assert cli.main(["-d", str(folder), "--sandbox", "my_sandbox"]) == 3
     assert sessions == []
     err = capsys.readouterr().err
     assert err.startswith("error: refused: invalid-sandbox-settings: ")
     assert "is not accessible" in err
+    assert str(path) in err
 
 
-def test_no_folder_file_keeps_the_neither_flag_error(
-    folder: Path, sessions: list[list[str]], capsys: pytest.CaptureFixture[str]
+def test_a_real_run_names_the_sandboxes_when_no_flag_chose(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (folder / "sandbox.json").mkdir()
+    _write_sandbox(home, "my_sandbox")
 
     assert cli.main(["-d", str(folder)]) == 2
     assert sessions == []
-    assert capsys.readouterr().err == f"error: {NO_PERMISSIONS}\n"
+    assert capsys.readouterr().err == (
+        "error: pass --sandbox <name>, --sandbox-settings <path>, or --yolo "
+        "to run without a sandbox; the sandboxes are: large, my_sandbox, tight\n"
+    )
 
 
-def test_dry_run_names_the_folders_sandbox_json(
-    folder: Path, capsys: pytest.CaptureFixture[str]
+def test_dry_run_names_a_sandbox_settings_file_as_given(
+    folder: Path, settings: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _add_sandbox(folder)
+    code = cli.main(["-d", str(folder), "--dry-run", "--sandbox-settings", settings])
 
-    assert cli.main(["-d", str(folder), "--dry-run"]) == 0
-    assert f"sandbox settings: {folder}/sandbox.json" in capsys.readouterr().out
+    assert code == 0
+    assert f"sandbox settings: {settings}\n" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -526,18 +604,30 @@ def _capture_view(monkeypatch: pytest.MonkeyPatch) -> list[RunSettings]:
 
 
 def test_the_view_gets_the_resolved_flags(
+    monkeypatch: pytest.MonkeyPatch, folder: Path, settings: str
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main(
+        ["-d", str(folder), "--sandbox-settings", settings, "--action-timeout", "5m"]
+    )
+
+    assert code == 0
+    assert seen[0].tasks_file == str(folder / "tasks.yaml")
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].sandbox_file == settings
+    assert seen[0].action_timeout == "5m"
+
+
+def test_the_view_leaves_the_permissions_unset_beside_a_folders_sandbox_json(
     monkeypatch: pytest.MonkeyPatch, folder: Path
 ) -> None:
     seen = _capture_view(monkeypatch)
     _add_sandbox(folder)
 
-    code = cli.main(["-d", str(folder), "--action-timeout", "5m"])
-
-    assert code == 0
-    assert seen[0].tasks_file == str(folder / "tasks.yaml")
-    assert seen[0].permissions is Permissions.SANDBOX
-    assert seen[0].sandbox_file == str(folder / "sandbox.json")
-    assert seen[0].action_timeout == "5m"
+    assert cli.main(["-d", str(folder)]) == 0
+    assert seen[0].permissions is Permissions.UNSET
+    assert seen[0].sandbox_file == ""
 
 
 def test_the_view_takes_skip(monkeypatch: pytest.MonkeyPatch, folder: Path) -> None:
@@ -750,21 +840,55 @@ def test_the_old_gate_timeout_flag_is_hidden_from_help(
 
 
 @pytest.mark.parametrize("other", ["--sandbox-settings=x.json", "--yolo"])
-def test_sandbox_preset_with_another_permission_flag_exits_2(
+def test_sandbox_with_another_permission_flag_exits_2(
     other: str, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert cli.main(["-d", str(folder), "--sandbox", "tight", other]) == 2
     assert capsys.readouterr().err == f"error: {PRESET_CONFLICT}\n"
 
 
-def test_sandbox_preset_rejects_an_unknown_value(
+def test_a_conflict_is_reported_before_an_unknown_name(
     folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with pytest.raises(SystemExit) as caught:
-        cli.main(["-d", str(folder), "--sandbox", "huge"])
+    assert cli.main(["-d", str(folder), "--sandbox", "huge", "--yolo"]) == 2
+    assert capsys.readouterr().err == f"error: {PRESET_CONFLICT}\n"
 
-    assert caught.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
+
+def test_an_unknown_sandbox_name_exits_2_listing_the_names(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_sandbox(home, "my_sandbox")
+
+    assert cli.main(["-d", str(folder), "--sandbox", "huge"]) == 2
+    assert capsys.readouterr().err == (
+        "error: --sandbox: no sandbox named huge; "
+        "the sandboxes are: large, my_sandbox, tight\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["yolo", "Tight", "tight.json", "../sandboxes/tight", ""]
+)
+def test_a_name_that_is_not_listed_exits_2(
+    name: str,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["-d", str(folder), "--sandbox", name]) == 2
+    assert sessions == []
+    err = capsys.readouterr().err
+    assert err.startswith(f"error: --sandbox: no sandbox named {name}; ")
+
+
+def test_an_unknown_sandbox_name_exits_2_in_the_view_too(
+    monkeypatch: pytest.MonkeyPatch, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = _capture_view(monkeypatch)
+
+    assert cli.main(["-d", str(folder), "--sandbox", "huge"]) == 2
+    assert "no sandbox named huge" in capsys.readouterr().err
+    assert seen == []
 
 
 def _argv(record: Path) -> list[str]:
@@ -773,43 +897,57 @@ def _argv(record: Path) -> list[str]:
     return json.loads(line)["argv"]
 
 
-@pytest.mark.parametrize(
-    ("flag", "preset"), [("tight", Preset.TIGHT), ("large", Preset.LARGE)]
-)
-def test_sandbox_preset_writes_the_folder_file_and_sandboxes_the_run(
-    flag: str, preset: Preset, folder: Path, record: Path
+@pytest.mark.parametrize("name", ["tight", "large"])
+def test_sandbox_name_sandboxes_the_run_with_that_file(
+    name: str, home: Path, folder: Path, record: Path
 ) -> None:
-    want = render(switches_for(preset))
+    path = _sandboxes(home) / f"{name}.json"
+    want = sandbox_args(str(path))
 
-    assert cli.main(["-d", str(folder), "--plain", "--sandbox", flag]) == 0
-    assert (folder / "sandbox.json").read_text(encoding="utf-8") == want
-    assert settings_args(want) == _argv(record)[1 : 1 + len(settings_args(want))]
-
-
-@pytest.mark.usefixtures("fake_claude")
-def test_sandbox_large_replaces_an_existing_folder_file(folder: Path) -> None:
-    _add_sandbox(folder, "{}")
-
-    assert cli.main(["-d", str(folder), "--sandbox", "large"]) == 0
-    assert (folder / "sandbox.json").read_text(encoding="utf-8") == render(
-        switches_for(Preset.LARGE)
-    )
-
-
-def test_sandbox_preset_wins_over_the_folders_file_for_the_session_flags(
-    folder: Path, record: Path
-) -> None:
-    _add_sandbox(folder, '{"sandbox":{"filesystem":{"denyRead":["~/"]}}}')
-    want = settings_args(render(switches_for(Preset.TIGHT)))
-
-    assert cli.main(["-d", str(folder), "--sandbox", "tight"]) == 0
+    assert cli.main(["-d", str(folder), "--plain", "--sandbox", name]) == 0
     assert want == _argv(record)[1 : 1 + len(want)]
-    assert '"~/"' not in " ".join(_argv(record))
+
+
+def test_a_sandbox_of_the_users_own_runs_with_its_settings_and_logs_its_path(
+    home: Path, folder: Path, record: Path
+) -> None:
+    path = _write_sandbox(home, "my_sandbox", '{"permissions": {"deny": ["WebFetch"]}}')
+    want = sandbox_args(str(path))
+
+    assert cli.main(["-d", str(folder), "--plain", "--sandbox", "my_sandbox"]) == 0
+    assert want == _argv(record)[1 : 1 + len(want)]
+    assert '"WebFetch"' in " ".join(_argv(record))
+    logged = _first_logged_event(folder)["sandbox_settings"]
+    assert logged == str(path)
+    assert Path(logged).is_absolute()
+    assert not (folder / "sandbox.json").exists()
+
+
+def test_a_sandbox_that_weakens_the_forced_keys_still_runs_sandboxed(
+    home: Path, folder: Path, record: Path
+) -> None:
+    weak = {
+        "sandbox": {
+            "enabled": False,
+            "allowUnsandboxedCommands": True,
+            "failIfUnavailable": False,
+        }
+    }
+    _write_sandbox(home, "weak", json.dumps(weak))
+
+    assert cli.main(["-d", str(folder), "--plain", "--sandbox", "weak"]) == 0
+    argv = _argv(record)
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["sandbox"] == {
+        "enabled": True,
+        "allowUnsandboxedCommands": False,
+        "failIfUnavailable": True,
+    }
 
 
 @pytest.mark.usefixtures("fake_claude")
-def test_a_relative_folder_with_spaces_gets_its_sandbox_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_relative_folder_with_spaces_logs_the_named_sandboxs_absolute_path(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = tmp_path / "run dir"
     run.mkdir()
@@ -817,24 +955,64 @@ def test_a_relative_folder_with_spaces_gets_its_sandbox_json(
     monkeypatch.chdir(tmp_path)
 
     assert cli.main(["-d", "run dir", "--sandbox", "tight"]) == 0
-    assert (run / "sandbox.json").exists()
-    (log,) = (run / "logs").glob("*/run.jsonl")
-    first = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
-    assert first["sandbox_settings"] == "run dir/sandbox.json"
+    assert not (run / "sandbox.json").exists()
+    logged = _first_logged_event(run)["sandbox_settings"]
+    assert logged == str(_sandboxes(home) / "tight.json")
 
 
-def test_dry_run_with_a_preset_names_the_file_and_writes_nothing(
-    folder: Path, capsys: pytest.CaptureFixture[str]
+def test_dry_run_with_a_sandbox_name_names_the_file_and_writes_nothing(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    before = sorted(path.name for path in _sandboxes(home).iterdir())
+
     assert cli.main(["-d", str(folder), "--dry-run", "--sandbox", "tight"]) == 0
     assert (
-        f"sandbox settings: {folder}/sandbox.json (tight preset; written on a real run)"
+        f"sandbox settings: {_sandboxes(home) / 'tight.json'} (tight)\n"
         in capsys.readouterr().out
     )
+    assert sorted(path.name for path in _sandboxes(home).iterdir()) == before
     assert not (folder / "sandbox.json").exists()
+    assert not (folder / "logs").exists()
 
 
-def test_the_view_refuses_a_preset_with_another_permission_flag(
+def test_dry_run_reads_a_deleted_shipped_sandbox_from_the_package(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (_sandboxes(home) / "tight.json").unlink()
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--sandbox", "tight"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        f"sandbox settings: {_sandboxes(home) / 'tight.json'} "
+        "(tight; added on a real run)\n" in out
+    )
+    assert "Added" not in out
+    assert not (_sandboxes(home) / "tight.json").exists()
+
+
+def test_dry_run_with_the_sandboxes_folder_gone_gives_the_real_runs_verdict(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shutil.rmtree(_sandboxes(home))
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--sandbox", "tight"]) == 0
+    assert "(tight; added on a real run)" in capsys.readouterr().out
+    assert not _sandboxes(home).exists()
+
+
+def test_dry_run_with_the_sandboxes_folder_gone_still_lists_the_shipped_names(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shutil.rmtree(_sandboxes(home))
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--sandbox", "huge"]) == 2
+    assert capsys.readouterr().err == (
+        "error: --sandbox: no sandbox named huge; the sandboxes are: large, tight\n"
+    )
+    assert not _sandboxes(home).exists()
+
+
+def test_the_view_refuses_a_sandbox_name_with_another_permission_flag(
     monkeypatch: pytest.MonkeyPatch,
     folder: Path,
     capsys: pytest.CaptureFixture[str],
@@ -848,8 +1026,8 @@ def test_the_view_refuses_a_preset_with_another_permission_flag(
     assert seen == []
 
 
-def test_the_view_gets_the_preset_from_the_flag(
-    monkeypatch: pytest.MonkeyPatch, folder: Path
+def test_the_view_gets_the_named_sandbox_as_a_settings_file(
+    monkeypatch: pytest.MonkeyPatch, home: Path, folder: Path
 ) -> None:
     seen = _capture_view(monkeypatch)
 
@@ -857,22 +1035,22 @@ def test_the_view_gets_the_preset_from_the_flag(
 
     assert code == 0
     assert seen[0].permissions is Permissions.SANDBOX
-    assert seen[0].preset is Preset.LARGE
-    assert seen[0].switches == switches_for(Preset.LARGE)
-    assert seen[0].sandbox_file == str(folder / "sandbox.json")
+    assert seen[0].sandbox_file == str(_sandboxes(home) / "large.json")
+    assert seen[0].preset is None
+    assert seen[0].switches is None
 
 
-def test_the_view_leaves_the_preset_path_empty_until_a_folder_is_chosen(
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_view_gets_the_named_sandbox_before_a_folder_is_chosen(
+    monkeypatch: pytest.MonkeyPatch, home: Path
 ) -> None:
     seen = _capture_view(monkeypatch)
 
     code = cli.main(["--sandbox", "tight"])
 
     assert code == 0
+    assert seen[0].tasks_file == ""
     assert seen[0].permissions is Permissions.SANDBOX
-    assert seen[0].preset is Preset.TIGHT
-    assert seen[0].sandbox_file == ""
+    assert seen[0].sandbox_file == str(_sandboxes(home) / "tight.json")
 
 
 def _answer(argv: list[str], default: SandboxDefault | None) -> cli.Answer:
@@ -880,17 +1058,22 @@ def _answer(argv: list[str], default: SandboxDefault | None) -> cli.Answer:
     args = cli._parser().parse_args(argv)
     cli.apply_sandbox_default(args, default)
     return cli.resolve_permissions(
-        args.dir, args.sandbox_settings, args.yolo, args.sandbox
+        args.sandbox_settings, args.yolo, args.sandbox, dry_run=False
     )
 
 
-@pytest.mark.parametrize("mode", ["tight", "large"])
-def test_a_preset_default_fills_in_the_missing_flag(folder: Path, mode: str) -> None:
+@pytest.mark.parametrize("mode", ["tight", "large", "my_sandbox"])
+def test_a_sandbox_default_fills_in_the_missing_flag(
+    home: Path, folder: Path, mode: str
+) -> None:
+    _write_sandbox(home, "my_sandbox")
+
     from_default = _answer(["-d", str(folder)], SandboxDefault(mode))
     from_flag = _answer(["-d", str(folder), "--sandbox", mode], None)
 
     assert from_default == from_flag
-    assert from_default.switches is not None
+    assert from_default.sandbox_name == mode
+    assert from_default.sandbox_file == str(_sandboxes(home) / f"{mode}.json")
 
 
 def test_a_yolo_default_fills_in_the_missing_flag(folder: Path) -> None:
@@ -899,12 +1082,6 @@ def test_a_yolo_default_fills_in_the_missing_flag(folder: Path) -> None:
 
     assert from_default == from_flag
     assert from_default.skip is True
-
-
-def test_a_default_naming_another_sandbox_is_not_supported_yet(folder: Path) -> None:
-    """Until --sandbox takes any name, a config default beyond the presets is refused, not a crash."""
-    with pytest.raises(UsageError, match="my_sandbox is not supported yet"):
-        _answer(["-d", str(folder)], SandboxDefault("my_sandbox"))
 
 
 @pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
@@ -923,16 +1100,14 @@ def test_a_flag_beats_the_default(
     assert _answer(argv, default) == _answer(argv, None)
 
 
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
-def test_the_folders_sandbox_json_beats_the_default(
-    folder: Path, settings: str, mode: str
+def test_the_folders_sandbox_json_does_not_stop_the_default(
+    home: Path, folder: Path
 ) -> None:
     _add_sandbox(folder)
-    default = SandboxDefault(mode)
 
-    answer = _answer(["-d", str(folder)], default)
+    answer = _answer(["-d", str(folder)], SandboxDefault("tight"))
 
-    assert answer == cli.Answer(str(folder / "sandbox.json"), False, None)
+    assert answer == cli.Answer(str(_sandboxes(home) / "tight.json"), False, "tight")
 
 
 def test_no_default_changes_nothing(folder: Path) -> None:
@@ -945,41 +1120,13 @@ def test_no_default_changes_nothing(folder: Path) -> None:
 
 
 @pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
-def test_a_default_without_dir_leaves_the_view_to_ask(mode: str) -> None:
+def test_a_default_applies_without_dir(mode: str) -> None:
     args = cli._parser().parse_args([])
-    before = vars(args).copy()
 
     cli.apply_sandbox_default(args, SandboxDefault(mode))
 
-    assert vars(args) == before
-
-
-@pytest.mark.parametrize("mode", ["yolo", "my_sandbox"])
-def test_a_default_without_dir_never_reads_the_current_folder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    """No --dir means no run folder, so a sandbox.json in the current folder must not count."""
-    _add_sandbox(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    args = cli._parser().parse_args([])
-    before = vars(args).copy()
-
-    cli.apply_sandbox_default(args, SandboxDefault(mode))
-
-    assert vars(args) == before
-
-
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
-def test_a_default_beside_the_folders_sandbox_json_changes_nothing(
-    folder: Path, settings: str, mode: str
-) -> None:
-    _add_sandbox(folder)
-    args = cli._parser().parse_args(["-d", str(folder)])
-    before = vars(args).copy()
-
-    cli.apply_sandbox_default(args, SandboxDefault(mode))
-
-    assert vars(args) == before
+    assert args.yolo is (mode == "yolo")
+    assert args.sandbox == (None if mode == "yolo" else mode)
 
 
 BAD_CONFIG = "version: 1.0.0\nnot_a_key: 1\n"
@@ -1392,7 +1539,7 @@ def test_a_config_default_reaches_the_run(
     assert sessions == [["--dangerously-skip-permissions"]]
 
 
-def test_a_yolo_config_default_without_dir_leaves_the_view_permissions_unset(
+def test_a_yolo_config_default_without_dir_sets_the_view_permissions_to_skip(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_config(home, YOLO_CONFIG)
@@ -1401,4 +1548,175 @@ def test_a_yolo_config_default_without_dir_leaves_the_view_permissions_unset(
     code = cli.main([])
 
     assert code == 0
-    assert seen[0].permissions is Permissions.UNSET
+    assert seen[0].permissions is Permissions.SKIP
+
+
+def test_a_sandbox_config_default_without_dir_gives_the_view_its_file(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_sandbox(home, "my_sandbox")
+    _write_config(home, YOLO_CONFIG.replace("default: yolo", "default: my_sandbox"))
+    seen = _capture_view(monkeypatch)
+
+    code = cli.main([])
+
+    assert code == 0
+    assert seen[0].tasks_file == ""
+    assert seen[0].permissions is Permissions.SANDBOX
+    assert seen[0].sandbox_file == str(path)
+
+
+def test_a_sandbox_config_default_reaches_the_run(
+    folder: Path, home: Path, sessions: list[list[str]]
+) -> None:
+    path = _write_sandbox(home, "my_sandbox", '{"permissions": {"deny": ["Read"]}}')
+    _write_config(home, YOLO_CONFIG.replace("default: yolo", "default: my_sandbox"))
+
+    assert cli.main(["-d", str(folder)]) == 0
+    assert sessions == [sandbox_args(str(path))]
+
+
+def test_a_config_default_applies_beside_the_folders_sandbox_json(
+    folder: Path,
+    home: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _add_sandbox(folder, "[]")
+    _write_config(home, YOLO_CONFIG)
+
+    assert cli.main(["-d", str(folder)]) == 0
+    assert sessions == [["--dangerously-skip-permissions"]]
+    assert capsys.readouterr().out == _notice(folder)
+
+
+def test_a_real_run_adds_a_deleted_shipped_sandbox_and_says_so_once(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    shipped = tight.read_bytes()
+    tight.unlink()
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert capsys.readouterr().out == f"Added {tight}\n"
+    assert tight.read_bytes() == shipped
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_real_run_leaves_an_edited_shipped_sandbox_alone(
+    home: Path, folder: Path, sessions: list[list[str]]
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    large.write_text("my edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert large.read_text(encoding="utf-8") == "my edit\n"
+
+
+def test_a_dry_run_adds_no_sandbox(
+    home: Path, folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    tight.unlink()
+
+    def add_missing() -> list[Path]:
+        pytest.fail("a dry run added a sandbox")
+
+    monkeypatch.setattr(cli, "add_missing", add_missing)
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--yolo"]) == 0
+    assert not tight.exists()
+
+
+def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read(
+    folder: Path, sessions: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    real_check = cli.config_folder_exists
+    real_add = cli.add_missing
+    real_dir = cli.resolve_dir
+    real_load = cli.load
+
+    def check() -> bool:
+        calls.append("check")
+        return real_check()
+
+    def add() -> list[Path]:
+        calls.append("add")
+        return real_add()
+
+    def resolve(dir: str) -> str:
+        calls.append("dir")
+        return real_dir(dir)
+
+    def load(**kwargs: Any) -> Any:
+        calls.append("load")
+        return real_load(**kwargs)
+
+    monkeypatch.setattr(cli, "config_folder_exists", check)
+    monkeypatch.setattr(cli, "add_missing", add)
+    monkeypatch.setattr(cli, "resolve_dir", resolve)
+    monkeypatch.setattr(cli, "load", load)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert calls == ["check", "add", "dir", "load"]
+
+
+def test_a_machine_that_is_not_set_up_gets_no_sandbox_added_and_no_name_check(
+    folder: Path,
+    fresh_home: Path,
+    no_terminal: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def add_missing() -> list[Path]:
+        pytest.fail("added a sandbox before the config folder exists")
+
+    monkeypatch.setattr(cli, "add_missing", add_missing)
+
+    assert cli.main(["-d", str(folder), "--sandbox", "typo"]) == 3
+    assert capsys.readouterr().err.startswith(REFUSED_SETUP)
+
+
+def test_a_sandboxes_path_that_is_a_file_is_refused_before_the_run_folder_is_read(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shutil.rmtree(_sandboxes(home))
+    _sandboxes(home).write_text("in the way", encoding="utf-8")
+
+    assert cli.main(["-d", str(home / "nowhere"), "--yolo"]) == 3
+    assert capsys.readouterr().err.startswith("error: refused: invalid-config: ")
+
+
+def test_sandboxes_are_added_even_when_the_config_turns_out_bad(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    tight.unlink()
+    _write_config(home, BAD_CONFIG)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 3
+    assert tight.exists()
+    assert capsys.readouterr().err.startswith("error: refused: invalid-config: ")
+
+
+def test_a_broken_config_is_refused_before_the_sandbox_name_is_looked_at(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_config(home, BAD_CONFIG)
+
+    assert cli.main(["-d", str(folder), "--sandbox", "typo"]) == 3
+    assert capsys.readouterr().err.startswith("error: refused: invalid-config: ")
+
+
+def test_the_sandbox_flag_is_documented_in_the_help() -> None:
+    # Argparse wraps the help, so the words are compared without the line breaks.
+    help_text = " ".join(cli._parser().format_help().split())
+
+    assert "--sandbox <name>" in help_text
+    assert "the named file from ~/.local/alr/sandboxes/" in help_text
