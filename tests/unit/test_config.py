@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from helpers import chmodded
 
 from alr.config import (
     Config,
@@ -51,9 +52,12 @@ defaults:
 
 
 def make_folder(tmp_path: Path) -> Path:
-    """Create a config folder holding both prompt files."""
+    """Create a config folder holding both prompt files and the shipped sandboxes."""
     folder = tmp_path / "alr"
     (folder / "prompts").mkdir(parents=True)
+    (folder / "sandboxes").mkdir()
+    (folder / "sandboxes" / "tight.json").write_text("{}", encoding="utf-8")
+    (folder / "sandboxes" / "large.json").write_text("{}", encoding="utf-8")
     (folder / "prompts" / "task_review.md").write_text("review", encoding="utf-8")
     (folder / "prompts" / "task_remediation.md").write_text("fix", encoding="utf-8")
     return folder
@@ -83,7 +87,7 @@ def test_parse_reads_the_documented_file(tmp_path: Path) -> None:
     config = parse(DOCUMENTED, folder)
 
     assert config == Config(
-        sandbox=SandboxDefault(mode="tight", sandbox_file=""),
+        sandbox=SandboxDefault(name="tight"),
         task_review_prompt=str(folder / "prompts" / "task_review.md"),
         task_review_max_rounds=1,
         task_remediation_prompt=str(folder / "prompts" / "task_remediation.md"),
@@ -100,26 +104,155 @@ def test_a_missing_sandbox_section_gives_none(tmp_path: Path) -> None:
     assert config.sandbox is None
 
 
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
-def test_each_preset_is_read(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("name", ["tight", "large", "yolo"])
+def test_each_shipped_name_and_yolo_is_read(tmp_path: Path, name: str) -> None:
     folder = make_folder(tmp_path)
-    text = replace("default: tight", f"default: {mode}")
+    text = replace("default: tight", f"default: {name}")
 
     config = parse(text, folder)
 
-    assert config.sandbox == SandboxDefault(mode=mode, sandbox_file="")
+    assert config.sandbox == SandboxDefault(name=name)
 
 
-def test_custom_reads_its_sandbox_file_relative_to_the_folder(tmp_path: Path) -> None:
+def test_default_accepts_a_user_sandbox_name(tmp_path: Path) -> None:
     folder = make_folder(tmp_path)
-    (folder / "mine.json").write_text("{}", encoding="utf-8")
-    text = replace("default: tight", "default: custom\n      sandbox_file: ./mine.json")
+    (folder / "sandboxes" / "my_sandbox.json").write_text("{}", encoding="utf-8")
+    text = replace("default: tight", "default: my_sandbox")
 
     config = parse(text, folder)
 
-    assert config.sandbox == SandboxDefault(
-        mode="custom", sandbox_file=str(folder / "mine.json")
+    assert config.sandbox == SandboxDefault(name="my_sandbox")
+
+
+def test_default_yolo(tmp_path: Path) -> None:
+    folder = make_folder(tmp_path)
+    shutil.rmtree(folder / "sandboxes")
+    text = replace("default: tight", "default: yolo")
+
+    config = parse(text, folder)
+
+    assert config.sandbox == SandboxDefault(name="yolo")
+
+
+def test_default_naming_no_sandbox_is_refused(tmp_path: Path) -> None:
+    folder = make_folder(tmp_path)
+    text = replace("default: tight", "default: nope")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(text, folder)
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert caught.value.message == (
+        f"{folder / 'config.yaml'}: default nope is not a sandbox; "
+        "the sandboxes are: large, tight"
     )
+
+
+def test_default_naming_no_sandbox_with_an_empty_folder_says_none(
+    tmp_path: Path,
+) -> None:
+    folder = make_folder(tmp_path)
+    shutil.rmtree(folder / "sandboxes")
+    text = replace("default: tight", "default: nope")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(text, folder)
+
+    assert caught.value.message.endswith("the sandboxes are: (none)")
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
+def test_default_with_a_sandboxes_path_that_is_a_file_is_refused_as_a_non_folder(
+    dry_run: bool, tmp_path: Path
+) -> None:
+    folder = make_folder(tmp_path)
+    shutil.rmtree(folder / "sandboxes")
+    (folder / "sandboxes").write_text("in the way", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(DOCUMENTED, folder, dry_run)
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert caught.value.message == (
+        f"{folder / 'sandboxes'} is not a folder; remove it yourself"
+    )
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
+def test_default_with_a_sandboxes_folder_alr_cannot_list_is_config_unwritable(
+    dry_run: bool, tmp_path: Path, locked_folder: None
+) -> None:
+    folder = make_folder(tmp_path)
+
+    with chmodded(folder / "sandboxes", 0o311), pytest.raises(RefusedError) as caught:
+        parse(DOCUMENTED, folder, dry_run)
+
+    assert caught.value.reason == CONFIG_UNWRITABLE
+    assert caught.value.message == (
+        f"cannot list the sandboxes in {folder / 'sandboxes'}: Permission denied"
+    )
+
+
+def test_custom_is_refused_with_move_advice(tmp_path: Path) -> None:
+    folder = make_folder(tmp_path)
+    # The advice must hold even for a user who already moved the file: custom is reserved.
+    (folder / "sandboxes" / "custom.json").write_text("{}", encoding="utf-8")
+    text = replace("default: tight", "default: custom")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(text, folder)
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert caught.value.message == (
+        f"{folder / 'config.yaml'}: custom: no longer supported; "
+        f"move the file into {folder / 'sandboxes'} and use its name as default"
+    )
+
+
+@pytest.mark.parametrize("default", ["custom", "tight"])
+def test_sandbox_file_is_refused_with_move_advice(tmp_path: Path, default: str) -> None:
+    folder = make_folder(tmp_path)
+    text = replace(
+        "default: tight", f"default: {default}\n      sandbox_file: ./mine.json"
+    )
+
+    with pytest.raises(RefusedError) as caught:
+        parse(text, folder)
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert caught.value.message == (
+        f"{folder / 'config.yaml'}: sandbox_file: no longer supported; "
+        f"move the file into {folder / 'sandboxes'} and use its name as default"
+    )
+
+
+def test_dry_run_accepts_a_missing_shipped_name(tmp_path: Path) -> None:
+    folder = make_folder(tmp_path)
+    (folder / "sandboxes" / "tight.json").unlink()
+
+    config = parse(DOCUMENTED, folder, dry_run=True)
+
+    assert config.sandbox == SandboxDefault(name="tight")
+    assert not (folder / "sandboxes" / "tight.json").exists()
+
+
+def test_a_real_run_refuses_a_missing_shipped_name(tmp_path: Path) -> None:
+    folder = make_folder(tmp_path)
+    (folder / "sandboxes" / "tight.json").unlink()
+
+    with pytest.raises(RefusedError, match="default tight is not a sandbox"):
+        parse(DOCUMENTED, folder)
+
+
+def test_load_passes_dry_run_on(tmp_path: Path) -> None:
+    create_folder(tmp_path)
+    folder = config_dir(tmp_path)
+    (folder / "config.yaml").write_text(DOCUMENTED, encoding="utf-8")
+    (folder / "sandboxes" / "tight.json").unlink()
+
+    config = load(tmp_path, dry_run=True)
+
+    assert config.sandbox == SandboxDefault(name="tight")
 
 
 def test_an_absolute_path_stays_as_written(tmp_path: Path) -> None:
@@ -175,22 +308,13 @@ REFUSALS = {
         replace("    task_remediation:", "    task_remediation:\n      colour: red"),
         '"colour"',
     ),
-    "unknown mode": (replace("default: tight", "default: loose"), '"loose"'),
-    "custom without a file": (
-        replace("default: tight", "default: custom"),
-        "sandbox_file",
+    "unknown mode": (
+        replace("default: tight", "default: loose"),
+        "default loose is not a sandbox",
     ),
-    "a file beside tight": (
-        replace("default: tight", "default: tight\n      sandbox_file: ./a.json"),
-        "sandbox_file",
-    ),
-    "a file beside yolo": (
-        replace("default: tight", "default: yolo\n      sandbox_file: ./a.json"),
-        "sandbox_file",
-    ),
-    "empty sandbox_file": (
-        replace("default: tight", "default: custom\n      sandbox_file: ''"),
-        "sandbox_file",
+    "default not a name": (
+        replace("default: tight", "default: [tight]"),
+        "is not a sandbox",
     ),
     "zero rounds": (
         replace("max_task_review_rounds: 1", "max_task_review_rounds: 0"),
@@ -256,7 +380,9 @@ REFUSALS = {
         "task_remediation",
     ),
     "missing mode": (
-        replace("      default: tight\n", "      sandbox_file: ./a.json\n"),
+        replace(
+            "    permissiveness:\n      default: tight\n", "    permissiveness: {}\n"
+        ),
         "default",
     ),
     "sandbox without permissiveness": (
@@ -286,7 +412,13 @@ def test_parse_refuses(tmp_path: Path, text: str, problem: str) -> None:
     assert problem in caught.value.message
 
 
-DEFAULT_FILES = ("config.yaml", "prompts/task_review.md", "prompts/task_remediation.md")
+DEFAULT_FILES = (
+    "config.yaml",
+    "prompts/task_review.md",
+    "prompts/task_remediation.md",
+    "sandboxes/tight.json",
+    "sandboxes/large.json",
+)
 
 
 def test_create_folder_writes_the_default_files(tmp_path: Path) -> None:
@@ -319,6 +451,9 @@ def test_create_folder_leaves_no_staging_files_behind(tmp_path: Path) -> None:
         "prompts",
         "prompts/task_remediation.md",
         "prompts/task_review.md",
+        "sandboxes",
+        "sandboxes/large.json",
+        "sandboxes/tight.json",
     ]
 
 
@@ -611,23 +746,6 @@ def test_a_reader_never_sees_the_folder_before_it_is_whole(
 
     assert seen == [False] * len(DEFAULT_FILES)
     assert (folder / "config.yaml").is_file()
-
-
-def test_a_missing_custom_sandbox_file_names_the_config_the_key_and_the_path(
-    tmp_path: Path,
-) -> None:
-    folder = make_folder(tmp_path)
-    text = replace("default: tight", "default: custom\n      sandbox_file: ./mine.json")
-
-    with pytest.raises(RefusedError) as caught:
-        parse(text, folder)
-
-    message = str(caught.value)
-    assert INVALID_CONFIG in message
-    assert "config.yaml" in message
-    assert "defaults.sandbox.permissiveness.sandbox_file" in message
-    assert str(folder / "mine.json") in message
-    assert "--sandbox-settings" not in message
 
 
 def test_an_unreadable_prompt_file_is_refused_at_startup(tmp_path: Path) -> None:

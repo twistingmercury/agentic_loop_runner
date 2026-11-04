@@ -1,14 +1,13 @@
 """prepare: the checks a run starts with, run again on Start, and nothing written before they pass."""
 
-import errno
+import json
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from helpers import block_saving, write_file
 
-from alr.engine import presets as presets_module
-from alr.engine.presets import Preset, preset_path, render, switches_for
+from alr.engine.sandbox import sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import (
     TASK_FILE_UNWRITABLE,
@@ -17,8 +16,8 @@ from alr.errors import (
     RunLogError,
 )
 from alr.record.runlog import RunLog
+from alr.sandboxes import sandboxes_dir
 from alr.tasks import Action, parse_tasks
-from alr.tui.dialogs import error_text
 from alr.tui.prepare import prepare
 from alr.tui.settings import Permissions, RunSettings
 
@@ -270,14 +269,14 @@ async def test_prepare_refuses_a_failed_task_and_writes_nothing(
     assert not (work_dir / "run" / "logs").exists()
 
 
-def _preset_settings(folder: Path, **changes: object) -> RunSettings:
+def _sandbox_settings(folder: Path, **changes: object) -> RunSettings:
+    """A run that picked the sandbox called tight, which lives in the config folder."""
     base = _settings(folder, logging=True)
     return replace(
         base,
         permissions=Permissions.SANDBOX,
-        preset=Preset.TIGHT,
-        switches=switches_for(Preset.TIGHT),
-        sandbox_file=preset_path(base.tasks_file),
+        sandbox_file=str(sandboxes_dir() / "tight.json"),
+        sandbox_name="tight",
         **changes,
     )
 
@@ -289,77 +288,61 @@ def _refuse_the_task_file_save(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("alr.tui.prepare.save_for_start", refuse)
 
 
-async def test_prepare_writes_the_preset_then_the_task_file(work_dir: Path) -> None:
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
+async def test_prepare_saves_the_task_file_and_writes_no_sandbox_json(
+    work_dir: Path,
+) -> None:
+    settings = _sandbox_settings(work_dir, after_task=[Action(command="true")])
 
     prepared = await prepare(settings)
     prepared.close()
 
-    assert Path(settings.sandbox_file).read_text(encoding="utf-8") == render(
-        switches_for(Preset.TIGHT)
-    )
+    assert not (work_dir / "run" / "sandbox.json").exists()
     assert parse_tasks(
         Path(settings.tasks_file).read_text(encoding="utf-8")
     ).shared.after_task
 
 
-async def test_prepare_writes_the_preset_even_when_the_task_file_needs_no_save(
+async def test_prepare_runs_a_named_sandbox_from_its_file_as_it_is_now(
     work_dir: Path,
 ) -> None:
-    settings = _preset_settings(work_dir)
+    settings = _sandbox_settings(work_dir)
+    # Edited after the dialog picked it: the run reads the file again on Start.
+    Path(settings.sandbox_file).write_text(
+        '{"sandbox": {"marker": 1}}', encoding="utf-8"
+    )
 
     prepared = await prepare(settings)
     prepared.close()
 
-    assert Path(settings.sandbox_file).exists()
+    args = prepared.options.session_args
+    assert args == sandbox_args(settings.sandbox_file)
+    assert json.loads(args[args.index("--settings") + 1])["sandbox"]["marker"] == 1
 
 
-async def test_prepare_puts_the_old_sandbox_json_back_when_the_save_fails(
+async def test_prepare_logs_the_named_sandbox_files_path(work_dir: Path) -> None:
+    settings = _sandbox_settings(work_dir)
+
+    prepared = await prepare(settings)
+    prepared.close()
+
+    (ledger,) = (work_dir / "run" / "logs").glob("*/run.jsonl")
+    started = json.loads(ledger.read_text(encoding="utf-8").splitlines()[0])
+    assert started["sandbox_settings"] == str(sandboxes_dir() / "tight.json")
+
+
+async def test_prepare_leaves_the_sandbox_file_alone_when_the_save_fails(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
+    settings = _sandbox_settings(work_dir, after_task=[Action(command="true")])
     sandbox = Path(settings.sandbox_file)
-    sandbox.write_bytes(b"old")
+    sandbox.write_bytes(b"{}")
     _refuse_the_task_file_save(monkeypatch)
 
     with pytest.raises(RefusedError) as caught:
         await prepare(settings)
 
     assert caught.value.reason == "task-file-unwritable"
-    assert sandbox.read_bytes() == b"old"
-    assert not (work_dir / "run" / "logs").exists()
-
-
-async def test_prepare_removes_the_new_sandbox_json_when_the_save_fails(
-    work_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
-    _refuse_the_task_file_save(monkeypatch)
-
-    with pytest.raises(RefusedError):
-        await prepare(settings)
-
-    assert not Path(settings.sandbox_file).exists()
-    assert not (work_dir / "run" / "logs").exists()
-
-
-async def test_prepare_refuses_and_removes_the_run_folder_when_the_sandbox_json_cannot_be_written(
-    work_dir: Path,
-) -> None:
-    # A pending save makes the order observable: the preset goes first, so a
-    # refused preset leaves the task file as it was.
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
-    # A missing folder fails the write for any user, root included.
-    settings = replace(
-        settings, sandbox_file=str(work_dir / "missing" / "sandbox.json")
-    )
-    before = Path(settings.tasks_file).read_bytes()
-
-    with pytest.raises(RefusedError) as caught:
-        await prepare(settings)
-
-    assert caught.value.reason == "sandbox-file-unwritable"
-    assert Path(settings.tasks_file).read_bytes() == before
+    assert sandbox.read_bytes() == b"{}"
     assert not (work_dir / "run" / "logs").exists()
 
 
@@ -377,36 +360,3 @@ async def test_prepare_writes_nothing_for_a_file_answer(work_dir: Path) -> None:
     prepared.close()
 
     assert sandbox.read_bytes() == b'{"sandbox": {"enabled": true}}'
-
-
-async def test_prepare_still_removes_the_run_folder_when_the_restore_fails(
-    work_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _preset_settings(work_dir, after_task=[Action(command="true")])
-    sandbox = Path(settings.sandbox_file)
-    sandbox.write_bytes(b'{"mine": true}')
-    _refuse_the_task_file_save(monkeypatch)
-    _fail_the_second_atomic_write(monkeypatch)
-
-    with pytest.raises(RefusedError) as caught:
-        await prepare(settings)
-
-    assert caught.value.reason == "task-file-unwritable"
-    assert "it now holds the preset" in error_text(caught.value)
-    assert sandbox.read_bytes() == render(switches_for(Preset.TIGHT)).encode("utf-8")
-    assert not (work_dir / "run" / "logs").exists()
-
-
-def _fail_the_second_atomic_write(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Let the preset write through and fail the restore that follows it."""
-    real = presets_module._replace_atomically
-    calls: list[Path] = []
-
-    def flaky(target: Path, data: bytes) -> None:
-        calls.append(target)
-        if len(calls) > 1:
-            raise OSError(errno.ENOSPC, "No space left on device")
-
-        real(target, data)
-
-    monkeypatch.setattr(presets_module, "_replace_atomically", flaky)

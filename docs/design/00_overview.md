@@ -1,7 +1,7 @@
 ---
-version: 15
-date: 2026-11-01
-notes: "The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+version: 16
+date: 2026-11-04
+notes: "The core concept diagram names the sandbox settings JSON as a file from ~/.local/alr/sandboxes/ or --sandbox-settings, not the run folder (ADR-032). Earlier: The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -37,7 +37,7 @@ flowchart TD
 
     subgraph files["Files"]
         tasks["tasks.yaml<br/>shared prompt, actions, tasks"]:::green
-        sandbox["sandbox settings JSON<br/>(--sandbox-settings or the run folder)"]:::green
+        sandbox["sandbox settings JSON<br/>(~/.local/alr/sandboxes/ or --sandbox-settings)"]:::green
     end
 
     subgraph programs["Programs alr starts"]

@@ -7,14 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sandboxes are files now (ADR-032). Tight and Large ship as `tight.json` and
+  `large.json` in `~/.local/alr/sandboxes/`, and any `*.json` there is a
+  sandbox you pick by name with `--sandbox <name>`, the config default, or the
+  permissions dialog. Edit them, or add your own such as `my_sandbox.json`.
+  Every real run adds a shipped file that is missing, prints `Added <path>`,
+  and never overwrites a file you edited. `--dry-run` writes nothing and
+  reads a missing shipped file from the package.
+- Breaking: `--sandbox` takes any sandbox name, not only `tight` or `large`.
+- The permissions dialog lists the sandboxes by name, with a preview of the
+  selected file. Every file a run would refuse is listed with its reason in
+  parentheses after the name (`not valid JSON`, `sandbox is not an object`, or
+  `cannot be read`), and OK stays off while it is selected.
+- The config's sandbox default now applies with or without `--dir`.
+- The dry run's sandbox line is now `sandbox settings: <path> (<name>)` for a
+  sandbox picked by name, and `sandbox settings: <path> (<name>; added on a real run)`
+  when a real run would first add the shipped file. A file given with
+  `--sandbox-settings` still prints `sandbox settings: <path>`.
+- A real run with no sandbox flag and no config default now fails with
+  `pass --sandbox <name>, --sandbox-settings <path>, or --yolo to run without a sandbox; the sandboxes are: <names>`.
+  The error names `--sandbox <name>` and lists the sandboxes (`(none)` when
+  there are none). It still exits 2.
+- The run log's `run_started.sandbox_settings` holds the absolute path of the
+  named file in `~/.local/alr/sandboxes/`, where it held the run folder's
+  `sandbox.json` for a preset. A `--sandbox-settings` file still shows the path
+  as given.
+- Breaking: a plain real run of a run folder that holds only a `sandbox.json`,
+  with no `--sandbox`, `--sandbox-settings`, `--yolo`, or config default, now
+  exits 2 with the error above instead of running, because the file is no
+  longer read. Move it into `~/.local/alr/sandboxes/` and pick it by name.
+- A refused sandbox file names the flag and the file. A named sandbox reads
+  `error: refused: invalid-sandbox-settings: --sandbox my_sandbox: <path>: must be a JSON object`
+  and a settings file reads
+  `error: refused: invalid-sandbox-settings: --sandbox-settings <path>: must be a JSON object`.
+  Before, the error named only the flag.
+- `custom` is a reserved name, like `yolo`. A `custom.json` in
+  `~/.local/alr/sandboxes/` is not listed, and `--sandbox custom` fails with
+  `--sandbox: no sandbox named custom; the sandboxes are: <names>`, because
+  `default: custom` in `config.yaml` is refused as the old mode.
+- The bundled `alr-task-file` skill's step 6 now covers sandboxes: how a
+  session is sandboxed, how a sandbox file lets named commands out
+  (`sandbox.excludedCommands` plus matching `permissions.allow` rules), how a
+  prompt must tell the session to run such a command (its own Bash call,
+  exactly as listed), and that writes outside the project are blocked.
+
+### Removed
+
+- Breaking: `custom` as the config's sandbox default and the `sandbox_file`
+  key are refused as `invalid-config`; move the file into
+  `~/.local/alr/sandboxes/` and use its name as `default`.
+- Breaking: a run folder's `sandbox.json` is ignored, and alr no longer writes
+  one. `--dir` prints `<folder>/sandbox.json is no longer read; pick a sandbox with --sandbox <name>`
+  when it finds one.
+- Breaking: the three switches (web, Docker, credential folders) are gone;
+  edit the sandbox file instead. The `sandbox-file-unwritable` refusal went
+  with them.
+
 ### Fixed
 
-- The Large preset's Docker switch now lets a session actually run Docker (#47).
-  Before, `docker` was denied because commands outside the sandbox still need a
+- The Large sandbox now lets a session actually run Docker (#47). Before,
+  `docker` was denied because commands outside the sandbox still need a
   permission check and nobody is there to approve it, and `./build/build.sh` ran
-  inside the sandbox where it couldn't reach the Docker socket. With the switch
-  on, `sandbox.json` now lists `docker *`, `./build/build.sh`, and
-  `./build/build.sh *` as excluded commands and allows them under `permissions`.
+  inside the sandbox where it couldn't reach the Docker socket. The shipped
+  `large.json` now lists `docker *`, `./build/build.sh`, and
+  `./build/build.sh *` as excluded commands (`sandbox.excludedCommands`) and
+  allows the same three under `permissions.allow`.
 
 ## [0.4.1] - 2026-11-03
 

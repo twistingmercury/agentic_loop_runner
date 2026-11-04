@@ -9,6 +9,7 @@ from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import Button
 
+from alr.sandboxes import list_sandboxes
 from alr.tui.app import AlrApp
 from alr.tui.dialogs import (
     ErrorDialog,
@@ -26,7 +27,7 @@ SIZES = [(80, 24), (140, 40)]
 
 DIALOGS: dict[str, Callable[[str], Screen[object]]] = {
     "folder": lambda tasks: FolderDialog(str(Path(tasks).parent)),
-    "permissions": lambda tasks: PermissionsDialog(RunSettings()),
+    "permissions": lambda tasks: PermissionsDialog(RunSettings(), list_sandboxes()),
     "actions": lambda tasks: ActionsDialog([], []),
     "viewer": lambda tasks: FileViewer(tasks),
     "error": lambda tasks: ErrorDialog("something went wrong"),

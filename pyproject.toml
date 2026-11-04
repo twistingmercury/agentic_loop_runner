@@ -37,7 +37,8 @@ files = ["src"]
 
 [tool.ruff]
 # The plans under docs/ hold code blocks that ruff would otherwise reformat.
-extend-exclude = ["docs"]
+# Claude Code's sandbox masks files under .claude/ with unreadable stand-ins.
+extend-exclude = ["docs", ".claude"]
 
 [tool.ruff.lint]
 select = ["F", "N"]

@@ -4,18 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from alr.engine.loop import read_tasks
-from alr.engine.sandbox import folder_sandbox, sandbox_args
+from alr.engine.sandbox import sandbox_args
 from alr.errors import UsageError
 from alr.tasks import TaskList
 
 
 @dataclass(frozen=True)
 class FolderCheck:
-    """A run folder that passed: its task file, the loaded tasks, and its sandbox.json if any."""
+    """A run folder that passed: its task file and the loaded tasks."""
 
     tasks_file: str
     task_list: TaskList
-    sandbox_file: str
 
 
 async def check_folder(folder: str) -> FolderCheck:
@@ -29,9 +28,12 @@ async def check_folder(folder: str) -> FolderCheck:
         raise UsageError(f"no tasks.yaml in {folder}")
 
     task_list = read_tasks(str(tasks_file))
-    return FolderCheck(str(tasks_file), task_list, folder_sandbox(folder) or "")
+    return FolderCheck(str(tasks_file), task_list)
 
 
-def check_sandbox(path: str) -> None:
-    """Accept a sandbox settings file, or raise why not; the run reads it the same way."""
-    sandbox_args(path)
+def check_sandbox(path: str, name: str = "") -> None:
+    """Accept a sandbox settings file, or raise why not; the run reads it the same way.
+
+    name is the sandbox picked by name, empty for a --sandbox-settings file.
+    """
+    sandbox_args(path, name)

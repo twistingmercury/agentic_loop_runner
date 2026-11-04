@@ -1,5 +1,6 @@
 """The config folder, ~/.local/alr: set up only after a typed yes, never by a dry run, left alone after."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,8 @@ def test_yes_sets_up_the_folder_and_starts_no_run(
         "config.yaml",
         "prompts/task_review.md",
         "prompts/task_remediation.md",
+        "sandboxes/tight.json",
+        "sandboxes/large.json",
     ):
         assert (folder / name).is_file()
         assert str(folder / name) in res.shown
@@ -89,6 +92,7 @@ def test_the_prompt_names_every_folder_it_will_create(
     assert str(home / ".local") in listed
     assert str(config_folder) in listed
     assert str(config_folder / "prompts") in listed
+    assert str(config_folder / "sandboxes") in listed
 
 
 @pytest.mark.parametrize(
@@ -176,6 +180,46 @@ def test_a_yolo_default_runs_without_a_flag(
     assert [record["argv"] for record in records] == [
         ["--print", "--dangerously-skip-permissions"]
     ]
+
+
+def test_a_sandbox_default_runs_that_sandbox_beside_a_folders_sandbox_json(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = set_up(home)
+    mine = '{"sandbox": {"filesystem": {"denyRead": ["~/"]}}}'
+    (folder / "sandboxes" / "my_sandbox.json").write_text(mine, encoding="utf-8")
+    (folder / "config.yaml").write_text(
+        YOLO_CONFIG.replace("default: yolo", "default: my_sandbox"), encoding="utf-8"
+    )
+    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    # The run folder's own file says nothing: the default still decides.
+    (tmp_path / "sandbox.json").write_text("null", encoding="utf-8")
+    record_file = tmp_path / "record.ndjson"
+
+    res = run_alr(f"--dir={tmp_path}", env={"FAKECLAUDE_RECORD_FILE": str(record_file)})
+
+    assert res.code == 0, res
+    (record,) = fake_claude_records(record_file)
+    settings = json.loads(record["argv"][4])
+    assert settings["sandbox"]["filesystem"] == {"denyRead": ["~/"]}
+    assert settings["sandbox"]["enabled"] is True
+
+
+def test_a_default_naming_no_sandbox_is_refused_before_any_task(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = set_up(home)
+    (folder / "config.yaml").write_text(
+        YOLO_CONFIG.replace("default: yolo", "default: nope"), encoding="utf-8"
+    )
+    write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr(f"--dir={tmp_path}")
+
+    assert res.code == 3, res
+    assert res.err.startswith("error: refused: invalid-config: ")
+    assert "default nope is not a sandbox; the sandboxes are: large, tight" in res.err
+    assert not (tmp_path / "logs").exists()
 
 
 def test_dry_run_in_a_terminal_refuses_without_asking_or_creating(

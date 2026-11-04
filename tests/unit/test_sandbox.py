@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import folder_sandbox, sandbox_args, settings_args
+from alr.engine.sandbox import sandbox_args, settings_args, settings_problem
 from alr.errors import RefusedError
 
 FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
@@ -66,55 +66,110 @@ def test_sandbox_args_forces_sandbox_keys(
 
 
 @pytest.mark.parametrize(
-    ("content", "want_error"),
+    ("content", "problem"),
     [
+        pytest.param("sandbox: true", "must be a JSON object: ", id="not JSON"),
+        pytest.param("[]", "must be a JSON object", id="array"),
         pytest.param(
-            "sandbox: true", "--sandbox-settings: must be a JSON object", id="not JSON"
-        ),
-        pytest.param("[]", "--sandbox-settings: must be a JSON object", id="array"),
-        pytest.param(
-            '{"sandbox":null}',
-            "--sandbox-settings: sandbox: must be a JSON object",
-            id="sandbox null",
+            '{"sandbox":null}', "sandbox: must be a JSON object", id="sandbox null"
         ),
         # The settings are re-serialized for Claude, so NaN would turn into invalid JSON.
         pytest.param(
             '{"sandbox":{"x":NaN}}',
-            "--sandbox-settings: must be a JSON object: ",
+            "must be a JSON object: invalid JSON constant NaN",
             id="NaN",
         ),
         pytest.param(
-            '\ufeff{"sandbox":{}}',
-            "--sandbox-settings: must be a JSON object: ",
-            id="byte order mark",
+            '\ufeff{"sandbox":{}}', "must be a JSON object: ", id="byte order mark"
         ),
-        pytest.param(
-            "[" * 100_000,
-            "--sandbox-settings: must be a JSON object: ",
-            id="deeply nested",
-        ),
+        pytest.param("[" * 100_000, "must be a JSON object: ", id="deeply nested"),
     ],
 )
 def test_sandbox_args_rejects_bad_files(
-    tmp_path: Path, content: str, want_error: str
+    tmp_path: Path, content: str, problem: str
 ) -> None:
-    with pytest.raises(RefusedError) as excinfo:
-        sandbox_args(str(_write_settings(tmp_path, content)))
-
-    assert excinfo.value.reason == "invalid-sandbox-settings"
-    assert want_error in str(excinfo.value)
-
-
-@pytest.mark.parametrize("name", ["missing.json"], ids=["missing file"])
-def test_sandbox_args_unreadable_path(tmp_path: Path, name: str) -> None:
-    path = str(tmp_path / name)
+    path = str(_write_settings(tmp_path, content))
 
     with pytest.raises(RefusedError) as excinfo:
         sandbox_args(path)
 
     assert excinfo.value.reason == "invalid-sandbox-settings"
-    assert "--sandbox-settings" in str(excinfo.value)
-    assert path in str(excinfo.value)
+    assert excinfo.value.message.startswith(f"--sandbox-settings {path}: {problem}")
+
+
+@pytest.mark.parametrize(
+    ("content", "problem"),
+    [
+        pytest.param("nope", "must be a JSON object: Expecting value", id="not JSON"),
+        pytest.param('{"sandbox": 5}', "sandbox: must be a JSON object", id="sandbox"),
+        pytest.param(
+            '{"x": NaN}', "must be a JSON object: invalid JSON constant NaN", id="NaN"
+        ),
+    ],
+)
+def test_a_bad_sandbox_picked_by_name_is_refused_naming_the_flag_and_the_file(
+    tmp_path: Path, content: str, problem: str
+) -> None:
+    path = str(_write_settings(tmp_path, content))
+
+    with pytest.raises(RefusedError) as excinfo:
+        sandbox_args(path, "five")
+
+    assert excinfo.value.reason == "invalid-sandbox-settings"
+    assert excinfo.value.message.startswith(f"--sandbox five: {path}: {problem}")
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        pytest.param("{}", "", id="empty object"),
+        pytest.param('{"sandbox": {}}', "", id="sandbox object"),
+        pytest.param("nope", "not valid JSON", id="not JSON"),
+        pytest.param("[]", "not valid JSON", id="array"),
+        pytest.param('{"x": NaN}', "not valid JSON", id="NaN"),
+        pytest.param("[" * 100_000, "not valid JSON", id="deeply nested"),
+        pytest.param('{"sandbox": 5}', "sandbox is not an object", id="sandbox 5"),
+        pytest.param(
+            '{"sandbox": null}', "sandbox is not an object", id="sandbox null"
+        ),
+    ],
+)
+def test_settings_problem_says_what_a_run_would_refuse(text: str, problem: str) -> None:
+    assert settings_problem(text) == problem
+
+
+def test_settings_args_refuses_text_naming_the_flag_and_the_file() -> None:
+    with pytest.raises(RefusedError) as excinfo:
+        settings_args("[]", "/s/five.json", "five")
+
+    assert (
+        excinfo.value.message == "--sandbox five: /s/five.json: must be a JSON object"
+    )
+
+
+def test_sandbox_args_unreadable_path(tmp_path: Path) -> None:
+    path = str(tmp_path / "missing.json")
+
+    with pytest.raises(RefusedError) as excinfo:
+        sandbox_args(path)
+
+    assert excinfo.value.reason == "invalid-sandbox-settings"
+    assert excinfo.value.message == (
+        f"--sandbox-settings {path}: is not accessible: No such file or directory"
+    )
+
+
+def test_a_named_sandbox_that_cannot_be_read_is_refused_naming_the_flag_and_the_file(
+    tmp_path: Path,
+) -> None:
+    path = str(tmp_path / "missing.json")
+
+    with pytest.raises(RefusedError) as excinfo:
+        sandbox_args(path, "five")
+
+    assert excinfo.value.message == (
+        f"--sandbox five: {path}: is not accessible: No such file or directory"
+    )
 
 
 @pytest.mark.parametrize("text", ["\\ud800"], ids=["lone surrogate"])
@@ -128,16 +183,7 @@ def test_sandbox_args_settings_can_always_be_encoded(tmp_path: Path, text: str) 
     assert json.loads(settings)["sandbox"]["note"] == json.loads(f'"{text}"')
 
 
-def test_folder_sandbox_keeps_a_relative_dir_relative(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_settings(tmp_path, "{}")
-    monkeypatch.chdir(tmp_path.parent)
-
-    assert folder_sandbox(tmp_path.name) == f"{tmp_path.name}/sandbox.json"
-
-
 def test_settings_args_equals_sandbox_args_for_the_same_text(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, PASS_THROUGH_IN)
 
-    assert sandbox_args(str(path)) == settings_args(PASS_THROUGH_IN)
+    assert sandbox_args(str(path)) == settings_args(PASS_THROUGH_IN, str(path))

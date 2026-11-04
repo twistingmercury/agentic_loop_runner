@@ -70,3 +70,12 @@ def fresh_home(home: Path) -> Path:
     """The temporary home as a machine that never ran alr: no ~/.local at all."""
     shutil.rmtree(home / ".local")
     return home
+
+
+@pytest.fixture
+def locked_folder() -> Iterator[None]:
+    """Skip as root, which can write anywhere; the tests restore their own modes."""
+    if os.geteuid() == 0:
+        pytest.skip("root can write to any folder")
+
+    yield

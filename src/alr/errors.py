@@ -19,7 +19,6 @@ INVALID_CONFIG = "invalid-config"
 INVALID_TASK_FILE = "invalid-task-file"
 INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"
 LOG_UNWRITABLE = "log-unwritable"
-SANDBOX_FILE_UNWRITABLE = "sandbox-file-unwritable"
 TASK_FILE_UNWRITABLE = "task-file-unwritable"
 
 

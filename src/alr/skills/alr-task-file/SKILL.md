@@ -154,15 +154,36 @@ authorized.
    durable task instructions: they never reach the session. alr rewrites
    the task file with every state change, so comments and custom formatting
    are not preserved. Every verification command must be one the session can
-   run. The session runs under Claude Code's permissions and, with
-   `--sandbox-settings`, inside its sandbox: a command that sets a variable
-   inline (`VAR=value cmd`) can be refused, and Docker, other users' files,
-   and hosts outside the sandbox's network list are out of reach. Give the
-   session an equivalent it can run. The prompt's verification text is for the
-   session to run; a check alr should run and judge goes in the task's
-   `actions` instead, or in `after_task` when every task needs it. alr runs
-   both lists itself, so a check the session cannot run belongs there; tell
-   the user to add it.
+   run.
+
+   The session runs under Claude Code's permissions and, when the run uses a
+   sandbox, inside it. A run sandboxes its sessions with `--sandbox <name>`
+   (a file in `~/.local/alr/sandboxes/`, where `tight.json` and `large.json`
+   ship) or `--sandbox-settings <path>`. A command that sets a variable inline
+   (`VAR=value cmd`) can be refused, and other users' files and hosts outside
+   the sandbox's network list are out of reach. Writes outside the project are
+   blocked, so a tool that writes a cache under the home folder (uv's
+   `~/.cache/uv`, for one) fails unless the sandbox file adds that folder to
+   `sandbox.filesystem.allowWrite`, or the task uses a project-local cache.
+
+   A sandbox file can let named commands out of the sandbox:
+   `sandbox.excludedCommands` lists them, and matching `permissions.allow`
+   rules let a session nobody can answer run them. The shipped `large.json`
+   does this for `docker *`, `./build/build.sh`, and `./build/build.sh *`; a
+   sandbox that excludes nothing, such as `tight.json`, keeps Docker out of
+   reach. A call only leaves the sandbox when the exclusions cover every
+   command in it, so a prompt that tells the session to run such a command
+   must say to run it as its own Bash call, exactly as listed, with no
+   redirect, pipe, `;`, `&&`, `cd ... &&`, inline `VAR=`, or `echo`. Read the
+   sandbox file the run will use (ask the user which one when you do not
+   know) and put those exact command strings in that instruction. For a
+   command the sandbox keeps out of reach, give the session an equivalent it
+   can run.
+
+   The prompt's verification text is for the session to run; a check alr
+   should run and judge goes in the task's `actions` instead, or in
+   `after_task` when every task needs it. alr runs both lists itself, so a
+   check the session cannot run belongs there; tell the user to add it.
 7. Write `shared.prompt` from the template. Replace every `GENERATE_*` token
    with project content and actual paths: full build/test commands and the
    project's commit policy, since the session sees only this prompt and one
