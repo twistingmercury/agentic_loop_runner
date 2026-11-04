@@ -8,11 +8,13 @@ import re
 import shutil
 import signal
 import sys
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import start_alr, wait_for_file
+from helpers import chmodded, start_alr, wait_for_file
 
 from alr import cli
 from alr.config import SandboxDefault
@@ -1668,6 +1670,31 @@ def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read
     assert calls == ["check", "add", "dir", "load"]
 
 
+def test_the_run_folder_notice_comes_after_the_sandboxes_are_added_and_before_the_config_is_read(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    tight.unlink()
+    _add_sandbox(folder)
+    printed_before_the_read: list[str] = []
+    real_load = cli.load
+
+    def load(**kwargs: Any) -> Any:
+        printed_before_the_read.append(capsys.readouterr().out)
+        return real_load(**kwargs)
+
+    monkeypatch.setattr(cli, "load", load)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    # The added file first, then the notice, both already on stdout when the config is read.
+    assert printed_before_the_read == [f"Added {tight}\n{_notice(folder)}"]
+    assert capsys.readouterr().out == ""
+
+
 def test_a_machine_that_is_not_set_up_gets_no_sandbox_added_and_no_name_check(
     folder: Path,
     fresh_home: Path,
@@ -1704,6 +1731,111 @@ def test_sandboxes_are_added_even_when_the_config_turns_out_bad(
     assert cli.main(["-d", str(folder), "--yolo"]) == 3
     assert tight.exists()
     assert capsys.readouterr().err.startswith("error: refused: invalid-config: ")
+
+
+@contextmanager
+def _sandboxes_is_a_file(home: Path) -> Iterator[str]:
+    """Put a file where the sandboxes folder belongs; yield the refusal every run must give."""
+    shutil.rmtree(_sandboxes(home))
+    _sandboxes(home).write_text("in the way", encoding="utf-8")
+    yield f"invalid-config: {_sandboxes(home)} is not a folder; remove it yourself"
+
+
+@contextmanager
+def _sandboxes_cannot_be_searched(home: Path) -> Iterator[str]:
+    """Take every permission off the sandboxes folder; yield the refusal every run must give."""
+    with chmodded(_sandboxes(home), 0o000):
+        yield (
+            "config-unwritable: cannot add the sandboxes to "
+            f"{_sandboxes(home)}: Permission denied"
+        )
+
+
+@contextmanager
+def _sandboxes_missing_from_a_read_only_config_folder(home: Path) -> Iterator[str]:
+    """Leave no place to make the sandboxes folder; yield the refusal every run must give."""
+    shutil.rmtree(_sandboxes(home))
+    with chmodded(home / ".local" / "alr", 0o500):
+        yield (
+            "config-unwritable: cannot add the sandboxes to "
+            f"{_sandboxes(home)}: Permission denied"
+        )
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param([], id="no permission flag"),
+        pytest.param(["--yolo"], id="yolo"),
+        pytest.param(["--sandbox", "tight"], id="sandbox by name"),
+    ],
+)
+@pytest.mark.parametrize(
+    "unusable",
+    [
+        pytest.param(_sandboxes_is_a_file, id="a file"),
+        pytest.param(_sandboxes_cannot_be_searched, id="no access"),
+        pytest.param(
+            _sandboxes_missing_from_a_read_only_config_folder,
+            id="missing, config folder read-only",
+        ),
+    ],
+)
+def test_a_sandboxes_folder_alr_cannot_use_is_refused_the_same_way_by_every_run(
+    unusable: Callable[[Path], AbstractContextManager[str]],
+    flags: list[str],
+    dry_run: bool,
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    locked_folder: None,
+) -> None:
+    argv = ["-d", str(folder), *flags]
+    if dry_run:
+        argv.append("--dry-run")
+
+    with unusable(home) as refusal:
+        code = cli.main(argv)
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert captured.err == f"error: refused: {refusal}\n"
+    assert captured.out == ""
+    assert sessions == []
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
+@pytest.mark.parametrize("by", ["flag", "config default"])
+def test_a_sandboxes_folder_alr_cannot_list_is_refused_when_a_name_is_looked_up(
+    by: str,
+    dry_run: bool,
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    locked_folder: None,
+) -> None:
+    argv = ["-d", str(folder)]
+    if by == "flag":
+        argv += ["--sandbox", "tight"]
+    else:
+        _write_config(home, YOLO_CONFIG.replace("default: yolo", "default: tight"))
+
+    if dry_run:
+        argv.append("--dry-run")
+
+    with chmodded(_sandboxes(home), 0o311):
+        code = cli.main(argv)
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert captured.err == (
+        "error: refused: config-unwritable: cannot list the sandboxes in "
+        f"{_sandboxes(home)}: Permission denied\n"
+    )
+    assert sessions == []
 
 
 def test_a_broken_config_is_refused_before_the_sandbox_name_is_looked_at(

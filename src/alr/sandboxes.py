@@ -1,5 +1,6 @@
 """The sandboxes folder, ~/.local/alr/sandboxes: add the shipped files, list the sandboxes, find one by name."""
 
+import errno
 import json
 import os
 import re
@@ -56,28 +57,66 @@ def add_missing(home: Path | None = None) -> list[Path]:
         folder.mkdir(exist_ok=True)
         return _copy_missing(folder)
     except OSError as error:
-        raise RefusedError(
-            CONFIG_UNWRITABLE,
-            f"cannot add the sandboxes to {folder}: {error.strerror or error}",
-        ) from error
+        raise _cannot_add(folder, _reason(error)) from error
+
+
+def check_can_add_missing(home: Path | None = None) -> None:
+    """Refuse what add_missing would refuse, without writing anything.
+
+    A dry run calls this where a real run calls add_missing, so both give the
+    same verdict. A real run only writes when a shipped file is missing: into
+    the folder, or into the config folder when the folder itself is missing.
+    os.access says whether it could, without trying; it needs the search
+    permission as well as the write permission to make an entry.
+    """
+    folder = sandboxes_dir(home)
+    try:
+        _refuse_unless_folder(folder)
+        missing = _missing_shipped(folder)
+        writes_into = folder if folder.exists() else folder.parent
+    except OSError as error:
+        raise _cannot_add(folder, _reason(error)) from error
+
+    if not missing:
+        return
+
+    if os.access(writes_into, os.W_OK | os.X_OK):
+        return
+
+    # The text the OS gives a real run for the same refusal.
+    raise _cannot_add(folder, os.strerror(errno.EACCES))
 
 
 def list_sandboxes(home: Path | None = None) -> list[Sandbox]:
     """List the sandboxes in the folder, sorted by name, each marked with its problem.
 
-    A broken file is still listed so the user sees why it cannot be used.
+    A broken file is still listed so the user sees why it cannot be used. A
+    path that is not a folder is refused as invalid-config, and a folder alr
+    cannot list as config-unwritable; a folder that is not there lists nothing.
     """
     return _list_in(sandboxes_dir(home))
 
 
 def _list_in(folder: Path) -> list[Sandbox]:
-    """List the sandboxes in a folder; list_sandboxes explains the order and the broken files."""
+    """List the sandboxes in a folder; list_sandboxes explains the order and the broken files.
+
+    A path that is not a folder is refused as add_missing refuses it, and a
+    folder alr cannot list is refused, so no caller meets an OSError.
+    """
+    # One handler for the listing and the check of each entry: a folder alr may
+    # read but not search lists its names, then fails on the first entry.
     try:
+        _refuse_unless_folder(folder)
         entries = list(folder.iterdir())
+        found = [_sandbox_from(entry) for entry in entries if _is_listed(entry)]
     except FileNotFoundError:
         return []
+    except OSError as error:
+        raise RefusedError(
+            CONFIG_UNWRITABLE,
+            f"cannot list the sandboxes in {folder}: {_reason(error)}",
+        ) from error
 
-    found = [_sandbox_from(entry) for entry in entries if _is_listed(entry)]
     return sorted(found, key=_name_of)
 
 
@@ -129,9 +168,8 @@ def names_in(folder: Path, dry_run: bool) -> list[str]:
     if not dry_run:
         return names
 
-    for shipped in _shipped_names():
-        if not _exists(folder / shipped):
-            names.append(shipped.removesuffix(_SUFFIX))
+    for shipped in _missing_shipped(folder):
+        names.append(shipped.removesuffix(_SUFFIX))
 
     return sorted(set(names))
 
@@ -158,6 +196,23 @@ def _exists(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
 
+def _missing_shipped(folder: Path) -> list[str]:
+    """List the shipped file names the folder lacks, so the real run, the dry run, and the check agree on them."""
+    return [name for name in _shipped_names() if not _exists(folder / name)]
+
+
+def _reason(error: OSError) -> str:
+    """Say why the OS refused, in the OS's own words."""
+    return error.strerror or str(error)
+
+
+def _cannot_add(folder: Path, reason: str) -> RefusedError:
+    """Build the refusal for sandboxes alr cannot add, which the real run and the dry run both give."""
+    return RefusedError(
+        CONFIG_UNWRITABLE, f"cannot add the sandboxes to {folder}: {reason}"
+    )
+
+
 def _shipped_names() -> list[str]:
     """List the file names alr ships, sorted."""
     shipped = files("alr") / "defaults" / SANDBOXES
@@ -174,11 +229,8 @@ def _copy_missing(folder: Path) -> list[Path]:
     """Copy each shipped file the folder lacks and return the paths copied."""
     added: list[Path] = []
     with as_file(files("alr") / "defaults" / SANDBOXES) as source:
-        for file_name in _shipped_names():
+        for file_name in _missing_shipped(folder):
             target = folder / file_name
-            if _exists(target):
-                continue
-
             if _link_copy(source / file_name, target):
                 added.append(target)
 

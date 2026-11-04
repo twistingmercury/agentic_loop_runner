@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from helpers import chmodded
 
 from alr.config import (
     Config,
@@ -158,6 +159,38 @@ def test_default_naming_no_sandbox_with_an_empty_folder_says_none(
         parse(text, folder)
 
     assert caught.value.message.endswith("the sandboxes are: (none)")
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
+def test_default_with_a_sandboxes_path_that_is_a_file_is_refused_as_a_non_folder(
+    dry_run: bool, tmp_path: Path
+) -> None:
+    folder = make_folder(tmp_path)
+    shutil.rmtree(folder / "sandboxes")
+    (folder / "sandboxes").write_text("in the way", encoding="utf-8")
+
+    with pytest.raises(RefusedError) as caught:
+        parse(DOCUMENTED, folder, dry_run)
+
+    assert caught.value.reason == INVALID_CONFIG
+    assert caught.value.message == (
+        f"{folder / 'sandboxes'} is not a folder; remove it yourself"
+    )
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
+def test_default_with_a_sandboxes_folder_alr_cannot_list_is_config_unwritable(
+    dry_run: bool, tmp_path: Path, locked_folder: None
+) -> None:
+    folder = make_folder(tmp_path)
+
+    with chmodded(folder / "sandboxes", 0o311), pytest.raises(RefusedError) as caught:
+        parse(DOCUMENTED, folder, dry_run)
+
+    assert caught.value.reason == CONFIG_UNWRITABLE
+    assert caught.value.message == (
+        f"cannot list the sandboxes in {folder / 'sandboxes'}: Permission denied"
+    )
 
 
 def test_custom_is_refused_with_move_advice(tmp_path: Path) -> None:

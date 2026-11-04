@@ -30,7 +30,13 @@ from alr.errors import (
 )
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
-from alr.sandboxes import add_missing, find, names_text, read_text
+from alr.sandboxes import (
+    add_missing,
+    check_can_add_missing,
+    find,
+    names_text,
+    read_text,
+)
 from alr.skillinstall import install
 from alr.tasks import parse_timeout
 from alr.tui.app import run_app
@@ -95,8 +101,11 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if not config_folder_exists():
             return _handle_missing_config_folder(args.dry_run)
 
-        # A dry run writes nothing (requirement 9); it reads a missing shipped file from the package instead.
-        if not args.dry_run:
+        # A dry run writes nothing (requirement 9): it refuses what the real run's
+        # add would refuse, and reads a missing shipped file from the package instead.
+        if args.dry_run:
+            check_can_add_missing()
+        else:
             _add_missing_sandboxes()
 
         tasks_file = resolve_dir(args.dir)

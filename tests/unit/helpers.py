@@ -10,10 +10,12 @@ import errno
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,21 @@ def write_file(path: Path, content: str) -> str:
     """Write content to path and return the path as the text the command line takes."""
     path.write_text(content, encoding="utf-8")
     return str(path)
+
+
+@contextmanager
+def chmodded(path: Path, mode: int) -> Iterator[None]:
+    """Give path a mode for the length of the block, then put the old mode back.
+
+    The old mode comes back even when the block fails, so pytest can still
+    remove the folder afterwards.
+    """
+    original = stat.S_IMODE(path.stat().st_mode)
+    path.chmod(mode)
+    try:
+        yield
+    finally:
+        path.chmod(original)
 
 
 def write_nested_file(path: Path, content: str) -> Path:

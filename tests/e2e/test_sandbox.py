@@ -513,6 +513,55 @@ def test_a_dry_run_notices_the_folders_sandbox_json_and_names_no_sandbox(
     assert run.records == [], "claude must not run"
 
 
+def put_a_file_where_the_sandboxes_belong(home: Path) -> str:
+    """Replace the sandboxes folder with a file; return the refusal every run must give."""
+    folder = sandboxes_folder(home)
+    shutil.rmtree(folder)
+    folder.write_text("in the way", encoding="utf-8")
+    return f"error: refused: invalid-config: {folder} is not a folder; remove it yourself\n"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param(["--yolo"], id="yolo"),
+        pytest.param(["--sandbox", "tight"], id="sandbox by name"),
+    ],
+)
+def test_a_dry_run_refuses_a_sandboxes_path_that_is_a_file(
+    flags: list[str], tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    refusal = put_a_file_where_the_sandboxes_belong(home)
+
+    res, _ = run_dry_run(tmp_path, VALID_TASKS_YAML, *flags)
+
+    assert res.code == 3, res
+    assert res.out == ""
+    assert res.err == refusal
+    assert sandboxes_folder(home).read_text(encoding="utf-8") == "in the way"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param(["--yolo"], id="yolo"),
+        pytest.param(["--sandbox", "tight"], id="sandbox by name"),
+    ],
+)
+def test_a_real_run_refuses_a_sandboxes_path_that_is_a_file(
+    flags: list[str], tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    refusal = put_a_file_where_the_sandboxes_belong(home)
+
+    run = run_with_flags(tmp_path, *flags)
+
+    assert run.res.code == 3, run.res
+    assert run.res.out == ""
+    assert run.res.err == refusal
+    assert run.records == [], "claude must not run"
+    assert sandboxes_folder(home).read_text(encoding="utf-8") == "in the way"
+
+
 def test_a_refused_run_leaves_nothing_in_the_folder(
     tmp_path: Path, fake_claude: Path
 ) -> None:
