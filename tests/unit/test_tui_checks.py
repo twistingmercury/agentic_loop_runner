@@ -68,6 +68,28 @@ def test_check_sandbox_rejects_a_bad_settings_file(tmp_path: Path, text: str) ->
         check_sandbox(str(path))
 
 
+def test_check_sandbox_names_the_flag_and_the_file_in_a_refusal(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "five.json"
+    path.write_text('{"sandbox": 5}', encoding="utf-8")
+
+    with pytest.raises(RefusedError) as by_name:
+        check_sandbox(str(path), "five")
+
+    with pytest.raises(RefusedError) as by_path:
+        check_sandbox(str(path))
+
+    assert (
+        by_name.value.message
+        == f"--sandbox five: {path}: sandbox: must be a JSON object"
+    )
+    assert (
+        by_path.value.message
+        == f"--sandbox-settings {path}: sandbox: must be a JSON object"
+    )
+
+
 def test_check_sandbox_rejects_a_missing_file(tmp_path: Path) -> None:
     with pytest.raises(RefusedError):
         check_sandbox(str(tmp_path / "nope.json"))

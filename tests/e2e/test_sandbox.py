@@ -243,8 +243,8 @@ def test_sandbox_bad_settings_file(
     run = run_with_flags(tmp_path, f"--sandbox-settings={path}", *mode)
 
     assert run.res.code == 3, run.res
-    assert (
-        "error: refused: invalid-sandbox-settings: --sandbox-settings: " in run.res.err
+    assert run.res.err.startswith(
+        f"error: refused: invalid-sandbox-settings: --sandbox-settings {path}: "
     )
     assert want in run.res.err
     assert run.records == [], "claude must not run"
@@ -366,13 +366,16 @@ def test_an_unknown_sandbox_name_exits_2_listing_the_names(
 def test_a_bad_named_sandbox_is_refused_and_starts_nothing(
     tmp_path: Path, home: Path, fake_claude: Path, mode: list[str]
 ) -> None:
-    (sandboxes_folder(home) / "my_sandbox.json").write_text("null", encoding="utf-8")
+    path = sandboxes_folder(home) / "my_sandbox.json"
+    path.write_text("null", encoding="utf-8")
 
     run = run_with_flags(tmp_path, "--sandbox", "my_sandbox", *mode)
 
     assert run.res.code == 3, run.res
-    assert "error: refused: invalid-sandbox-settings: " in run.res.err
-    assert "must be a JSON object" in run.res.err
+    assert run.res.err == (
+        "error: refused: invalid-sandbox-settings: "
+        f"--sandbox my_sandbox: {path}: must be a JSON object\n"
+    )
     assert run.records == [], "claude must not run"
 
 

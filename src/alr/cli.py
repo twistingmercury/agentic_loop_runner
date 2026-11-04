@@ -470,9 +470,13 @@ def _sandbox_flags(answer: Answer, dry_run: bool) -> list[str]:
     """Return the flags for a sandboxed session, reading the settings from the file or, for a dry run, the package."""
     if _added_on_real_run(answer, dry_run):
         # The file is not in the folder yet; check the copy a real run would add.
-        return settings_args(read_text(Path(answer.sandbox_file)))
+        return settings_args(
+            read_text(Path(answer.sandbox_file)),
+            answer.sandbox_file,
+            answer.sandbox_name,
+        )
 
-    return sandbox_args(answer.sandbox_file)
+    return sandbox_args(answer.sandbox_file, answer.sandbox_name)
 
 
 def _added_on_real_run(answer: Answer, dry_run: bool) -> bool:

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from alr.engine.sandbox import bypass_args
+from alr.errors import RefusedError
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -69,6 +70,25 @@ def test_session_args_for_a_named_sandbox_read_its_file_and_force_the_keys(
 
     document = json.loads(args[args.index("--settings") + 1])
     assert document["sandbox"]["enabled"] is True
+
+
+def test_session_args_refuse_a_named_sandbox_naming_the_flag_and_the_file(
+    tmp_path: Path,
+) -> None:
+    sandbox = tmp_path / "five.json"
+    sandbox.write_text('{"sandbox": 5}', encoding="utf-8")
+    settings = RunSettings(
+        permissions=Permissions.SANDBOX,
+        sandbox_file=str(sandbox),
+        sandbox_name="five",
+    )
+
+    with pytest.raises(RefusedError) as excinfo:
+        settings.session_args()
+
+    assert excinfo.value.message == (
+        f"--sandbox five: {sandbox}: sandbox: must be a JSON object"
+    )
 
 
 def test_a_named_sandbox_is_not_missing_once_the_folder_is_known() -> None:

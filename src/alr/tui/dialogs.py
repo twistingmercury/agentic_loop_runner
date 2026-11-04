@@ -364,7 +364,7 @@ class PermissionsDialog(_Dialog[PermissionChoice]):
     def _accept_settings(self, path: str, name: str) -> None:
         """Check the settings file as the run will read it; an error keeps the user here."""
         try:
-            check_sandbox(path)
+            check_sandbox(path, name)
         except AlrError as exc:
             self.query_one("#error", Static).update(error_text(exc))
             return

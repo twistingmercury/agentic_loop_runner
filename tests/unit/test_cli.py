@@ -72,7 +72,7 @@ def test_session_args_sandbox_file(
             False,
             True,
             RefusedError,
-            "--sandbox-settings: file",
+            "--sandbox-settings {path}: is not accessible",
             id="dry run, bad file",
         ),
     ],
@@ -90,7 +90,7 @@ def test_session_args_errors(
     with pytest.raises(error) as caught:
         cli.session_args(cli.Answer(path, skip, ""), dry_run)
 
-    assert want in str(caught.value)
+    assert want.format(path=path) in str(caught.value)
 
 
 # Go's TestSessionArgs_WizardLeavesTheChoiceOpen is not ported: alr has no wizard.
@@ -513,13 +513,15 @@ def test_a_bad_named_sandbox_file_fails_and_never_runs_unsandboxed(
     sessions: list[list[str]],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _write_sandbox(home, "my_sandbox", content)
+    path = _write_sandbox(home, "my_sandbox", content)
 
     assert cli.main(["-d", str(folder), "--sandbox", "my_sandbox"]) == 3
     assert sessions == []
     first_line = capsys.readouterr().err.splitlines()[0]
-    assert first_line.startswith("error: refused: invalid-sandbox-settings: ")
-    assert "must be a JSON object" in first_line
+    assert first_line == (
+        "error: refused: invalid-sandbox-settings: "
+        f"--sandbox my_sandbox: {path}: must be a JSON object"
+    )
 
 
 def test_an_unreadable_named_sandbox_file_fails(
@@ -544,9 +546,10 @@ def test_an_unreadable_named_sandbox_file_fails(
     assert cli.main(["-d", str(folder), "--sandbox", "my_sandbox"]) == 3
     assert sessions == []
     err = capsys.readouterr().err
-    assert err.startswith("error: refused: invalid-sandbox-settings: ")
-    assert "is not accessible" in err
-    assert str(path) in err
+    assert err == (
+        "error: refused: invalid-sandbox-settings: "
+        f"--sandbox my_sandbox: {path}: is not accessible: Permission denied\n"
+    )
 
 
 def test_a_real_run_names_the_sandboxes_when_no_flag_chose(
@@ -681,7 +684,7 @@ def test_the_view_still_checks_a_given_settings_file(
 
     assert code == 3
     assert capsys.readouterr().err.startswith(
-        "error: refused: invalid-sandbox-settings: "
+        f"error: refused: invalid-sandbox-settings: --sandbox-settings {bad}: "
     )
     assert seen == []
 

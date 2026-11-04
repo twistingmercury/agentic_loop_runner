@@ -434,13 +434,13 @@ async def test_ok_with_the_settings_file_keeps_the_user_on_the_step_when_it_is_i
 
         assert host.result == "unset"
         shown = error(host.screen)
-        assert shown.startswith("--sandbox-settings: must be a JSON object")
+        assert shown.startswith(f"--sandbox-settings {bad}: must be a JSON object")
         assert "refused" not in shown, "the dialog shows the message, not the reason"
 
 
 async def test_ok_on_a_sandbox_the_run_would_refuse_keeps_the_user_here() -> None:
     # A JSON object, so it is listed without a problem; its sandbox key is what the run refuses.
-    add_sandbox("odd", '{"sandbox": 3}')
+    odd = add_sandbox("odd", '{"sandbox": 3}')
     host = Host()
     async with host.run_test(size=BIG) as pilot:
         host.push_screen(
@@ -453,7 +453,9 @@ async def test_ok_on_a_sandbox_the_run_would_refuse_keeps_the_user_here() -> Non
         await pilot.pause()
 
         assert host.result == "unset"
-        assert "sandbox: must be a JSON object" in error(host.screen)
+        assert error(host.screen) == (
+            f"--sandbox odd: {odd}: sandbox: must be a JSON object"
+        )
 
         await pilot.click("#sandbox-2")
 

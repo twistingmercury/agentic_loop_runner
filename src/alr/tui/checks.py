@@ -31,6 +31,9 @@ async def check_folder(folder: str) -> FolderCheck:
     return FolderCheck(str(tasks_file), task_list)
 
 
-def check_sandbox(path: str) -> None:
-    """Accept a sandbox settings file, or raise why not; the run reads it the same way."""
-    sandbox_args(path)
+def check_sandbox(path: str, name: str = "") -> None:
+    """Accept a sandbox settings file, or raise why not; the run reads it the same way.
+
+    name is the sandbox picked by name, empty for a --sandbox-settings file.
+    """
+    sandbox_args(path, name)

@@ -56,7 +56,7 @@ class RunSettings:
         if self.permissions is Permissions.SKIP:
             return bypass_args()
 
-        return sandbox_args(self.sandbox_file)
+        return sandbox_args(self.sandbox_file, self.sandbox_name)
 
     def permissions_text(self) -> str:
         """Say how sessions run, for the strip: not chosen, skip, or sandbox with its name or file."""
