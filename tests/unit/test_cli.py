@@ -886,7 +886,7 @@ def _answer(argv: list[str], default: SandboxDefault | None) -> cli.Answer:
 
 @pytest.mark.parametrize("mode", ["tight", "large"])
 def test_a_preset_default_fills_in_the_missing_flag(folder: Path, mode: str) -> None:
-    from_default = _answer(["-d", str(folder)], SandboxDefault(mode, ""))
+    from_default = _answer(["-d", str(folder)], SandboxDefault(mode))
     from_flag = _answer(["-d", str(folder), "--sandbox", mode], None)
 
     assert from_default == from_flag
@@ -894,24 +894,20 @@ def test_a_preset_default_fills_in_the_missing_flag(folder: Path, mode: str) -> 
 
 
 def test_a_yolo_default_fills_in_the_missing_flag(folder: Path) -> None:
-    from_default = _answer(["-d", str(folder)], SandboxDefault("yolo", ""))
+    from_default = _answer(["-d", str(folder)], SandboxDefault("yolo"))
     from_flag = _answer(["-d", str(folder), "--yolo"], None)
 
     assert from_default == from_flag
     assert from_default.skip is True
 
 
-def test_a_custom_default_fills_in_the_missing_flag(
-    folder: Path, settings: str
-) -> None:
-    from_default = _answer(["-d", str(folder)], SandboxDefault("custom", settings))
-    from_flag = _answer(["-d", str(folder), "--sandbox-settings", settings], None)
-
-    assert from_default == from_flag
-    assert from_default.sandbox_file == settings
+def test_a_default_naming_another_sandbox_is_not_supported_yet(folder: Path) -> None:
+    """Until --sandbox takes any name, a config default beyond the presets is refused, not a crash."""
+    with pytest.raises(UsageError, match="my_sandbox is not supported yet"):
+        _answer(["-d", str(folder)], SandboxDefault("my_sandbox"))
 
 
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
 @pytest.mark.parametrize("flag", ["--sandbox", "--sandbox-settings", "--yolo"])
 def test_a_flag_beats_the_default(
     folder: Path, settings: str, mode: str, flag: str
@@ -922,17 +918,17 @@ def test_a_flag_beats_the_default(
         "--yolo": ["--yolo"],
     }[flag]
     argv = ["-d", str(folder), *flags]
-    default = SandboxDefault(mode, settings if mode == "custom" else "")
+    default = SandboxDefault(mode)
 
     assert _answer(argv, default) == _answer(argv, None)
 
 
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
 def test_the_folders_sandbox_json_beats_the_default(
     folder: Path, settings: str, mode: str
 ) -> None:
     _add_sandbox(folder)
-    default = SandboxDefault(mode, settings if mode == "custom" else "")
+    default = SandboxDefault(mode)
 
     answer = _answer(["-d", str(folder)], default)
 
@@ -948,19 +944,19 @@ def test_no_default_changes_nothing(folder: Path) -> None:
     assert vars(args) == before
 
 
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
-def test_a_default_without_dir_leaves_the_view_to_ask(mode: str, settings: str) -> None:
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
+def test_a_default_without_dir_leaves_the_view_to_ask(mode: str) -> None:
     args = cli._parser().parse_args([])
     before = vars(args).copy()
 
-    cli.apply_sandbox_default(args, SandboxDefault(mode, settings))
+    cli.apply_sandbox_default(args, SandboxDefault(mode))
 
     assert vars(args) == before
 
 
-@pytest.mark.parametrize("mode", ["yolo", "custom"])
+@pytest.mark.parametrize("mode", ["yolo", "my_sandbox"])
 def test_a_default_without_dir_never_reads_the_current_folder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, settings: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     """No --dir means no run folder, so a sandbox.json in the current folder must not count."""
     _add_sandbox(tmp_path)
@@ -968,12 +964,12 @@ def test_a_default_without_dir_never_reads_the_current_folder(
     args = cli._parser().parse_args([])
     before = vars(args).copy()
 
-    cli.apply_sandbox_default(args, SandboxDefault(mode, settings))
+    cli.apply_sandbox_default(args, SandboxDefault(mode))
 
     assert vars(args) == before
 
 
-@pytest.mark.parametrize("mode", ["tight", "large", "yolo", "custom"])
+@pytest.mark.parametrize("mode", ["tight", "large", "yolo"])
 def test_a_default_beside_the_folders_sandbox_json_changes_nothing(
     folder: Path, settings: str, mode: str
 ) -> None:
@@ -981,7 +977,7 @@ def test_a_default_beside_the_folders_sandbox_json_changes_nothing(
     args = cli._parser().parse_args(["-d", str(folder)])
     before = vars(args).copy()
 
-    cli.apply_sandbox_default(args, SandboxDefault(mode, settings))
+    cli.apply_sandbox_default(args, SandboxDefault(mode))
 
     assert vars(args) == before
 

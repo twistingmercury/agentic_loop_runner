@@ -42,9 +42,8 @@ from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
 
 _INTERRUPTED = "error: interrupted"
-# The config's sandbox modes that are not presets (see alr.config).
+# The config's sandbox default that is not a sandbox name (see alr.config).
 _YOLO = "yolo"
-_CUSTOM = "custom"
 _YES_ANSWERS = ("y", "yes")
 
 
@@ -102,7 +101,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             return _handle_missing_config_folder(args.dry_run)
 
         tasks_file = resolve_dir(args.dir)
-        config = load()
+        config = load(dry_run=args.dry_run)
         apply_sandbox_default(args, config.sandbox)
         answer = resolve_permissions(
             args.dir, args.sandbox_settings, args.yolo, args.sandbox
@@ -400,15 +399,11 @@ def apply_sandbox_default(
     if _permission_chosen(args):
         return
 
-    if default.mode == _YOLO:
+    if default.name == _YOLO:
         args.yolo = True
         return
 
-    if default.mode == _CUSTOM:
-        args.sandbox_settings = default.sandbox_file
-        return
-
-    args.sandbox = default.mode
+    args.sandbox = default.name
 
 
 def _permission_chosen(args: argparse.Namespace) -> bool:
@@ -427,7 +422,14 @@ def _preset_answer(dir: str, sandbox_settings: str, skip: bool, preset: str) -> 
     if sandbox_settings or skip:
         raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
 
-    switches = switches_for(Preset(preset))
+    # A config default can name any sandbox file, but only the presets resolve
+    # until --sandbox picks files by name (ADR-032).
+    try:
+        chosen = Preset(preset)
+    except ValueError as exc:
+        raise UsageError(f"--sandbox: {preset} is not supported yet") from exc
+
+    switches = switches_for(chosen)
     # Without -d the path would be relative to nowhere; the view's folder pick settles it.
     path = preset_path(str(Path(dir) / "tasks.yaml")) if dir else ""
     return Answer(path, False, switches)

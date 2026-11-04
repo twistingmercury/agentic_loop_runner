@@ -67,7 +67,11 @@ def list_sandboxes(home: Path | None = None) -> list[Sandbox]:
 
     A broken file is still listed so the user sees why it cannot be used.
     """
-    folder = sandboxes_dir(home)
+    return _list_in(sandboxes_dir(home))
+
+
+def _list_in(folder: Path) -> list[Sandbox]:
+    """List the sandboxes in a folder; list_sandboxes explains the order and the broken files."""
     try:
         entries = list(folder.iterdir())
     except FileNotFoundError:
@@ -84,11 +88,13 @@ def find(name: str, home: Path | None = None, dry_run: bool = False) -> Path:
     is found anyway: a real run would add it, and the dry run must give the
     same answer.
     """
-    path = sandboxes_dir(home) / f"{name}{_SUFFIX}"
-    names = _names(home, dry_run)
+    folder = sandboxes_dir(home)
+    path = folder / f"{name}{_SUFFIX}"
+    names = names_in(folder, dry_run)
     if name not in names:
         raise UsageError(
-            f"--sandbox: no sandbox named {name}; the sandboxes are: {_join(names)}"
+            f"--sandbox: no sandbox named {name}; "
+            f"the sandboxes are: {join_names(names)}"
         )
 
     return path
@@ -110,16 +116,19 @@ def read_text(path: Path) -> str:
 
 def names_text(home: Path | None = None) -> str:
     """Return the sandbox names as "a, b", or "(none)", for messages."""
-    return _join(_names(home, dry_run=False))
+    return join_names(names_in(sandboxes_dir(home), dry_run=False))
 
 
-def _names(home: Path | None, dry_run: bool) -> list[str]:
-    """List the names a run could pick, adding the shipped ones a real run would add."""
-    names = [sandbox.name for sandbox in list_sandboxes(home)]
+def names_in(folder: Path, dry_run: bool) -> list[str]:
+    """List the names a run could pick from a sandboxes folder.
+
+    A dry run adds the shipped names a real run would add, so both give the
+    same verdict. Config validation calls this with the folder it is parsing.
+    """
+    names = [sandbox.name for sandbox in _list_in(folder)]
     if not dry_run:
         return names
 
-    folder = sandboxes_dir(home)
     for shipped in _shipped_names():
         if not _exists(folder / shipped):
             names.append(shipped.removesuffix(_SUFFIX))
@@ -127,7 +136,8 @@ def _names(home: Path | None, dry_run: bool) -> list[str]:
     return sorted(set(names))
 
 
-def _join(names: list[str]) -> str:
+def join_names(names: list[str]) -> str:
+    """Join names as "a, b", or "(none)" when there are none, for messages."""
     return ", ".join(names) if names else "(none)"
 
 

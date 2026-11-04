@@ -21,13 +21,17 @@ from alr.errors import (
 CONFIG_FILE = "config.yaml"
 
 _MAX_MAJOR_VERSION = 1
-_SANDBOX_MODES = ("tight", "large", "yolo", "custom")
+_YOLO = "yolo"
+# The old way to name a sandbox file; see _refuse_removed_sandbox_keys.
 _CUSTOM = "custom"
+_SANDBOX_FILE = "sandbox_file"
+# The same name as alr.sandboxes.SANDBOXES, which this module cannot import at the top.
+_SANDBOXES = "sandboxes"
 
 _TOP_KEYS = ("version", "defaults")
 _DEFAULTS_KEYS = ("sandbox", "prompts")
 _SANDBOX_KEYS = ("permissiveness",)
-_PERMISSIVENESS_KEYS = ("default", "sandbox_file")
+_PERMISSIVENESS_KEYS = ("default",)
 _PROMPTS_KEYS = ("task_review", "task_remediation")
 _TASK_REVIEW_KEYS = ("prompt", "max_task_review_rounds")
 _TASK_REMEDIATION_KEYS = ("prompt",)
@@ -35,11 +39,10 @@ _TASK_REMEDIATION_KEYS = ("prompt",)
 
 @dataclass(frozen=True)
 class SandboxDefault:
-    """The sandbox mode a run uses when no flag and no run folder sandbox.json choose one."""
+    """The sandbox a run uses when no flag chooses one."""
 
-    mode: str
-    # An absolute path; empty unless the mode is custom.
-    sandbox_file: str
+    # "yolo", or the name of a file in the sandboxes folder.
+    name: str
 
 
 @dataclass(frozen=True)
@@ -123,16 +126,18 @@ def _subfolders(names: list[str]) -> list[PurePosixPath]:
     return list(subfolders)
 
 
-def load(home: Path | None = None) -> Config:
+def load(home: Path | None = None, dry_run: bool = False) -> Config:
     """Read the config from the config folder.
 
     This never writes. Callers check the folder exists first: a real run asks
     before creating it (see create_folder) and a dry run refuses without it.
     A folder that is gone anyway, or a file or link in its place, is refused.
+    A dry run counts a shipped sandbox whose file is missing as there, since
+    a real run would add it before it reads the config.
     """
     folder = config_dir(home)
     _refuse_unless_folder_exists(folder)
-    return _read_folder(folder)
+    return _read_folder(folder, dry_run)
 
 
 def create_folder(home: Path | None = None) -> None:
@@ -156,11 +161,12 @@ def create_folder(home: Path | None = None) -> None:
             ) from error
 
 
-def parse(text: str, folder: Path) -> Config:
+def parse(text: str, folder: Path, dry_run: bool = False) -> Config:
     """Turn config.yaml's text into a Config, refusing anything alr does not understand.
 
     A typo caught here stops a run at startup, not hours later when a review
-    first reads the setting.
+    first reads the setting. The sandbox default is checked against the
+    sandboxes folder inside the config folder; dry_run is explained in load.
     """
     path = folder / CONFIG_FILE
     top = _load_mapping(text, path)
@@ -168,7 +174,7 @@ def parse(text: str, folder: Path) -> Config:
     _check_version(top, path)
 
     defaults = _section(top, "defaults", path, _DEFAULTS_KEYS, "the file")
-    sandbox = _read_sandbox(defaults, folder, path)
+    sandbox = _read_sandbox(defaults, folder, path, dry_run)
     prompts = _section(defaults, "prompts", path, _PROMPTS_KEYS, "defaults")
     review = _section(prompts, "task_review", path, _TASK_REVIEW_KEYS, "prompts")
     remediation = _section(
@@ -220,7 +226,7 @@ def _refuse_foreign(folder: Path) -> None:
         raise RefusedError(INVALID_CONFIG, f"{folder} is a file; remove it yourself")
 
 
-def _read_folder(folder: Path) -> Config:
+def _read_folder(folder: Path, dry_run: bool) -> Config:
     """Read the config.yaml inside a folder, which must already hold one."""
     path = folder / CONFIG_FILE
     try:
@@ -234,7 +240,7 @@ def _read_folder(folder: Path) -> Config:
     except (OSError, UnicodeDecodeError) as error:
         raise _refuse(path, f"cannot be read: {error}") from error
 
-    return parse(text, folder)
+    return parse(text, folder, dry_run)
 
 
 def _create_all_at_once(source: Path, names: list[str], folder: Path) -> None:
@@ -366,44 +372,73 @@ def _check_version(top: dict[str, Any], path: Path) -> None:
 
 
 def _read_sandbox(
-    defaults: dict[str, Any], folder: Path, path: Path
+    defaults: dict[str, Any], folder: Path, path: Path, dry_run: bool
 ) -> SandboxDefault | None:
-    """Read the optional sandbox section; without it no mode is chosen."""
+    """Read the optional sandbox section; without it no sandbox is chosen."""
     if "sandbox" not in defaults:
         return None
 
     sandbox = _section(defaults, "sandbox", path, _SANDBOX_KEYS, "defaults")
-    permissiveness = _section(
-        sandbox, "permissiveness", path, _PERMISSIVENESS_KEYS, "sandbox"
-    )
-    mode = _required(permissiveness, "default", path, "permissiveness")
-    if mode not in _SANDBOX_MODES:
+    permissiveness = _permissiveness(sandbox, path)
+    # Before the unknown-key check, so an old config gets advice, not a bare refusal.
+    _refuse_removed_keys(permissiveness, folder, path)
+    _refuse_unknown_keys(permissiveness, _PERMISSIVENESS_KEYS, path, "permissiveness")
+    name = _required(permissiveness, "default", path, "permissiveness")
+    _refuse_unknown_sandbox(name, folder, path, dry_run)
+    return SandboxDefault(name)
+
+
+def _permissiveness(sandbox: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Return the permissiveness mapping, whose keys _read_sandbox checks itself."""
+    if "permissiveness" not in sandbox:
+        raise _refuse(path, "permissiveness is missing from sandbox")
+
+    permissiveness = sandbox["permissiveness"]
+    if not isinstance(permissiveness, dict):
+        raise _refuse(path, "permissiveness must be a mapping of keys to values")
+
+    return permissiveness
+
+
+def _refuse_removed_keys(
+    permissiveness: dict[str, Any], folder: Path, path: Path
+) -> None:
+    """Refuse the custom value and the sandbox_file key with advice on what to do instead.
+
+    A custom sandbox file now lives in the sandboxes folder and is picked by
+    name, so a config written for the old way says to move the file.
+    """
+    removed = []
+    if _SANDBOX_FILE in permissiveness:
+        removed.append(_SANDBOX_FILE)
+
+    if permissiveness.get("default") == _CUSTOM:
+        removed.append(_CUSTOM)
+
+    for key in removed:
         raise _refuse(
             path,
-            f"default {quote(str(mode))} must be one of {', '.join(_SANDBOX_MODES)}",
+            f"{key}: no longer supported; move the file into "
+            f"{folder / _SANDBOXES} and use its name as default",
         )
 
-    return SandboxDefault(mode, _sandbox_file(permissiveness, mode, folder, path))
 
+def _refuse_unknown_sandbox(name: Any, folder: Path, path: Path, dry_run: bool) -> None:
+    """Refuse a default that is neither yolo nor a sandbox in the sandboxes folder."""
+    if name == _YOLO:
+        return
 
-def _sandbox_file(
-    permissiveness: dict[str, Any], mode: str, folder: Path, path: Path
-) -> str:
-    """Return the custom sandbox file's absolute path, or empty for the other modes."""
-    given = "sandbox_file" in permissiveness
-    if mode != _CUSTOM:
-        if given:
-            raise _refuse(path, f"sandbox_file only goes with default: {_CUSTOM}")
+    # Imported here because alr.sandboxes imports config_dir from this module.
+    from alr.sandboxes import join_names, names_in
 
-        return ""
+    names = names_in(folder / _SANDBOXES, dry_run)
+    if name in names:
+        return
 
-    if not given:
-        raise _refuse(path, f"default: {_CUSTOM} needs a sandbox_file")
-
-    key = "defaults.sandbox.permissiveness.sandbox_file"
-    sandbox_path = _absolute(permissiveness["sandbox_file"], key, folder, path)
-    _refuse_unreadable(sandbox_path, key, path)
-    return str(sandbox_path)
+    raise _refuse(
+        path,
+        f"default {name} is not a sandbox; the sandboxes are: {join_names(names)}",
+    )
 
 
 def _prompt_path(section: dict[str, Any], name: str, folder: Path, path: Path) -> str:
