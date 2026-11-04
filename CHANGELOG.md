@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Large preset's Docker switch now lets a session actually run Docker (#47).
+  Before, `docker` was denied because commands outside the sandbox still need a
+  permission check and nobody is there to approve it, and `./build/build.sh` ran
+  inside the sandbox where it couldn't reach the Docker socket. With the switch
+  on, `sandbox.json` now lists `docker *`, `./build/build.sh`, and
+  `./build/build.sh *` as excluded commands and allows them under `permissions`.
+
 ## [0.4.1] - 2026-11-03
 
 ### Changed

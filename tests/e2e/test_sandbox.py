@@ -61,7 +61,7 @@ TIGHT_DOC = {
 LARGE_DOC = {
     "sandbox": {
         **TIGHT_DOC["sandbox"],
-        "excludedCommands": ["docker *"],
+        "excludedCommands": ["docker *", "./build/build.sh", "./build/build.sh *"],
         "network": {
             "allowedDomains": [
                 "github.com",
@@ -76,7 +76,14 @@ LARGE_DOC = {
                 "storage.googleapis.com",
             ]
         },
-    }
+    },
+    "permissions": {
+        "allow": [
+            "Bash(docker *)",
+            "Bash(./build/build.sh)",
+            "Bash(./build/build.sh *)",
+        ]
+    },
 }
 FAILED_TASKS_YAML = (
     shared_block()
