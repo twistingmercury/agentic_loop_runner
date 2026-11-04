@@ -1,7 +1,7 @@
 ---
-version: 16
+version: 17
 date: 2026-11-04
-notes: "The core concept diagram names the sandbox settings JSON as a file from ~/.local/alr/sandboxes/ or --sandbox-settings, not the run folder (ADR-032). Earlier: The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+notes: "The System Model table lists alr.config (ADR-031) and alr.sandboxes (ADR-032). Earlier: The core concept diagram names the sandbox settings JSON as a file from ~/.local/alr/sandboxes/ or --sandbox-settings, not the run folder (ADR-032). Earlier: The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
 ---
 
 # alr — Architecture Overview
@@ -68,6 +68,8 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
 | `alr.cli`            | Parses flags, runs the startup checks, picks the front end, sets the exit code                          |
 | `alr.tasks`          | Parses, validates, and atomically saves the task file                                                   |
+| `alr.config`         | The config folder `~/.local/alr`: creates it on first run, then reads `config.yaml` (ADR-031)           |
+| `alr.sandboxes`      | The sandbox files in `~/.local/alr/sandboxes/`: adds the shipped ones, lists, finds by name (ADR-032)   |
 | `alr.engine`         | The shared run logic: the loop, the outcome rule, actions, session flags, process handling              |
 | `alr.plain`          | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                    |
 | `alr.record`         | The run events and the run log writer, shared by both front ends                                        |
