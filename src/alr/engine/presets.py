@@ -29,6 +29,9 @@ WEB_DOMAINS = (
     "sum.golang.org",
     "storage.googleapis.com",
 )
+# Excluded commands run outside the sandbox but still go through the
+# permission flow, so each pattern is also allowed in the permissions block.
+DOCKER_COMMANDS = ("docker *", "./build/build.sh", "./build/build.sh *")
 
 
 class Preset(StrEnum):
@@ -63,13 +66,17 @@ def render(switches: Switches) -> str:
     if switches.web:
         sandbox["network"] = {"allowedDomains": list(WEB_DOMAINS)}
 
+    document: dict[str, Any] = {"sandbox": sandbox}
     if switches.docker:
-        sandbox["excludedCommands"] = ["docker *"]
+        sandbox["excludedCommands"] = list(DOCKER_COMMANDS)
+        document["permissions"] = {
+            "allow": [f"Bash({command})" for command in DOCKER_COMMANDS]
+        }
 
     if switches.hide_credentials:
         sandbox["filesystem"] = {"denyRead": list(CREDENTIAL_PATHS)}
 
-    return json.dumps({"sandbox": sandbox}, indent=2, sort_keys=True) + "\n"
+    return json.dumps(document, indent=2, sort_keys=True) + "\n"
 
 
 def preset_path(tasks_file: str) -> str:

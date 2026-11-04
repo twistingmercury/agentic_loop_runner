@@ -9,6 +9,7 @@ import pytest
 
 from alr.engine.presets import (
     CREDENTIAL_PATHS,
+    DOCKER_COMMANDS,
     WEB_DOMAINS,
     Preset,
     Switches,
@@ -61,8 +62,32 @@ def test_render_large_has_the_web_list_and_docker() -> None:
     doc = json.loads(render(switches_for(Preset.LARGE)))["sandbox"]
 
     assert doc["network"] == {"allowedDomains": list(WEB_DOMAINS)}
-    assert doc["excludedCommands"] == ["docker *"]
+    assert doc["excludedCommands"] == list(DOCKER_COMMANDS)
     assert doc["filesystem"] == {"denyRead": list(CREDENTIAL_PATHS)}
+
+
+def test_render_large_excludes_and_allows_the_docker_commands() -> None:
+    doc = json.loads(render(switches_for(Preset.LARGE)))
+
+    assert doc["sandbox"]["excludedCommands"] == [
+        "docker *",
+        "./build/build.sh",
+        "./build/build.sh *",
+    ]
+    assert doc["permissions"] == {
+        "allow": [
+            "Bash(docker *)",
+            "Bash(./build/build.sh)",
+            "Bash(./build/build.sh *)",
+        ]
+    }
+
+
+def test_docker_off_leaves_permissions_absent() -> None:
+    doc = json.loads(render(Switches(web=True, docker=False, hide_credentials=True)))
+
+    assert "permissions" not in doc
+    assert "excludedCommands" not in doc["sandbox"]
 
 
 def test_an_off_switch_leaves_its_key_absent() -> None:
