@@ -15,12 +15,12 @@ from textual.timer import Timer
 from textual.worker import Worker, WorkerState
 
 from alr.engine import proc
-from alr.engine.presets import preset_path, render
 from alr.engine.loop import read_tasks, reset_failed, reset_in_memory, run
 from alr.durations import format_elapsed
 from alr.errors import AlrError
 from alr.engine.stop import Stop
 from alr.record.events import RunDone, RunResult, TaskStarted
+from alr.sandboxes import list_sandboxes
 from alr.stream.frontend import StreamFrontEnd
 from alr.tui.adapter import RunEvent, make_report
 from alr.tui.dialogs import (
@@ -238,23 +238,23 @@ class AlrApp(App[None]):
             self.push_screen(ErrorDialog(error_text(exc)))
             return
 
-        if self.settings.switches is not None:
-            # A preset answered already; its path goes beside whichever task file was picked.
-            self.settings.sandbox_file = preset_path(check.tasks_file)
-
         self.query_one(TasksPane).load(self._task_list)
         self._refresh()
 
     async def ask_permissions(self) -> None:
-        """Show the permissions dialog and apply an accepted answer to the settings."""
-        choice = await self.push_screen_wait(PermissionsDialog(self.settings))
+        """Show the permissions dialog and apply an accepted answer to the settings.
+
+        The sandboxes are listed each time, so a file added while alr runs is
+        there the next time the dialog opens.
+        """
+        dialog = PermissionsDialog(self.settings, list_sandboxes())
+        choice = await self.push_screen_wait(dialog)
         if choice is None:
             return
 
         self.settings.permissions = choice.permissions
         self.settings.sandbox_file = choice.sandbox_file
-        self.settings.preset = choice.preset
-        self.settings.switches = choice.switches
+        self.settings.sandbox_name = choice.sandbox_name
         self._refresh()
 
     async def ask_reset(self) -> None:
@@ -389,7 +389,7 @@ class AlrApp(App[None]):
             return
 
         if item == "sandbox":
-            self.push_screen(self._sandbox_viewer())
+            self.push_screen(FileViewer(self.settings.sandbox_file))
             return
 
         # The setup dialogs change the settings, which are locked once a run starts.
@@ -403,15 +403,6 @@ class AlrApp(App[None]):
             "reset": self.ask_reset,
         }
         self.run_worker(action[item](), exit_on_error=False)
-
-    def _sandbox_viewer(self) -> FileViewer:
-        """A chosen preset is what will run and is written nowhere, so show it; any other answer shows its file."""
-        if self.settings.switches is not None:
-            return FileViewer(
-                self.settings.sandbox_file, render(self.settings.switches)
-            )
-
-        return FileViewer(self.settings.sandbox_file)
 
     def on_select_changed(self, message: Select.Changed) -> None:
         if message.select.id == "logging" and isinstance(message.value, bool):

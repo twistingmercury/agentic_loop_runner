@@ -1,12 +1,11 @@
 """RunSettings: when a run can start, and what it starts with."""
 
-from dataclasses import replace
+import json
 from pathlib import Path
 
 import pytest
 
-from alr.engine.presets import Preset, Switches, render, switches_for
-from alr.engine.sandbox import bypass_args, settings_args
+from alr.engine.sandbox import bypass_args
 from alr.tui.settings import Permissions, RunSettings
 
 
@@ -55,41 +54,38 @@ def test_session_args_for_sandbox_reads_the_settings_file(tmp_path: Path) -> Non
     assert settings.session_args()[:2] == ["--permission-mode", "acceptEdits"]
 
 
+def test_session_args_for_a_named_sandbox_read_its_file_and_force_the_keys(
+    tmp_path: Path,
+) -> None:
+    sandbox = tmp_path / "my_sandbox.json"
+    sandbox.write_text('{"sandbox": {"enabled": false}}', encoding="utf-8")
+    settings = RunSettings(
+        permissions=Permissions.SANDBOX,
+        sandbox_file=str(sandbox),
+        sandbox_name="my_sandbox",
+    )
+
+    args = settings.session_args()
+
+    document = json.loads(args[args.index("--settings") + 1])
+    assert document["sandbox"]["enabled"] is True
+
+
+def test_a_named_sandbox_is_not_missing_once_the_folder_is_known() -> None:
+    settings = RunSettings(
+        tasks_file="t/tasks.yaml",
+        permissions=Permissions.SANDBOX,
+        sandbox_file="/h/.local/alr/sandboxes/tight.json",
+        sandbox_name="tight",
+    )
+
+    assert settings.missing() is None
+
+
 def test_log_folder_is_beside_the_task_file() -> None:
     settings = RunSettings(tasks_file="run/tasks.yaml")
 
     assert settings.log_folder() == Path("run/logs")
-
-
-def _preset_settings(**changes: object) -> RunSettings:
-    settings = RunSettings(
-        tasks_file="t/tasks.yaml",
-        permissions=Permissions.SANDBOX,
-        preset=Preset.TIGHT,
-        switches=switches_for(Preset.TIGHT),
-        sandbox_file="t/sandbox.json",
-    )
-    return replace(settings, **changes)
-
-
-def test_a_preset_answer_is_not_missing_once_the_folder_is_known() -> None:
-    assert _preset_settings().missing() is None
-
-
-def test_a_preset_answer_without_a_folder_asks_for_the_folder() -> None:
-    settings = _preset_settings(tasks_file="", sandbox_file="")
-
-    assert settings.missing() == "choose a run folder"
-
-
-def test_a_preset_answer_with_a_folder_but_no_file_path_asks_for_the_folder() -> None:
-    assert _preset_settings(sandbox_file="").missing() == "choose a run folder"
-
-
-def test_session_args_for_a_preset_come_from_the_rendered_document() -> None:
-    expected = settings_args(render(switches_for(Preset.TIGHT)))
-
-    assert _preset_settings().session_args() == expected
 
 
 @pytest.mark.parametrize(
@@ -98,29 +94,19 @@ def test_session_args_for_a_preset_come_from_the_rendered_document() -> None:
         (RunSettings(), "not chosen"),
         (RunSettings(permissions=Permissions.SKIP), "skip"),
         (
-            RunSettings(permissions=Permissions.SANDBOX, sandbox_file="s.json"),
-            "sandbox",
-        ),
-        (_preset_settings(), "sandbox (tight)"),
-        (
-            _preset_settings(preset=Preset.LARGE, switches=switches_for(Preset.LARGE)),
-            "sandbox (large)",
-        ),
-        (
-            _preset_settings(
-                switches=Switches(web=True, docker=False, hide_credentials=True)
+            RunSettings(
+                permissions=Permissions.SANDBOX,
+                sandbox_file="/s/tight.json",
+                sandbox_name="tight",
             ),
-            "sandbox (tight, adjusted)",
+            "sandbox (tight)",
         ),
         (
-            _preset_settings(
-                preset=Preset.LARGE,
-                switches=Switches(web=True, docker=False, hide_credentials=True),
-            ),
-            "sandbox (large, adjusted)",
+            RunSettings(permissions=Permissions.SANDBOX, sandbox_file="/s/mine.json"),
+            "sandbox (/s/mine.json)",
         ),
     ],
-    ids=["unset", "skip", "file", "tight", "large", "tight adjusted", "large adjusted"],
+    ids=["unset", "skip", "named sandbox", "settings file"],
 )
 def test_permissions_text(settings: RunSettings, text: str) -> None:
     assert settings.permissions_text() == text

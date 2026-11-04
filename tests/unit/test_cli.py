@@ -616,6 +616,7 @@ def test_the_view_gets_the_resolved_flags(
     assert seen[0].tasks_file == str(folder / "tasks.yaml")
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == settings
+    assert seen[0].sandbox_name == ""
     assert seen[0].action_timeout == "5m"
 
 
@@ -1036,8 +1037,7 @@ def test_the_view_gets_the_named_sandbox_as_a_settings_file(
     assert code == 0
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == str(_sandboxes(home) / "large.json")
-    assert seen[0].preset is None
-    assert seen[0].switches is None
+    assert seen[0].sandbox_name == "large"
 
 
 def test_the_view_gets_the_named_sandbox_before_a_folder_is_chosen(
@@ -1051,6 +1051,7 @@ def test_the_view_gets_the_named_sandbox_before_a_folder_is_chosen(
     assert seen[0].tasks_file == ""
     assert seen[0].permissions is Permissions.SANDBOX
     assert seen[0].sandbox_file == str(_sandboxes(home) / "tight.json")
+    assert seen[0].sandbox_name == "tight"
 
 
 def _answer(argv: list[str], default: SandboxDefault | None) -> cli.Answer:

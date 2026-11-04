@@ -265,6 +265,7 @@ def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int
     settings = RunSettings(
         tasks_file=tasks_file,
         sandbox_file=sandbox_file,
+        sandbox_name=answer.sandbox_name,
         permissions=_permissions(sandbox_file, args.yolo),
         action_timeout=args.action_timeout or "",
         reset_failed=args.reset_failed,

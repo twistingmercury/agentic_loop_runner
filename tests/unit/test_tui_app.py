@@ -26,6 +26,7 @@ from textual.widgets import (
     Input,
     ListView,
     OptionList,
+    RadioButton,
     RadioSet,
     Select,
     Static,
@@ -34,10 +35,10 @@ from textual.widgets import (
 
 from alr import cli
 from alr.engine import proc
-from alr.engine.presets import Preset, preset_path, render, switches_for
 from alr.engine.stop import Stop
 from alr.errors import RefusedError, RunLogError
 from alr.record.runlog import RunLog
+from alr.sandboxes import sandboxes_dir
 from alr.tasks import parse_tasks
 from alr.tui.app import AlrApp, AppState
 from alr.record.events import ActionStarted, Activity, TaskStarted
@@ -1345,9 +1346,9 @@ async def test_the_whole_setup_runs_from_the_keyboard_alone(work_dir: Path) -> N
         await until(lambda: isinstance(app.screen, FolderDialog))
         await pilot.press("end", *"/run", "enter")
 
-        # Down twice to "skip", Enter picks it, Tab skips the disabled switches to OK.
+        # Tight is pressed, so one Down reaches "skip"; Enter picks it, Tab goes to OK.
         await until(lambda: isinstance(app.screen, PermissionsDialog))
-        await pilot.press("down", "down", "enter", "tab", "enter")
+        await pilot.press("down", "enter", "tab", "enter")
 
         # The command field has focus; Enter adds, then Tab to Done.
         await until(lambda: isinstance(app.screen, ActionsDialog))
@@ -2089,27 +2090,38 @@ async def test_a_worker_ending_after_the_app_exits_is_ignored(
     assert app.state is AppState.RUNNING
 
 
-def _preset_settings(tasks_file: str, preset: Preset) -> RunSettings:
-    """What --sandbox <preset> hands the view: the preset answers, the file is not written yet."""
+def _sandbox_settings(tasks_file: str, name: str) -> RunSettings:
+    """What --sandbox <name> hands the view: the sandbox answers, with the path of its file."""
     return RunSettings(
         tasks_file=tasks_file,
-        sandbox_file=preset_path(tasks_file) if tasks_file else "",
+        sandbox_file=str(sandboxes_dir() / f"{name}.json"),
         permissions=Permissions.SANDBOX,
-        preset=preset,
-        switches=switches_for(preset),
+        sandbox_name=name,
         logging=False,
     )
 
 
-async def test_launch_does_not_ask_permissions_when_the_folder_has_a_file(
+def _radio_labels(app: AlrApp) -> list[str]:
+    """The labels of the open permissions dialog's radios, in order."""
+    return [str(button.label) for button in app.screen.query(RadioButton)]
+
+
+def _pressed_label(app: AlrApp) -> str:
+    """The label of the pressed radio in the open permissions dialog."""
+    pressed = app.screen.query_one(RadioSet).pressed_button
+    assert pressed is not None
+    return str(pressed.label)
+
+
+async def test_launch_does_not_ask_permissions_with_a_settings_file_flag(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    sandbox_file = write_file(work_dir / "run" / "sandbox.json", "{}")
+    given = write_file(work_dir / "run" / "mine.json", "{}")
     app = AlrApp(
         RunSettings(
             tasks_file=tasks_file,
-            sandbox_file=sandbox_file,
+            sandbox_file=given,
             permissions=Permissions.SANDBOX,
         )
     )
@@ -2118,13 +2130,15 @@ async def test_launch_does_not_ask_permissions_when_the_folder_has_a_file(
 
         assert not isinstance(app.screen, ModalScreen)
         assert app.state is AppState.READY
+        label = str(app.query_one("#permissions", Static).render())
+        assert f"Permissions: sandbox ({given})" in label
 
 
-async def test_launch_does_not_ask_permissions_with_a_preset_flag(
+async def test_launch_does_not_ask_permissions_with_a_sandbox_flag(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    app = AlrApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -2133,49 +2147,72 @@ async def test_launch_does_not_ask_permissions_with_a_preset_flag(
         assert "Permissions: sandbox (large)" in label
 
 
-async def test_a_preset_flag_without_a_folder_settles_the_path_when_the_folder_is_chosen(
+async def test_a_sandbox_flag_keeps_its_answer_when_the_folder_is_chosen(
     work_dir: Path,
 ) -> None:
     folder = work_dir / "run"
-    tasks_file = write_file(folder / "tasks.yaml", TASKS)
-    app = AlrApp(_preset_settings("", Preset.TIGHT))
+    write_file(folder / "tasks.yaml", TASKS)
+    app = AlrApp(_sandbox_settings("", "tight"))
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, FolderDialog))
-        assert app.settings.sandbox_file == ""
 
         app.screen.query_one("#path", Input).value = str(folder)
         await pilot.click("#ok")
         await until(lambda: not isinstance(app.screen, ModalScreen))
 
-        assert app.settings.sandbox_file == preset_path(tasks_file)
         assert app.settings.permissions is Permissions.SANDBOX
+        assert app.settings.sandbox_name == "tight"
+        assert app.settings.sandbox_file == str(sandboxes_dir() / "tight.json")
 
 
 async def test_p_reopens_the_dialog_preselected_to_the_current_answer(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    app = AlrApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
         await pilot.press("p")
         await until(lambda: isinstance(app.screen, PermissionsDialog))
 
-        pressed = app.screen.query_one(RadioSet).pressed_button
-        assert pressed is not None
-        assert pressed.id == "large"
+        assert _pressed_label(app) == "large"
 
 
-async def test_choosing_tight_over_the_folders_file_shows_adjusted_when_a_switch_moves(
+async def test_a_file_added_while_alr_runs_shows_up_the_next_time_the_dialog_opens(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    sandbox_file = write_file(work_dir / "run" / "sandbox.json", "{}")
+    app = AlrApp(_sandbox_settings(tasks_file, "tight"))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+        await pilot.press("p")
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
+        assert _radio_labels(app) == ["large", "tight", "Skip permissions (no sandbox)"]
+        await pilot.press("escape")
+        await until(lambda: not isinstance(app.screen, ModalScreen))
+
+        write_file(sandboxes_dir() / "my_sandbox.json", "{}")
+        await pilot.press("p")
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
+
+        assert _radio_labels(app) == [
+            "large",
+            "my_sandbox",
+            "tight",
+            "Skip permissions (no sandbox)",
+        ]
+
+
+async def test_choosing_a_sandbox_over_a_settings_file_names_it_in_the_strip(
+    work_dir: Path,
+) -> None:
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    given = write_file(work_dir / "run" / "mine.json", "{}")
     app = AlrApp(
         RunSettings(
             tasks_file=tasks_file,
-            sandbox_file=sandbox_file,
+            sandbox_file=given,
             permissions=Permissions.SANDBOX,
             logging=False,
         )
@@ -2185,30 +2222,47 @@ async def test_choosing_tight_over_the_folders_file_shows_adjusted_when_a_switch
 
         await pilot.press("p")
         await until(lambda: isinstance(app.screen, PermissionsDialog))
-        await pilot.click("#tight")
-        await pilot.click("#web")
+        await pilot.click("#sandbox-1")
         await pilot.click("#ok")
         await until(lambda: not isinstance(app.screen, ModalScreen))
 
         label = str(app.query_one("#permissions", Static).render())
-        assert "Permissions: sandbox (tight, adjusted)" in label
+        assert "Permissions: sandbox (tight)" in label
+        assert app.settings.sandbox_name == "tight"
+        assert app.settings.sandbox_file == str(sandboxes_dir() / "tight.json")
 
 
-async def test_x_before_start_shows_the_preset_not_the_old_folder_file(
+async def test_choosing_skip_after_a_sandbox_forgets_the_sandbox(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    sandbox = Path(write_file(work_dir / "run" / "sandbox.json", "old\n"))
-    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
+    app = AlrApp(_sandbox_settings(tasks_file, "large"))
+    async with app.run_test() as pilot:
+        await until(lambda: app.state is AppState.READY)
+
+        await pilot.press("p")
+        await until(lambda: isinstance(app.screen, PermissionsDialog))
+        await pilot.click("#skip")
+        await pilot.click("#ok")
+        await until(lambda: not isinstance(app.screen, ModalScreen))
+
+        assert app.settings.permissions is Permissions.SKIP
+        assert app.settings.sandbox_name == ""
+        assert app.settings.sandbox_file == ""
+
+
+async def test_x_before_start_shows_the_chosen_sandbox_file(work_dir: Path) -> None:
+    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
+    chosen = write_file(sandboxes_dir() / "my_sandbox.json", '{"sandbox": {}}\n')
+    app = AlrApp(_sandbox_settings(tasks_file, "my_sandbox"))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
         await pilot.press("x")
         await until(lambda: isinstance(app.screen, FileViewer))
 
-        text = app.screen.query_one("#text", TextArea).text
-        assert text == render(switches_for(Preset.LARGE))
-        assert sandbox.read_text(encoding="utf-8") == "old\n", "nothing is written yet"
+        assert str(app.screen.query_one("#path").render()) == chosen
+        assert app.screen.query_one("#text", TextArea).text == '{"sandbox": {}}\n'
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -2243,63 +2297,35 @@ async def test_x_while_running_shows_the_file_on_disk(
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_x_while_running_shows_the_preset_that_no_file_holds(
-    work_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_preset_settings(tasks_file, Preset.LARGE))
-    async with app.run_test() as pilot:
-        await pilot.press("s")
-        await until(lambda: app.state is AppState.RUNNING)
-
-        await pilot.press("x")
-        await until(lambda: isinstance(app.screen, FileViewer))
-
-        text = app.screen.query_one("#text", TextArea).text
-        assert text == render(switches_for(Preset.LARGE))
-
-        await pilot.press("escape")
-        await until(lambda: not isinstance(app.screen, ModalScreen))
-        await pilot.press("ctrl+c")
-        await _finished(app)
-
-
-@pytest.mark.usefixtures("fake_claude")
-async def test_start_with_a_preset_writes_nothing_to_the_run_folder(
+async def test_start_with_a_named_sandbox_writes_nothing_to_the_run_folder(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    settings = _preset_settings(tasks_file, Preset.LARGE)
-    app = AlrApp(settings)
+    app = AlrApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
 
-    assert not Path(preset_path(tasks_file)).exists()
+    # Logging is off, so the task file is all the run folder may hold.
+    held = sorted(path.name for path in Path(tasks_file).parent.iterdir())
+    assert held == ["tasks.yaml"]
 
 
-async def test_the_permissions_dialog_keeps_ok_on_screen_after_choosing_a_preset(
+async def test_the_permissions_dialog_keeps_ok_on_screen_with_a_long_list(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    sandbox_file = write_file(work_dir / "run" / "sandbox.json", "{}")
-    app = AlrApp(
-        RunSettings(
-            tasks_file=tasks_file,
-            sandbox_file=sandbox_file,
-            permissions=Permissions.SANDBOX,
-            logging=False,
-        )
-    )
+    for number in range(14):
+        write_file(sandboxes_dir() / f"extra_{number:02}.json", "{}")
+
+    app = AlrApp(_sandbox_settings(tasks_file, "tight"))
     async with app.run_test(size=(80, 24)) as pilot:
         await until(lambda: app.state is AppState.READY)
 
         await pilot.press("p")
         await until(lambda: isinstance(app.screen, PermissionsDialog))
-        await pilot.click("#tight")
-        await pilot.click("#web")
 
         ok = app.screen.query_one("#ok").region
         assert app.screen.region.contains_region(ok)
         assert app.screen.query_one("#dialog").region.contains_region(ok)
+        assert app.screen.query_one("#preview").region.height >= 6
