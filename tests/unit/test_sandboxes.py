@@ -382,6 +382,10 @@ def test_list_marks_invalid_json_and_unreadable(
     folder.mkdir()
     (folder / "broken.json").write_text("{not json", encoding="utf-8")
     (folder / "list.json").write_text("[]\n", encoding="utf-8")
+    (folder / "nan.json").write_text('{"a": NaN}\n', encoding="utf-8")
+    (folder / "infinity.json").write_text('{"a": Infinity}\n', encoding="utf-8")
+    (folder / "five.json").write_text('{"sandbox": 5}\n', encoding="utf-8")
+    (folder / "null.json").write_text('{"sandbox": null}\n', encoding="utf-8")
     (folder / "good.json").write_text("{}\n", encoding="utf-8")
     secret = folder / "secret.json"
     secret.write_text("{}\n", encoding="utf-8")
@@ -396,8 +400,12 @@ def test_list_marks_invalid_json_and_unreadable(
 
     assert problems == {
         "broken": "not valid JSON",
+        "five": "sandbox is not an object",
         "good": "",
+        "infinity": "not valid JSON",
         "list": "not valid JSON",
+        "nan": "not valid JSON",
+        "null": "sandbox is not an object",
         "secret": "cannot be read",
     }
 

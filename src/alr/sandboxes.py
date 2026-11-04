@@ -1,7 +1,6 @@
 """The sandboxes folder, ~/.local/alr/sandboxes: add the shipped files, list the sandboxes, find one by name."""
 
 import errno
-import json
 import os
 import re
 import tempfile
@@ -16,6 +15,7 @@ from alr.errors import (
     RefusedError,
     UsageError,
 )
+from alr.engine.sandbox import settings_problem
 
 SANDBOXES = "sandboxes"
 
@@ -26,7 +26,6 @@ _NAME = re.compile(r"[A-Za-z0-9_-]+")
 _BYPASS = "yolo"
 _SUFFIX = ".json"
 
-_NOT_VALID_JSON = "not valid JSON"
 _CANNOT_BE_READ = "cannot be read"
 
 
@@ -36,7 +35,7 @@ class Sandbox:
 
     name: str
     path: Path
-    # Empty when the file reads as a JSON object, else why it cannot be used.
+    # Empty when a run can use the file, else why it cannot.
     problem: str
 
 
@@ -277,19 +276,14 @@ def _sandbox_from(entry: Path) -> Sandbox:
 
 
 def _problem_with(path: Path) -> str:
-    """Return why a sandbox file cannot be used, or an empty string when it can."""
+    """Return why a sandbox file cannot be used, or an empty string when it can.
+
+    The reading rules are the run's own, so a sandbox is marked broken exactly
+    when a run would refuse it.
+    """
     try:
         text = read_text(path)
     except OSError:
         return _CANNOT_BE_READ
 
-    try:
-        settings = json.loads(text)
-    except (ValueError, RecursionError):
-        # Settings nested deeply enough overflow the parser.
-        return _NOT_VALID_JSON
-
-    if not isinstance(settings, dict):
-        return _NOT_VALID_JSON
-
-    return ""
+    return settings_problem(text)

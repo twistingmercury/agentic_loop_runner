@@ -438,28 +438,45 @@ async def test_ok_with_the_settings_file_keeps_the_user_on_the_step_when_it_is_i
         assert "refused" not in shown, "the dialog shows the message, not the reason"
 
 
-async def test_ok_on_a_sandbox_the_run_would_refuse_keeps_the_user_here() -> None:
-    # A JSON object, so it is listed without a problem; its sandbox key is what the run refuses.
-    odd = add_sandbox("odd", '{"sandbox": 3}')
+@pytest.mark.parametrize(
+    ("content", "problem"),
+    [
+        pytest.param("not json", "not valid JSON", id="bad JSON"),
+        pytest.param('{"a": NaN}', "not valid JSON", id="NaN"),
+        pytest.param('{"a": Infinity}', "not valid JSON", id="Infinity"),
+        pytest.param("[1, 2]", "not valid JSON", id="not an object"),
+        pytest.param('{"sandbox": 5}', "sandbox is not an object", id="sandbox 5"),
+        pytest.param(
+            '{"sandbox": null}', "sandbox is not an object", id="sandbox null"
+        ),
+    ],
+)
+async def test_a_sandbox_the_run_would_refuse_is_marked_and_cannot_be_accepted(
+    content: str, problem: str
+) -> None:
+    odd = add_sandbox("odd", content)
     host = Host()
     async with host.run_test(size=BIG) as pilot:
         host.push_screen(
             PermissionsDialog(RunSettings(), list_sandboxes()), host.record
         )
         await pilot.pause()
+        assert radios(host.screen)[1] == ("sandbox-1", f"odd   ({problem})")
 
         await pilot.click("#sandbox-1")
+
+        assert preview(host.screen) == f"{odd}\n{problem}"
+        assert ok_is_disabled(host.screen)
         await pilot.click("#ok")
         await pilot.pause()
-
         assert host.result == "unset"
-        assert error(host.screen) == (
-            f"--sandbox odd: {odd}: sandbox: must be a JSON object"
-        )
+        assert isinstance(host.screen, PermissionsDialog)
 
-        await pilot.click("#sandbox-2")
-
-        assert error(host.screen) == ""
+        # The marked file must not trap the user: Cancel still closes the dialog.
+        await pilot.click("#cancel")
+        await pilot.pause()
+        assert host.result is None
+        assert not isinstance(host.screen, PermissionsDialog)
 
 
 async def test_permissions_dialog_skip_returns_skip() -> None:

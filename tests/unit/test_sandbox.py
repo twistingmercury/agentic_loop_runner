@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import sandbox_args, settings_args
+from alr.engine.sandbox import sandbox_args, settings_args, settings_problem
 from alr.errors import RefusedError
 
 FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
@@ -117,6 +117,25 @@ def test_a_bad_sandbox_picked_by_name_is_refused_naming_the_flag_and_the_file(
 
     assert excinfo.value.reason == "invalid-sandbox-settings"
     assert excinfo.value.message.startswith(f"--sandbox five: {path}: {problem}")
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        pytest.param("{}", "", id="empty object"),
+        pytest.param('{"sandbox": {}}', "", id="sandbox object"),
+        pytest.param("nope", "not valid JSON", id="not JSON"),
+        pytest.param("[]", "not valid JSON", id="array"),
+        pytest.param('{"x": NaN}', "not valid JSON", id="NaN"),
+        pytest.param("[" * 100_000, "not valid JSON", id="deeply nested"),
+        pytest.param('{"sandbox": 5}', "sandbox is not an object", id="sandbox 5"),
+        pytest.param(
+            '{"sandbox": null}', "sandbox is not an object", id="sandbox null"
+        ),
+    ],
+)
+def test_settings_problem_says_what_a_run_would_refuse(text: str, problem: str) -> None:
+    assert settings_problem(text) == problem
 
 
 def test_settings_args_refuses_text_naming_the_flag_and_the_file() -> None:
