@@ -873,14 +873,18 @@ def test_an_unknown_sandbox_name_exits_2_listing_the_names(
 
 
 @pytest.mark.parametrize(
-    "name", ["yolo", "Tight", "tight.json", "../sandboxes/tight", ""]
+    "name", ["yolo", "custom", "Tight", "tight.json", "../sandboxes/tight", ""]
 )
 def test_a_name_that_is_not_listed_exits_2(
     name: str,
+    home: Path,
     folder: Path,
     sessions: list[list[str]],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    _write_sandbox(home, "yolo")
+    _write_sandbox(home, "custom")
+
     assert cli.main(["-d", str(folder), "--sandbox", name]) == 2
     assert sessions == []
     err = capsys.readouterr().err

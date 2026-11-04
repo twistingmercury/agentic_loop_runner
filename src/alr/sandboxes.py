@@ -20,10 +20,12 @@ from alr.engine.sandbox import settings_problem
 SANDBOXES = "sandboxes"
 
 # The names a user can type as a flag value. A leading dot never matches, so
-# dotfiles (and the temporary files add_missing writes) are not listed. yolo is
-# left out so it keeps meaning the bypass.
+# dotfiles (and the temporary files add_missing writes) are not listed.
 _NAME = re.compile(r"[A-Za-z0-9_-]+")
-_BYPASS = "yolo"
+# Names no file can take. yolo keeps meaning the bypass. custom was the old
+# config mode, which config.yaml still refuses, so a custom.json must not be
+# pickable by flag while the same name is refused as a default.
+RESERVED_NAMES = ("yolo", "custom")
 _SUFFIX = ".json"
 
 _CANNOT_BE_READ = "cannot be read"
@@ -265,7 +267,7 @@ def _is_listed(entry: Path) -> bool:
         return False
 
     name = entry.stem
-    if name == _BYPASS or not _NAME.fullmatch(name):
+    if name in RESERVED_NAMES or not _NAME.fullmatch(name):
         return False
 
     return entry.is_file()

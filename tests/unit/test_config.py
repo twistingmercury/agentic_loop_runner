@@ -195,6 +195,8 @@ def test_default_with_a_sandboxes_folder_alr_cannot_list_is_config_unwritable(
 
 def test_custom_is_refused_with_move_advice(tmp_path: Path) -> None:
     folder = make_folder(tmp_path)
+    # The advice must hold even for a user who already moved the file: custom is reserved.
+    (folder / "sandboxes" / "custom.json").write_text("{}", encoding="utf-8")
     text = replace("default: tight", "default: custom")
 
     with pytest.raises(RefusedError) as caught:

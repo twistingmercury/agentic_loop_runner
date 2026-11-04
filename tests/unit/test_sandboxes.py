@@ -274,7 +274,9 @@ def test_check_accepts_a_missing_folder_and_a_missing_file_and_writes_nothing(
     assert list(folder.iterdir()) == []
 
 
-def test_list_skips_subfolders_dotfiles_bad_names_and_yolo(set_up_home: Path) -> None:
+def test_list_skips_subfolders_dotfiles_bad_names_and_reserved_names(
+    set_up_home: Path,
+) -> None:
     folder = sandboxes_dir(set_up_home)
     folder.mkdir()
     for name in ("b.json", "a_1.json", "Z-9.json"):
@@ -284,6 +286,7 @@ def test_list_skips_subfolders_dotfiles_bad_names_and_yolo(set_up_home: Path) ->
         "has space.json",
         "dotted.name.json",
         "yolo.json",
+        "custom.json",
         "notes.txt",
         "noext",
         ".json",
@@ -437,11 +440,12 @@ def test_find_unknown_name_with_no_sandboxes_says_none(set_up_home: Path) -> Non
     )
 
 
-@pytest.mark.parametrize("name", ["yolo", "../tight", "has space", ""])
+@pytest.mark.parametrize("name", ["yolo", "custom", "../tight", "has space", ""])
 def test_find_refuses_names_that_are_never_listed(name: str, set_up_home: Path) -> None:
     folder = sandboxes_dir(set_up_home)
     folder.mkdir()
     (folder / "yolo.json").write_text("{}\n", encoding="utf-8")
+    (folder / "custom.json").write_text("{}\n", encoding="utf-8")
 
     with pytest.raises(UsageError):
         find(name, set_up_home)

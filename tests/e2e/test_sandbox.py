@@ -362,6 +362,21 @@ def test_an_unknown_sandbox_name_exits_2_listing_the_names(
     assert not (run.tasks_path.parent / "logs").exists()
 
 
+def test_custom_is_a_reserved_name_even_when_custom_json_exists(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    """custom was the old config mode, so its file is not listed and cannot be picked."""
+    (sandboxes_folder(home) / "custom.json").write_text("{}", encoding="utf-8")
+
+    run = run_with_flags(tmp_path, "--sandbox", "custom")
+
+    assert run.res.code == 2, run.res
+    assert run.res.err == (
+        "error: --sandbox: no sandbox named custom; the sandboxes are: large, tight\n"
+    )
+    assert run.records == [], "claude must not run"
+
+
 @pytest.mark.parametrize("mode", [[], ["--dry-run"]], ids=["run", "dry run"])
 def test_a_bad_named_sandbox_is_refused_and_starts_nothing(
     tmp_path: Path, home: Path, fake_claude: Path, mode: list[str]
