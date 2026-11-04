@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sandboxes are files now (ADR-032). Tight and Large ship as `tight.json` and
+  `large.json` in `~/.local/alr/sandboxes/`, and any `*.json` there is a
+  sandbox you pick by name with `--sandbox <name>`, the config default, or the
+  permissions dialog. Edit them, or add your own such as `my_sandbox.json`.
+  Every real run adds a shipped file that is missing, prints `Added <path>`,
+  and never overwrites a file you edited. `--dry-run` writes nothing and
+  reads a missing shipped file from the package.
+- The permissions dialog lists the sandboxes by name, with a preview of the
+  selected file. A file that is not valid JSON is listed with the reason, and
+  OK stays off while it is selected.
+- The config's sandbox default now applies with or without `--dir`.
+
+### Removed
+
+- Breaking: `custom` as the config's sandbox default and the `sandbox_file`
+  key are refused as `invalid-config`; move the file into
+  `~/.local/alr/sandboxes/` and use its name as `default`.
+- Breaking: a run folder's `sandbox.json` is ignored, and alr no longer writes
+  one. `--dir` prints `<folder>/sandbox.json is no longer read; pick a sandbox
+  with --sandbox <name>` when it finds one.
+- Breaking: `--sandbox` takes any sandbox name, not only `tight` or `large`.
+- Breaking: the three switches (web, Docker, credential folders) are gone;
+  edit the sandbox file instead. The `sandbox-file-unwritable` refusal went
+  with them.
+
 ### Fixed
 
 - The Large preset's Docker switch now lets a session actually run Docker (#47).
