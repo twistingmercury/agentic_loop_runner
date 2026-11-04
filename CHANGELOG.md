@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-04
+
 ### Changed
 
 - Sandboxes are files now (ADR-032). Tight and Large ship as `tight.json` and
