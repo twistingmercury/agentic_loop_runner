@@ -156,7 +156,8 @@ authorized.
    instructions: they never reach the session. alr rewrites
    the task file with every state change, so comments and custom formatting
    are not preserved. Every verification command must be one the session can
-   run.
+   run. Do not name `tasks.yaml` in a task prompt or a command; a command
+   reaches the file as `$ALR_TASK_FILE`.
 
    The session runs under Claude Code's permissions and, when the run uses a
    sandbox, inside it. A run sandboxes its sessions with `--sandbox <name>`
