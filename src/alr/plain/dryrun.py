@@ -6,9 +6,12 @@ from typing import TextIO
 
 from alr.engine.actions import first_line, action_limit
 from alr.engine.loop import read_tasks
+from alr.engine.sandbox import parse_settings
 from alr.errors import INVALID_TASK_FILE, RefusedError, TaskFileError
+from alr.plain.dryrun_checks import check_task_list
 from alr.plain.report import print_tasks, refuse_failed_report
 from alr.record.runlog import check_writable, run_dir
+from alr.sandboxes import read_text
 from alr.tasks import Action, TaskList
 
 
@@ -31,6 +34,7 @@ async def dry_run(
     check_writable(path)
     print_tasks(out, task_list)
     _print_action_limits(out, task_list, action_timeout)
+    _print_warnings(out, task_list, sandbox_file)
     _print_sandbox(out, sandbox_file, sandbox_name, added_on_real_run)
     out.write(f"{tasks_file} is valid\n")
 
@@ -38,7 +42,14 @@ async def dry_run(
 def _print_sandbox(
     out: TextIO, sandbox_file: str, sandbox_name: str, added_on_real_run: bool
 ) -> None:
-    """Name the sandbox settings file, and the sandbox it was picked as when it was picked by name."""
+    """Name the sandbox settings file, and the sandbox it was picked as when it was picked by name.
+
+    With no file there is nothing to read the sandbox rules from, so say they were skipped.
+    """
+    if not sandbox_file:
+        out.write("sandbox rules skipped: no sandbox settings file\n")
+        return
+
     if added_on_real_run:
         out.write(
             f"sandbox settings: {sandbox_file} ({sandbox_name}; added on a real run)\n"
@@ -49,8 +60,31 @@ def _print_sandbox(
         out.write(f"sandbox settings: {sandbox_file} ({sandbox_name})\n")
         return
 
-    if sandbox_file:
-        out.write(f"sandbox settings: {sandbox_file}\n")
+    out.write(f"sandbox settings: {sandbox_file}\n")
+
+
+def _print_warnings(out: TextIO, task_list: TaskList, sandbox_file: str) -> None:
+    """Write one line per problem the rules find in the prompts and commands."""
+    excluded_commands = _excluded_commands(sandbox_file)
+    for finding in check_task_list(task_list, excluded_commands):
+        out.write(f"{finding.line()}\n")
+
+
+def _excluded_commands(sandbox_file: str) -> list[str] | None:
+    """The sandbox file's excludedCommands strings, or None when there is no file.
+
+    The file was checked before the dry run started, so it parses. A missing or
+    mistyped excludedCommands means none: the rule has nothing to match.
+    """
+    if not sandbox_file:
+        return None
+
+    settings = parse_settings(read_text(Path(sandbox_file)))
+    entries = settings.get("sandbox", {}).get("excludedCommands", [])
+    if not isinstance(entries, list):
+        return []
+
+    return [entry for entry in entries if isinstance(entry, str)]
 
 
 def _read_for_dry_run(tasks_file: str) -> TaskList:

@@ -15,6 +15,7 @@ import pytest
 from e2e_helpers import (
     DRY_RUN_TASKS_YAML,
     ONE_TASK_TABLE,
+    SKIPPED_SANDBOX_LINE,
     SHARED_PROMPT,
     TWO_TASKS_YAML,
     VALID_TASKS_YAML,
@@ -530,7 +531,8 @@ def test_a_dry_run_notices_the_folders_sandbox_json_and_names_no_sandbox(
 
     assert run.res.code == 0, run.res
     assert run.res.out == (
-        f"{folder_notice(folder)}{ONE_TASK_TABLE}{run.tasks_path} is valid\n"
+        f"{folder_notice(folder)}{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}"
+        f"{run.tasks_path} is valid\n"
     )
     assert run.records == [], "claude must not run"
 

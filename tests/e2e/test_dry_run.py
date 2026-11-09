@@ -6,6 +6,7 @@ from e2e_helpers import (
     CLEAN_ONE_TASK,
     DRY_RUN_TASKS_YAML,
     ONE_TASK_TABLE,
+    SKIPPED_SANDBOX_LINE,
     VALID_TASKS_YAML,
     run_alr,
     run_args,
@@ -19,7 +20,7 @@ def test_dry_run_valid_file(tmp_path: Path, fake_claude: Path) -> None:
     res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML)
 
     assert res.code == 0, res
-    assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
 
 
 def test_dry_run_invalid_file(tmp_path: Path, fake_claude: Path) -> None:
@@ -168,5 +169,28 @@ def test_dry_run_accepts_a_logs_symlink_to_an_existing_folder(
     res = run_alr("-d", str(tmp_path), "--dry-run")
 
     assert res.code == 0, res
-    assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
     assert list(target.iterdir()) == []
+
+
+def test_dry_run_warns_and_still_ends_valid(tmp_path: Path, fake_claude: Path) -> None:
+    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML)
+
+    lines = res.out.splitlines()
+    warning_lines = [line for line in lines if line.startswith("warning: task 1: ")]
+    assert res.code == 0, res
+    assert any(line.startswith("warning: task 1: finish-block: ") for line in lines)
+    assert lines[-2 - len(warning_lines) : -2] == warning_lines, (
+        "the warnings sit just before the sandbox line"
+    )
+    assert lines[-2] == SKIPPED_SANDBOX_LINE.strip()
+    assert lines[-1] == f"{tasks_path} is valid"
+
+
+def test_dry_run_with_yolo_prints_the_skipped_sandbox_line(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--yolo")
+
+    assert res.code == 0, res
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"

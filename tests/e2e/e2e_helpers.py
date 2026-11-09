@@ -43,6 +43,9 @@ TWO_TASKS = """tasks:
 # the dry run's exact output use it, so their fixtures draw no warning.
 CLEAN_ENDING = "\n\nCompletion criteria:\n- It is done.\n\nFinish:\nReply in one line."
 
+# What a dry run prints where the sandbox line goes when no sandbox is chosen.
+SKIPPED_SANDBOX_LINE = "sandbox rules skipped: no sandbox settings file\n"
+
 ONE_TASK_TABLE = (
     "   ID  STATE      NAME\n   --  ---------  ----\n    1  PENDING    First task\n"
 )

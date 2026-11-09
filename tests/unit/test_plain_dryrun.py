@@ -12,6 +12,9 @@ from alr.plain.dryrun import dry_run
 from alr.plain.dryrun_checks import check_task_list
 from alr.tasks import parse_tasks
 
+# What a dry run with no sandbox settings file prints where the sandbox line goes.
+SKIPPED_LINE = "sandbox rules skipped: no sandbox settings file\n"
+
 # Every task prompt in a fixture whose dry-run output is asserted exactly ends
 # like this, so none of those fixtures draws a warning that the assertion does
 # not expect.
@@ -85,6 +88,7 @@ async def test_dry_run_valid_file(tmp_path: Path) -> None:
         "   --  ---------  ----\n"
         "    1  PENDING    First task\n"
         "    2  PENDING    Second task\n"
+        f"{SKIPPED_LINE}"
         f"{tasks_file} is valid\n"
     )
 
@@ -175,7 +179,7 @@ async def test_dry_run_lists_effective_action_timeouts(
     got = await _dry_run(tasks_file, action_timeout=override)
 
     assert "NAME\n" in got, "the task table comes first"
-    assert got.endswith(f"Third\n{want}{tasks_file} is valid\n"), (
+    assert got.endswith(f"Third\n{want}{SKIPPED_LINE}{tasks_file} is valid\n"), (
         "action lines sit between the table and the valid line"
     )
 
@@ -230,7 +234,7 @@ async def test_dry_run_lists_a_tasks_own_action_limits_first(
 
     got = await _dry_run(tasks_file, action_timeout=override)
 
-    assert got.endswith(f"Done\n{want}{tasks_file} is valid\n"), (
+    assert got.endswith(f"Done\n{want}{SKIPPED_LINE}{tasks_file} is valid\n"), (
         "a completed task's actions are listed too: the dry run reports the file, not the run"
     )
 
@@ -261,7 +265,7 @@ async def test_dry_run_lists_after_run_actions_after_the_after_task_ones(
         "First\nafter_task: make lint: 10m (default)\n"
         "after_run: git push --dry-run: 1m (action)\n"
         "after_run: echo done: 10m (default)\n"
-        f"{tasks_file} is valid\n"
+        f"{SKIPPED_LINE}{tasks_file} is valid\n"
     )
 
 
@@ -276,18 +280,19 @@ async def test_dry_run_no_actions_prints_no_action_lines(tmp_path: Path) -> None
     # The prefix, not the bare word: the temporary path holds this test's name.
     assert "after_task: " not in got
     assert "after_run: " not in got
-    assert got.endswith(f"First\n{tasks_file} is valid\n")
+    assert got.endswith(f"First\n{SKIPPED_LINE}{tasks_file} is valid\n")
 
 
 async def test_dry_run_names_sandbox_settings(tmp_path: Path) -> None:
     tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    settings = write_file(tmp_path / "sandbox.json", "{}")
 
-    assert await _dry_run(tasks_file, sandbox_file="sandbox.json") == (
+    assert await _dry_run(tasks_file, sandbox_file=settings) == (
         "   ID  STATE      NAME\n"
         "   --  ---------  ----\n"
         "    1  PENDING    First task\n"
         "    2  PENDING    Second task\n"
-        "sandbox settings: sandbox.json\n"
+        f"sandbox settings: {settings}\n"
         f"{tasks_file} is valid\n"
     )
 
@@ -352,7 +357,8 @@ async def test_dry_run_creates_no_log_folder(tmp_path: Path) -> None:
 
 async def test_dry_run_names_a_sandbox_picked_by_name(tmp_path: Path) -> None:
     tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
-    path = str(tmp_path / "sandboxes" / "large.json")
+    (tmp_path / "sandboxes").mkdir()
+    path = write_file(tmp_path / "sandboxes" / "large.json", "{}")
 
     got = await _dry_run(tasks_file, sandbox_file=path, sandbox_name="large")
 
@@ -377,10 +383,11 @@ async def test_dry_run_says_a_missing_shipped_sandbox_is_added_on_a_real_run(
 async def test_dry_run_writes_nothing_at_the_sandbox_path(tmp_path: Path) -> None:
     tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
     path = tmp_path / "sandbox.json"
+    path.write_text("{}", encoding="utf-8")
 
     await _dry_run(tasks_file, sandbox_file=str(path), sandbox_name="large")
 
-    assert not path.exists()
+    assert path.read_text(encoding="utf-8") == "{}"
 
 
 @pytest.mark.parametrize(
@@ -399,3 +406,105 @@ def test_dry_run_fixtures_pass_every_rule(tasks_yaml: str) -> None:
     parsed = parse_tasks(tasks_yaml)
 
     assert check_task_list(parsed, None) == []
+
+
+# No Finish block, so rule 1 warns on task 1.
+NO_FINISH_YAML = (
+    "shared:\n  prompt: shared\n  after_task: []\ntasks:\n"
+    "  - id: 1\n    name: First\n    prompt: |\n"
+    "      Do the first thing.\n\n      Completion criteria:\n      - done\n"
+)
+WRAPPED_BUILD_YAML = (
+    "shared:\n  prompt: shared\n  after_task: []\ntasks:\n"
+    "  - id: 1\n    name: First\n    prompt: |\n"
+    "      Run `./build/build.sh > build.log` to check.\n"
+    f"{PROMPT_ENDING}\n"
+)
+
+
+async def test_warnings_print_before_the_sandbox_line_and_valid(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", NO_FINISH_YAML)
+    settings = write_file(tmp_path / "sandbox.json", "{}")
+
+    got = await _dry_run(tasks_file, sandbox_file=settings)
+
+    assert got.splitlines()[-3:] == [
+        "warning: task 1: finish-block: Completion criteria:",
+        f"sandbox settings: {settings}",
+        f"{tasks_file} is valid",
+    ]
+
+
+async def test_no_sandbox_prints_the_skipped_line(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+
+    got = await _dry_run(tasks_file, sandbox_file="")
+
+    assert got.endswith(f"Second task\n{SKIPPED_LINE}{tasks_file} is valid\n")
+    assert "sandbox settings:" not in got
+
+
+async def test_the_skipped_line_follows_the_warnings(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", NO_FINISH_YAML)
+
+    got = await _dry_run(tasks_file)
+
+    assert got.endswith(
+        "warning: task 1: finish-block: Completion criteria:\n"
+        f"{SKIPPED_LINE}{tasks_file} is valid\n"
+    )
+
+
+async def test_excluded_commands_feed_rule_3(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", WRAPPED_BUILD_YAML)
+    settings = write_file(
+        tmp_path / "sandbox.json",
+        '{"sandbox": {"excludedCommands": ["./build/build.sh"]}}',
+    )
+
+    got = await _dry_run(tasks_file, sandbox_file=settings)
+
+    assert (
+        "warning: task 1: excluded-command-wrapped: ./build/build.sh > build.log\n"
+        in got
+    )
+
+
+async def test_no_sandbox_file_leaves_rule_3_off(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", WRAPPED_BUILD_YAML)
+
+    got = await _dry_run(tasks_file)
+
+    assert "excluded-command-wrapped" not in got
+
+
+@pytest.mark.parametrize(
+    "settings_json",
+    [
+        pytest.param("{}", id="no sandbox key"),
+        pytest.param('{"sandbox": {}}', id="no excludedCommands"),
+        pytest.param('{"sandbox": {"excludedCommands": "*"}}', id="not a list"),
+        pytest.param('{"sandbox": {"excludedCommands": [1, null]}}', id="not strings"),
+    ],
+)
+async def test_a_settings_file_without_excluded_commands_means_none(
+    tmp_path: Path, settings_json: str
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", WRAPPED_BUILD_YAML)
+    settings = write_file(tmp_path / "sandbox.json", settings_json)
+
+    got = await _dry_run(tasks_file, sandbox_file=settings)
+
+    assert "excluded-command-wrapped" not in got
+    assert got.endswith(f"sandbox settings: {settings}\n{tasks_file} is valid\n")
+
+
+async def test_a_clean_file_prints_no_warning(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+    settings = write_file(tmp_path / "sandbox.json", "{}")
+
+    got = await _dry_run(tasks_file, sandbox_file=settings)
+
+    assert "warning:" not in got
