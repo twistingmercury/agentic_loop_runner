@@ -181,12 +181,15 @@ def _note_ignored_folder_sandbox(dir: str) -> None:
 
 
 def _install_skill() -> int:
-    """Install the bundled skill and print where it went."""
+    """Install the bundled skills and print where each went, one per line."""
     try:
-        print(install())
+        paths = install()
     except AlrError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code
+
+    for path in paths:
+        print(path)
 
     return 0
 
@@ -311,7 +314,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--install-skill",
         action="store_true",
-        help="Install the bundled alr-task-file skill into ~/.claude/skills and exit",
+        help="Install the bundled skills into ~/.claude/skills and exit",
     )
     parser.add_argument(
         "-d",

@@ -1,4 +1,4 @@
-"""--install-skill: the bundled skill lands in the user's skills folder."""
+"""--install-skill: every bundled skill lands in the user's skills folder."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -10,15 +10,29 @@ from alr import skillinstall
 from alr.skillinstall import install
 
 
-def test_install_copies_the_skill_under_the_home_folder(tmp_path: Path) -> None:
-    path = install(tmp_path)
+SKILLS = ("alr-task-file", "alr-task-review")
 
-    assert path == tmp_path / ".claude" / "skills" / "alr-task-file"
-    assert (path / "SKILL.md").is_file()
+
+def _skill(home: Path, name: str) -> Path:
+    return home / ".claude" / "skills" / name
+
+
+def test_install_copies_every_skill_under_the_home_folder(tmp_path: Path) -> None:
+    install(tmp_path)
+
+    for name in SKILLS:
+        assert (_skill(tmp_path, name) / "SKILL.md").is_file()
+
+
+def test_install_returns_the_paths_in_sorted_name_order(tmp_path: Path) -> None:
+    paths = install(tmp_path)
+
+    assert paths == [_skill(tmp_path, name) for name in SKILLS]
 
 
 def test_install_replaces_an_existing_copy(tmp_path: Path) -> None:
-    path = install(tmp_path)
+    path = _skill(tmp_path, "alr-task-file")
+    install(tmp_path)
     (path / "SKILL.md").write_text("edited", encoding="utf-8")
     (path / "stale.txt").write_text("old", encoding="utf-8")
 
@@ -50,7 +64,8 @@ def _failing_copy(partial: str) -> Callable[..., None]:
 def test_a_failed_copy_leaves_the_old_skill_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = install(tmp_path)
+    path = _skill(tmp_path, "alr-task-file")
+    install(tmp_path)
     (path / "SKILL.md").write_text("mine", encoding="utf-8")
     monkeypatch.setattr(skillinstall.shutil, "copytree", _failing_copy("part.txt"))
 
@@ -59,7 +74,7 @@ def test_a_failed_copy_leaves_the_old_skill_intact(
 
     assert (path / "SKILL.md").read_text(encoding="utf-8") == "mine"
     assert not (path / "part.txt").exists()
-    assert [entry.name for entry in path.parent.iterdir()] == [path.name]
+    assert sorted(entry.name for entry in path.parent.iterdir()) == list(SKILLS)
 
 
 def test_an_error_without_a_strerror_never_says_none(
@@ -96,3 +111,19 @@ def test_a_plain_file_at_the_target_is_refused_and_kept(tmp_path: Path) -> None:
         install(tmp_path)
 
     assert target.read_text(encoding="utf-8") == "mine"
+
+
+def test_a_symlink_at_the_second_skills_target_stops_after_the_first(
+    tmp_path: Path,
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = _skill(tmp_path, "alr-task-review")
+    link.parent.mkdir(parents=True)
+    link.symlink_to(real)
+
+    with pytest.raises(SkillInstallError, match=f"{link} is a symlink"):
+        install(tmp_path)
+
+    assert (_skill(tmp_path, "alr-task-file") / "SKILL.md").is_file()
+    assert link.is_symlink()

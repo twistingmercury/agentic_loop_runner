@@ -689,7 +689,7 @@ def test_the_view_still_checks_a_given_settings_file(
     assert seen == []
 
 
-def test_install_skill_prints_the_path_and_exits_0(
+def test_install_skill_prints_one_path_per_skill_and_exits_0(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -697,8 +697,9 @@ def test_install_skill_prints_the_path_and_exits_0(
     code = cli.main(["--install-skill"])
 
     assert code == 0
-    assert capsys.readouterr().out.strip() == str(
-        tmp_path / ".claude" / "skills" / "alr-task-file"
+    skills = tmp_path / ".claude" / "skills"
+    assert capsys.readouterr().out == (
+        f"{skills / 'alr-task-file'}\n{skills / 'alr-task-review'}\n"
     )
 
 
