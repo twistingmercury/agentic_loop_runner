@@ -3,7 +3,10 @@
 from pathlib import Path
 
 from e2e_helpers import (
+    CLEAN_ONE_TASK,
+    DRY_RUN_TASKS_YAML,
     ONE_TASK_TABLE,
+    SKIPPED_SANDBOX_LINE,
     VALID_TASKS_YAML,
     run_alr,
     run_args,
@@ -14,10 +17,10 @@ from e2e_helpers import (
 
 
 def test_dry_run_valid_file(tmp_path: Path, fake_claude: Path) -> None:
-    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML)
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML)
 
     assert res.code == 0, res
-    assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
 
 
 def test_dry_run_invalid_file(tmp_path: Path, fake_claude: Path) -> None:
@@ -88,8 +91,7 @@ def test_dry_run_with_reset_failed_is_refused(tmp_path: Path) -> None:
 def test_dry_run_valid_actions_are_not_run(tmp_path: Path, fake_claude: Path) -> None:
     marker = tmp_path / "action-ran"
     tasks_yaml = (
-        shared_block(after_task=[{"action": f"touch '{marker}'"}])
-        + "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+        shared_block(after_task=[{"action": f"touch '{marker}'"}]) + CLEAN_ONE_TASK
     )
 
     res, tasks_path = run_dry_run(tmp_path, tasks_yaml)
@@ -159,7 +161,7 @@ def test_dry_run_refuses_a_dangling_logs_symlink_like_a_real_run(
 def test_dry_run_accepts_a_logs_symlink_to_an_existing_folder(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    tasks_path = write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
     target = tmp_path / "elsewhere"
     target.mkdir()
     (tmp_path / "logs").symlink_to(target)
@@ -167,5 +169,56 @@ def test_dry_run_accepts_a_logs_symlink_to_an_existing_folder(
     res = run_alr("-d", str(tmp_path), "--dry-run")
 
     assert res.code == 0, res
-    assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
     assert list(target.iterdir()) == []
+
+
+def test_dry_run_warns_and_still_ends_valid(tmp_path: Path, fake_claude: Path) -> None:
+    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML)
+
+    lines = res.out.splitlines()
+    warning_lines = [line for line in lines if line.startswith("warning: task 1: ")]
+    assert res.code == 0, res
+    assert any(line.startswith("warning: task 1: finish-block: ") for line in lines)
+    assert lines[-2 - len(warning_lines) : -2] == warning_lines, (
+        "the warnings sit just before the sandbox line"
+    )
+    assert lines[-2] == SKIPPED_SANDBOX_LINE.strip()
+    assert lines[-1] == f"{tasks_path} is valid"
+
+
+def test_dry_run_with_yolo_prints_the_skipped_sandbox_line(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--yolo")
+
+    assert res.code == 0, res
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
+
+
+def test_dry_run_strict_refuses_a_warned_file(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML, "--strict")
+
+    assert res.code == 3, res
+    assert res.err.startswith("error: refused: task-file-warnings: ")
+    assert "warning: task 1: finish-block: " in res.out
+    assert f"{tasks_path} is valid" not in res.out
+
+
+def test_dry_run_strict_passes_a_clean_file(tmp_path: Path, fake_claude: Path) -> None:
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--strict")
+
+    assert res.code == 0, res
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
+
+
+def test_strict_without_dry_run_is_a_usage_error(tmp_path: Path) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr("-d", str(tasks_path.parent), "--strict", "--yolo")
+
+    assert res.code == 2, res
+    assert "error: --strict can only be used with --dry-run\n" in res.err
+    assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML

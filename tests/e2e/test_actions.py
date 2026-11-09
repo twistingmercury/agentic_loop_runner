@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 
 from e2e_helpers import (
+    CLEAN_ENDING,
+    CLEAN_ONE_TASK,
+    SKIPPED_SANDBOX_LINE,
     assert_no_tmp_file,
     expected_stdin,
     fake_claude_records,
@@ -237,13 +240,13 @@ def test_actions_dry_run_lists_effective_timeouts(
             "Body.",
             [{"action": "go test ./...", "timeout": "30s"}, {"action": "make lint"}],
         )
-        + "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+        + CLEAN_ONE_TASK
     )
 
     res, tasks_path = run_dry_run(tmp_path, tasks_yaml, *flags)
 
     assert res.code == 0, res
-    assert f"First task\n{want}{tasks_path} is valid\n" in res.out
+    assert f"First task\n{want}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n" in res.out
 
 
 @pytest.mark.parametrize(
@@ -465,12 +468,14 @@ def test_actions_dry_run_lists_a_tasks_own_limits_first(
 ) -> None:
     tasks_yaml = shared_block(
         "Body.", [{"action": "echo one"}]
-    ) + two_tasks_first_with_actions([{"action": "uv run pytest", "timeout": "15m"}])
+    ) + two_tasks_first_with_actions(
+        [{"action": "uv run pytest", "timeout": "15m"}], CLEAN_ENDING
+    )
 
     res, tasks_path = run_dry_run(tmp_path, tasks_yaml, *flags)
 
     assert res.code == 0, res
-    assert f"{want}{tasks_path} is valid\n" in res.out
+    assert f"{want}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n" in res.out
 
 
 def test_actions_a_tasks_own_actions_survive_the_save(

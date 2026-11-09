@@ -13,7 +13,9 @@ from typing import Any
 import pytest
 
 from e2e_helpers import (
+    DRY_RUN_TASKS_YAML,
     ONE_TASK_TABLE,
+    SKIPPED_SANDBOX_LINE,
     SHARED_PROMPT,
     TWO_TASKS_YAML,
     VALID_TASKS_YAML,
@@ -257,7 +259,7 @@ def test_dry_run_names_sandbox_settings(tmp_path: Path, fake_claude: Path) -> No
     settings = write_sandbox_settings(elsewhere, "{}")
 
     res, tasks_path = run_dry_run(
-        tmp_path, VALID_TASKS_YAML, f"--sandbox-settings={settings}"
+        tmp_path, DRY_RUN_TASKS_YAML, f"--sandbox-settings={settings}"
     )
 
     assert res.code == 0, res
@@ -272,12 +274,15 @@ def sandboxes_folder(home: Path) -> Path:
 
 
 def run_folder(
-    tmp_path: Path, sandbox_json: str, *flags: str
+    tmp_path: Path,
+    sandbox_json: str,
+    *flags: str,
+    tasks_yaml: str = VALID_TASKS_YAML,
 ) -> tuple[SandboxRun, Path]:
     """Run a folder holding tasks.yaml and a sandbox.json, with only --dir to name it."""
     folder = tmp_path / "run"
     folder.mkdir()
-    tasks_path = write_tasks_yaml(folder, VALID_TASKS_YAML)
+    tasks_path = write_tasks_yaml(folder, tasks_yaml)
     write_sandbox_settings(folder, sandbox_json)
     record_file = tmp_path / "record.ndjson"
     res = run_alr(
@@ -454,7 +459,7 @@ def test_a_dry_run_with_the_sandboxes_folder_gone_reads_the_package_and_creates_
     folder = sandboxes_folder(home)
     shutil.rmtree(folder)
 
-    res, _ = run_dry_run(tmp_path, VALID_TASKS_YAML, "--sandbox", "tight")
+    res, _ = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--sandbox", "tight")
 
     assert res.code == 0, res
     assert (
@@ -472,7 +477,7 @@ def test_dry_run_names_a_sandbox_picked_by_name_and_writes_nothing(
     folder = sandboxes_folder(home)
     before = sorted(path.name for path in folder.iterdir())
 
-    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML, "--sandbox", "large")
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--sandbox", "large")
 
     assert res.code == 0, res
     assert res.out == (
@@ -522,11 +527,12 @@ def test_a_named_sandbox_leaves_the_folders_sandbox_json_alone(
 def test_a_dry_run_notices_the_folders_sandbox_json_and_names_no_sandbox(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    run, folder = run_folder(tmp_path, "{}", "--dry-run")
+    run, folder = run_folder(tmp_path, "{}", "--dry-run", tasks_yaml=DRY_RUN_TASKS_YAML)
 
     assert run.res.code == 0, run.res
     assert run.res.out == (
-        f"{folder_notice(folder)}{ONE_TASK_TABLE}{run.tasks_path} is valid\n"
+        f"{folder_notice(folder)}{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}"
+        f"{run.tasks_path} is valid\n"
     )
     assert run.records == [], "claude must not run"
 

@@ -26,6 +26,23 @@ from alr.tui.settings import Permissions, RunSettings
 ONE_TASK_YAML = (
     "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
 )
+# ONE_TASK_YAML, but with a prompt that passes every dry-run rule, for the test
+# that checks the dry run's printed lines.
+CLEAN_ONE_TASK_YAML = """shared:
+  prompt: shared
+  after_task: []
+tasks:
+  - id: 1
+    name: a
+    prompt: |
+      Do it.
+
+      Completion criteria:
+      - it is done
+
+      Finish:
+      Reply in one line.
+"""
 SANDBOXED = [
     "--permission-mode",
     "acceptEdits",
@@ -216,6 +233,8 @@ def test_tasks_flag_is_an_unknown_argument(
 def test_dir_with_only_tasks_yaml_dry_runs(
     flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+
     assert cli.main([flag, str(folder), "--dry-run", "--plain"]) == 0
     assert f"{folder / 'tasks.yaml'} is valid" in capsys.readouterr().out
 
@@ -725,6 +744,39 @@ def test_reset_failed_with_dry_run_is_a_usage_error(
     assert capsys.readouterr().err == (
         "error: --reset-failed cannot be used with --dry-run (a dry run writes nothing)\n"
     )
+
+
+@pytest.mark.parametrize("extra", [[], ["--plain"]], ids=["view", "plain"])
+def test_strict_without_dry_run_is_a_usage_error(
+    folder: Path, capsys: pytest.CaptureFixture[str], extra: list[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--strict", *extra])
+
+    assert code == 2
+    assert capsys.readouterr().err == (
+        "error: --strict can only be used with --dry-run\n"
+    )
+
+
+def test_the_strict_flag_is_in_the_parser() -> None:
+    args = cli._parser().parse_args(["--dry-run", "--strict"])
+
+    assert args.strict is True
+    assert cli._parser().parse_args([]).strict is False
+    assert "With --dry-run, refuse when the checks find a warning" in " ".join(
+        cli._parser().format_help().split()
+    )
+
+
+def test_a_strict_dry_run_with_a_warning_exits_3(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--dry-run", "--strict", "--yolo"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert captured.err.startswith("error: refused: task-file-warnings: ")
+    assert "is valid" not in captured.out
 
 
 @pytest.mark.usefixtures("fake_claude")
