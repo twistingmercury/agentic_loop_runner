@@ -150,8 +150,10 @@ authorized.
    of none.
 6. Put scope, steps, the project's own checks (tests, linters, the build),
    task-specific verification, and completion criteria inside each task's
-   prompt. Preserve project-specific instructions. YAML comments are not
-   durable task instructions: they never reach the session. alr rewrites
+   prompt, and end every task prompt with the template's Finish block: alr puts
+   the task prompt last, so it is the session's last instruction. Preserve
+   project-specific instructions. YAML comments are not durable task
+   instructions: they never reach the session. alr rewrites
    the task file with every state change, so comments and custom formatting
    are not preserved. Every verification command must be one the session can
    run.
@@ -190,8 +192,9 @@ authorized.
    task. When an `after_task` action commits, the `Commits` line tells the session not
    to commit; otherwise keep commits conditional on the project's authorization.
    Keep the `tasks.yaml` rule and the Finish section as written so the file
-   works without this skill installed. Apart from the project's own checks,
-   keep generic rules out of task prompts; they live once, in `shared.prompt`.
+   works without this skill installed. Apart from the project's own checks and
+   each task's closing Finish block, keep generic rules out of task prompts;
+   they live once, in `shared.prompt`.
 8. Validate `tasks.yaml` with `alr -d <run folder> --dry-run` (the run folder
    holds `tasks.yaml`): it applies
    the same rules a real run does and exits non-zero on an invalid file. If
@@ -205,6 +208,8 @@ authorized.
    is in the work tree, so a sandbox settings file kept inside the repository
    needs a `.gitignore` line (or its own path in the `git reset` step). Do not edit
    `.gitignore` yourself unless asked.
+   Also tell the user not to edit `tasks.yaml` while a run is going: alr
+   rewrites it on every state change, and an edit made during a run will be lost.
 
 ## Task scope
 
