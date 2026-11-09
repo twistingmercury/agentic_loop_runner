@@ -2,6 +2,7 @@
 
 from alr.plain.dryrun_checks import (
     COMPLETION_CRITERIA,
+    EXCLUDED_COMMAND_WRAPPED,
     FINISH_BLOCK,
     INLINE_VARIABLE,
     NO_CHECK,
@@ -12,6 +13,8 @@ from alr.plain.dryrun_checks import (
     headings,
 )
 from alr.tasks import COMPLETED, PENDING, Action, Shared, Task, TaskList
+
+EXCLUDED = ["docker *", "./build/build.sh", "./build/build.sh *"]
 
 CLEAN_PROMPT = """Objective:
 Do the thing.
@@ -274,3 +277,74 @@ def test_no_check_comes_last_within_a_task() -> None:
         COMPLETION_CRITERIA,
         NO_CHECK,
     ]
+
+
+def with_span(span: str) -> TaskList:
+    """Three tasks, the third naming the span in a code span."""
+    return task_list(CLEAN_PROMPT, CLEAN_PROMPT, CLEAN_PROMPT + f"Run `{span}`.\n")
+
+
+def test_wrapped_build_command_warns() -> None:
+    span = "./build/build.sh > build.log 2>&1; echo exit=$?"
+
+    findings = check_task_list(with_span(span), EXCLUDED)
+
+    assert findings == [Finding("task 3", EXCLUDED_COMMAND_WRAPPED, span)]
+
+
+def test_lone_excluded_command_is_silent() -> None:
+    prompt = CLEAN_PROMPT + "Run `./build/build.sh` and `docker run x`.\n"
+
+    assert check_task_list(task_list(prompt), EXCLUDED) == []
+
+
+def test_excluded_command_after_an_operator_warns() -> None:
+    for span in ["echo start && ./build/build.sh", "docker run x | tee log"]:
+        findings = check_task_list(with_span(span), EXCLUDED)
+
+        assert findings == [Finding("task 3", EXCLUDED_COMMAND_WRAPPED, span)]
+
+
+def test_operator_spans_alone_are_silent() -> None:
+    tasks = task_list(CLEAN_PROMPT)
+    tasks.shared.prompt = "Use `;`, `&&`, `echo`, and `cd ... &&`."
+
+    assert check_task_list(tasks, EXCLUDED) == []
+
+
+def test_rule_3_reads_the_shared_prompt() -> None:
+    tasks = task_list(CLEAN_PROMPT)
+    tasks.shared.prompt = "Run `./build/build.sh | cat`."
+
+    findings = check_task_list(tasks, EXCLUDED)
+
+    expected = Finding(
+        "shared prompt", EXCLUDED_COMMAND_WRAPPED, "./build/build.sh | cat"
+    )
+    assert findings == [expected]
+
+
+def test_rule_3_skipped_without_a_sandbox() -> None:
+    tasks = with_span("./build/build.sh > build.log 2>&1; echo exit=$?")
+
+    assert check_task_list(tasks, None) == []
+    assert check_task_list(tasks, []) == []
+
+
+def test_completed_task_prompt_is_skipped_by_rule_3() -> None:
+    prompt = CLEAN_PROMPT + "Run `./build/build.sh > build.log`.\n"
+
+    assert check_task_list(task_list(prompt, state=COMPLETED), EXCLUDED) == []
+
+
+def test_every_operator_cuts_a_span_into_parts() -> None:
+    spans = [
+        "./build/build.sh < input",
+        "./build/build.sh; true",
+        "true || ./build/build.sh",
+        "cat $(./build/build.sh -v)",
+    ]
+    for span in spans:
+        findings = check_task_list(with_span(span), EXCLUDED)
+
+        assert findings == [Finding("task 3", EXCLUDED_COMMAND_WRAPPED, span)]

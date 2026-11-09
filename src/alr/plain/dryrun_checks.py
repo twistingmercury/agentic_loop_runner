@@ -1,6 +1,7 @@
 """The dry run's second pass: deterministic warnings about what prompts and commands say."""
 
 import re
+from fnmatch import fnmatchcase
 from dataclasses import dataclass
 
 from alr.tasks import COMPLETED, Action, Task, TaskList
@@ -29,6 +30,12 @@ _FENCED_BLOCK = re.compile(
 
 # Single backticks around text on one line; a lone backtick matches nothing.
 _INLINE_SPAN = re.compile(r"`([^`\n]+)`")
+
+# The shell operators that put a command inside a larger call. Longer ones come
+# first so `||` and `&&` are not read as two single characters.
+_OPERATORS = re.compile(r"\|\||&&|\$\(|[<>|;]")
+
+ECHO_COMMAND = "echo"
 
 # NAME=value followed by a command, the shape of an inline variable.
 _INLINE_VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*\s+\S")
@@ -67,21 +74,25 @@ def check_task_list(
     """Run the rules over a task list, in one fixed order.
 
     excluded_commands is the sandbox file's excludedCommands, or None when there
-    is no sandbox file, which skips the rule that needs it. For now rules 1, 2,
-    4, 5, and 6 run.
+    is no sandbox file, which skips the rule that needs it. An empty list has no
+    entries to match, so it skips the rule too. All six rules run.
 
     The order is fixed so one file always prints the same lines: the shared
     prompt, then each task in file order, then the after_task actions, then the
     after_run actions.
     """
     findings: list[Finding] = []
-    findings.extend(_check_inline_variables("shared prompt", task_list.shared.prompt))
+    shared_prompt = task_list.shared.prompt
+    findings.extend(
+        _check_excluded_commands("shared prompt", shared_prompt, excluded_commands)
+    )
+    findings.extend(_check_inline_variables("shared prompt", shared_prompt))
 
     for task in task_list.tasks:
         if task.state == COMPLETED:
             continue
 
-        findings.extend(_check_task(task_list, task))
+        findings.extend(_check_task(task_list, task, excluded_commands))
 
     after_task = task_list.after_task_list()
     findings.extend(_check_task_file_in_actions("after_task", after_task))
@@ -116,10 +127,13 @@ def _first_line(text: str) -> str:
     return text.split("\n")[0].strip()
 
 
-def _check_task(task_list: TaskList, task: Task) -> list[Finding]:
-    """Every task rule, in rule order: 1, 2, 4, 5, 6."""
+def _check_task(
+    task_list: TaskList, task: Task, excluded_commands: list[str] | None
+) -> list[Finding]:
+    """Every task rule, in rule order: 1, 2, 3, 4, 5, 6."""
     where = f"task {task.id}"
     findings = _check_headings(task)
+    findings.extend(_check_excluded_commands(where, task.prompt, excluded_commands))
     findings.extend(_check_inline_variables(where, task.prompt))
     findings.extend(_check_task_file_in_prompt(where, task.prompt))
     findings.extend(_check_task_file_in_actions(where, task.actions))
@@ -142,6 +156,39 @@ def _check_headings(task: Task) -> list[Finding]:
         findings.append(Finding(where, COMPLETION_CRITERIA, MISSING))
 
     return findings
+
+
+def _check_excluded_commands(
+    where: str, prompt: str, excluded_commands: list[str] | None
+) -> list[Finding]:
+    """Rule 3: a code span wraps a command the sandbox excludes, so the exclusion does not apply."""
+    if not excluded_commands:
+        return []
+
+    findings: list[Finding] = []
+    for span in code_spans(prompt):
+        if _wraps_excluded_command(span, excluded_commands):
+            findings.append(Finding(where, EXCLUDED_COMMAND_WRAPPED, _first_line(span)))
+
+    return findings
+
+
+def _wraps_excluded_command(span: str, excluded_commands: list[str]) -> bool:
+    """True when the span has an operator or an echo, and one part of it is an excluded command."""
+    stripped = (part.strip() for part in _OPERATORS.split(span))
+    parts = [part for part in stripped if part]
+
+    has_operator = _OPERATORS.search(span) is not None
+    has_echo = any(part.split()[0] == ECHO_COMMAND for part in parts)
+    if not has_operator and not has_echo:
+        return False
+
+    for part in parts:
+        for entry in excluded_commands:
+            if fnmatchcase(part, entry):
+                return True
+
+    return False
 
 
 def _check_inline_variables(where: str, prompt: str) -> list[Finding]:
