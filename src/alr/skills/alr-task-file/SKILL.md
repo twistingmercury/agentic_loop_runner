@@ -202,8 +202,14 @@ authorized.
    by hand. Also check paths, runnable verification commands, safe cleanup
    instructions, and preservation of project policies, and confirm no
    `GENERATE_*` token remains in the file.
-9. Report the output path and the checks performed. Do not launch the loop
-   merely to validate generated files.
+9. Review the file with the `alr-task-review` skill, in a fresh agent that did
+   not write it when you can start one, using the sandbox file the run will use
+   (ask the user which one when you do not know). If that skill is not
+   installed, tell the user to run `alr --install-skill` and go on. Put the
+   findings in your report and change nothing because of them until the user
+   says so.
+10. Report the output path, the checks performed, and the review's findings or
+   `NO FINDINGS`. Do not launch the loop merely to validate generated files.
    When an action commits, also tell the user that the commit takes whatever
    is in the work tree, so a sandbox settings file kept inside the repository
    needs a `.gitignore` line (or its own path in the `git reset` step). Do not edit
