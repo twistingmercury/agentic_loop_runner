@@ -9,18 +9,39 @@ from helpers import write_file
 
 from alr.errors import FailedTasksError, RefusedError
 from alr.plain.dryrun import dry_run
+from alr.plain.dryrun_checks import check_task_list
+from alr.tasks import parse_tasks
 
-VALID_TASKS_YAML = """shared:
-  prompt: shared
-tasks:
-  - id: 1
-    name: First task
-    prompt: Do the first thing.
-  - id: 2
-    name: Second task
-    prompt: Do the second thing.
-"""
-ACTIONS_YAML = """shared:
+# Every task prompt in a fixture whose dry-run output is asserted exactly ends
+# like this, so none of those fixtures draws a warning that the assertion does
+# not expect.
+PROMPT_ENDING = """
+
+      Completion criteria:
+      - it is done
+
+      Finish:
+      Reply in one line."""
+
+
+def _task(task_id: int, name: str, request: str, extra: str = "") -> str:
+    """One task entry, with a prompt that passes every dry-run rule."""
+    return (
+        f"  - id: {task_id}\n"
+        f"    name: {name}\n"
+        f"    prompt: |\n"
+        f"      {request}{PROMPT_ENDING}\n"
+        f"{extra}"
+    )
+
+
+VALID_TASKS_YAML = (
+    "shared:\n  prompt: shared\n  after_task: []\ntasks:\n"
+    + _task(1, "First task", "Do the first thing.")
+    + _task(2, "Second task", "Do the second thing.")
+)
+ACTIONS_YAML = (
+    """shared:
   prompt: shared
   after_task:
     - action: go test ./...
@@ -30,16 +51,11 @@ ACTIONS_YAML = """shared:
         echo two
     - action: make lint
 tasks:
-  - id: 1
-    name: First
-    prompt: p
-  - id: 2
-    name: Second
-    prompt: p
-  - id: 3
-    name: Third
-    prompt: p
 """
+    + _task(1, "First", "Do the first thing.")
+    + _task(2, "Second", "Do the second thing.")
+    + _task(3, "Third", "Do the third thing.")
+)
 
 
 async def _dry_run(
@@ -164,24 +180,28 @@ async def test_dry_run_lists_effective_action_timeouts(
     )
 
 
-TASK_ACTIONS_YAML = """shared:
+TASK_ACTIONS_YAML = (
+    """shared:
   prompt: shared
   after_task:
     - action: echo one
 tasks:
-  - id: 1
-    name: First
-    prompt: p
-    actions:
-      - action: uv run pytest
-        timeout: 15m
-  - id: 2
+"""
+    + _task(
+        1,
+        "First",
+        "Do the first thing.",
+        extra="    actions:\n      - action: uv run pytest\n        timeout: 15m\n",
+    )
+    # A completed task's prompt is skipped by every rule, so "p" stays clean.
+    + """  - id: 2
     name: Done
     prompt: p
     state: completed
     actions:
       - action: markdownlint README.md
 """
+)
 
 
 @pytest.mark.parametrize(
@@ -215,15 +235,24 @@ async def test_dry_run_lists_a_tasks_own_action_limits_first(
     )
 
 
+AFTER_RUN_YAML = (
+    "shared:\n  prompt: shared\n  after_task:\n    - action: make lint\n"
+    "  after_run:\n    - action: git push --dry-run\n      timeout: 1m\n"
+    "    - action: echo done\n"
+    "tasks:\n" + _task(1, "First", "Do the first thing.")
+)
+# An explicit empty after_task says the missing check is meant.
+NO_ACTIONS_YAML = "shared:\n  prompt: shared\n  after_task: []\ntasks:\n" + _task(
+    1, "First", "Do the first thing."
+)
+
+
 async def test_dry_run_lists_after_run_actions_after_the_after_task_ones(
     tmp_path: Path,
 ) -> None:
     tasks_file = write_file(
         tmp_path / "tasks.yaml",
-        "shared:\n  prompt: shared\n  after_task:\n    - action: make lint\n"
-        "  after_run:\n    - action: git push --dry-run\n      timeout: 1m\n"
-        "    - action: echo done\n"
-        "tasks:\n  - {id: 1, name: First, prompt: p}\n",
+        AFTER_RUN_YAML,
     )
 
     got = await _dry_run(tasks_file)
@@ -239,7 +268,7 @@ async def test_dry_run_lists_after_run_actions_after_the_after_task_ones(
 async def test_dry_run_no_actions_prints_no_action_lines(tmp_path: Path) -> None:
     tasks_file = write_file(
         tmp_path / "tasks.yaml",
-        "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: First, prompt: p}\n",
+        NO_ACTIONS_YAML,
     )
 
     got = await _dry_run(tasks_file, action_timeout="2m")
@@ -352,3 +381,21 @@ async def test_dry_run_writes_nothing_at_the_sandbox_path(tmp_path: Path) -> Non
     await _dry_run(tasks_file, sandbox_file=str(path), sandbox_name="large")
 
     assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "tasks_yaml",
+    [
+        pytest.param(VALID_TASKS_YAML, id="valid"),
+        pytest.param(ACTIONS_YAML, id="shared actions"),
+        pytest.param(TASK_ACTIONS_YAML, id="a task's own actions"),
+        pytest.param(AFTER_RUN_YAML, id="after_run"),
+        pytest.param(NO_ACTIONS_YAML, id="no actions"),
+    ],
+)
+def test_dry_run_fixtures_pass_every_rule(tasks_yaml: str) -> None:
+    # The tests above pin the dry run's exact output, so their fixtures must not
+    # draw a warning the assertions do not expect.
+    parsed = parse_tasks(tasks_yaml)
+
+    assert check_task_list(parsed, None) == []

@@ -3,6 +3,8 @@
 from pathlib import Path
 
 from e2e_helpers import (
+    CLEAN_ONE_TASK,
+    DRY_RUN_TASKS_YAML,
     ONE_TASK_TABLE,
     VALID_TASKS_YAML,
     run_alr,
@@ -14,7 +16,7 @@ from e2e_helpers import (
 
 
 def test_dry_run_valid_file(tmp_path: Path, fake_claude: Path) -> None:
-    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML)
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML)
 
     assert res.code == 0, res
     assert res.out == f"{ONE_TASK_TABLE}{tasks_path} is valid\n"
@@ -88,8 +90,7 @@ def test_dry_run_with_reset_failed_is_refused(tmp_path: Path) -> None:
 def test_dry_run_valid_actions_are_not_run(tmp_path: Path, fake_claude: Path) -> None:
     marker = tmp_path / "action-ran"
     tasks_yaml = (
-        shared_block(after_task=[{"action": f"touch '{marker}'"}])
-        + "tasks:\n  - id: 1\n    name: First task\n    prompt: p\n"
+        shared_block(after_task=[{"action": f"touch '{marker}'"}]) + CLEAN_ONE_TASK
     )
 
     res, tasks_path = run_dry_run(tmp_path, tasks_yaml)
@@ -159,7 +160,7 @@ def test_dry_run_refuses_a_dangling_logs_symlink_like_a_real_run(
 def test_dry_run_accepts_a_logs_symlink_to_an_existing_folder(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+    tasks_path = write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
     target = tmp_path / "elsewhere"
     target.mkdir()
     (tmp_path / "logs").symlink_to(target)

@@ -26,6 +26,23 @@ from alr.tui.settings import Permissions, RunSettings
 ONE_TASK_YAML = (
     "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
 )
+# ONE_TASK_YAML, but with a prompt that passes every dry-run rule, for the test
+# that checks the dry run's printed lines.
+CLEAN_ONE_TASK_YAML = """shared:
+  prompt: shared
+  after_task: []
+tasks:
+  - id: 1
+    name: a
+    prompt: |
+      Do it.
+
+      Completion criteria:
+      - it is done
+
+      Finish:
+      Reply in one line.
+"""
 SANDBOXED = [
     "--permission-mode",
     "acceptEdits",
@@ -216,6 +233,8 @@ def test_tasks_flag_is_an_unknown_argument(
 def test_dir_with_only_tasks_yaml_dry_runs(
     flag: str, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+
     assert cli.main([flag, str(folder), "--dry-run", "--plain"]) == 0
     assert f"{folder / 'tasks.yaml'} is valid" in capsys.readouterr().out
 

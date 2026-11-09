@@ -39,6 +39,10 @@ TWO_TASKS = """tasks:
     prompt: Do the second thing.
 """
 
+# What a task prompt ends with to pass every dry-run rule. The tests that pin
+# the dry run's exact output use it, so their fixtures draw no warning.
+CLEAN_ENDING = "\n\nCompletion criteria:\n- It is done.\n\nFinish:\nReply in one line."
+
 ONE_TASK_TABLE = (
     "   ID  STATE      NAME\n   --  ---------  ----\n    1  PENDING    First task\n"
 )
@@ -161,15 +165,24 @@ def shared_block(
     return yaml.safe_dump({"shared": shared}, sort_keys=False)
 
 
-def two_tasks_first_with_actions(actions: list[dict[str, str]]) -> str:
-    """The two tasks of TWO_TASKS, with actions on task 1 only; put it after a shared block."""
+def two_tasks_first_with_actions(
+    actions: list[dict[str, str]], prompt_ending: str = ""
+) -> str:
+    """The two tasks of TWO_TASKS, with actions on task 1 only; put it after a shared block.
+
+    prompt_ending is added to both prompts; CLEAN_ENDING makes them pass the dry run's rules.
+    """
     first = {
         "id": 1,
         "name": "First task",
-        "prompt": "Do the first thing.",
+        "prompt": "Do the first thing." + prompt_ending,
         "actions": actions,
     }
-    second = {"id": 2, "name": "Second task", "prompt": "Do the second thing."}
+    second = {
+        "id": 2,
+        "name": "Second task",
+        "prompt": "Do the second thing." + prompt_ending,
+    }
     return yaml.safe_dump({"tasks": [first, second]}, sort_keys=False)
 
 
@@ -179,6 +192,18 @@ def run_args(tasks_path: Path) -> list[str]:
 
 
 VALID_TASKS_YAML = shared_block() + ONE_TASK
+# One task whose prompt passes every dry-run rule, for the tests that pin the
+# dry run's exact output. Its explicit empty after_task says the missing check
+# is meant.
+CLEAN_ONE_TASK = yaml.safe_dump(
+    {
+        "tasks": [
+            {"id": 1, "name": "First task", "prompt": "Do the thing." + CLEAN_ENDING}
+        ]
+    },
+    sort_keys=False,
+)
+DRY_RUN_TASKS_YAML = shared_block(after_task=[]) + CLEAN_ONE_TASK
 TWO_TASKS_YAML = shared_block() + TWO_TASKS
 
 

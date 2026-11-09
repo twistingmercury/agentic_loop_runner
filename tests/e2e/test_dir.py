@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from e2e_helpers import (
+    DRY_RUN_TASKS_YAML,
     expected_stdin,
     fake_claude_records,
     read_tasks_yaml,
@@ -68,7 +69,7 @@ def test_dir_missing_tasks_file(tmp_path: Path, fake_claude: Path) -> None:
 
 def test_dir_dry_run(tmp_path: Path, fake_claude: Path) -> None:
     folder = run_folder(tmp_path)
-    tasks_path = write_tasks_yaml(folder, DIR_TASKS_YAML)
+    tasks_path = write_tasks_yaml(folder, DRY_RUN_TASKS_YAML)
 
     res = run_alr("--dry-run", "-d", str(folder))
 
