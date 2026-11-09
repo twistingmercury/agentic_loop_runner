@@ -7,7 +7,12 @@ from typing import TextIO
 from alr.engine.actions import first_line, action_limit
 from alr.engine.loop import read_tasks
 from alr.engine.sandbox import parse_settings
-from alr.errors import INVALID_TASK_FILE, RefusedError, TaskFileError
+from alr.errors import (
+    INVALID_TASK_FILE,
+    TASK_FILE_WARNINGS,
+    RefusedError,
+    TaskFileError,
+)
 from alr.plain.dryrun_checks import check_task_list
 from alr.plain.report import print_tasks, refuse_failed_report
 from alr.record.runlog import check_writable, run_dir
@@ -22,11 +27,13 @@ async def dry_run(
     sandbox_file: str,
     sandbox_name: str = "",
     added_on_real_run: bool = False,
+    strict: bool = False,
 ) -> None:
     """Apply the checks a real run starts with, in its order, and write what it would run under.
 
     sandbox_name is the sandbox picked by name, and added_on_real_run says its
-    file is a shipped one that a real run would add first.
+    file is a shipped one that a real run would add first. With strict, a
+    warning refuses the dry run after everything is printed.
     """
     task_list = _read_for_dry_run(tasks_file)
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
@@ -34,8 +41,12 @@ async def dry_run(
     check_writable(path)
     print_tasks(out, task_list)
     _print_action_limits(out, task_list, action_timeout)
-    _print_warnings(out, task_list, sandbox_file)
+    warning_count = _print_warnings(out, task_list, sandbox_file)
     _print_sandbox(out, sandbox_file, sandbox_name, added_on_real_run)
+    if strict and warning_count:
+        noun = "warning" if warning_count == 1 else "warnings"
+        raise RefusedError(TASK_FILE_WARNINGS, f"{warning_count} {noun}")
+
     out.write(f"{tasks_file} is valid\n")
 
 
@@ -63,11 +74,14 @@ def _print_sandbox(
     out.write(f"sandbox settings: {sandbox_file}\n")
 
 
-def _print_warnings(out: TextIO, task_list: TaskList, sandbox_file: str) -> None:
-    """Write one line per problem the rules find in the prompts and commands."""
+def _print_warnings(out: TextIO, task_list: TaskList, sandbox_file: str) -> int:
+    """Write one line per problem the rules find in the prompts and commands, and return how many."""
     excluded_commands = _excluded_commands(sandbox_file)
-    for finding in check_task_list(task_list, excluded_commands):
+    findings = check_task_list(task_list, excluded_commands)
+    for finding in findings:
         out.write(f"{finding.line()}\n")
+
+    return len(findings)
 
 
 def _excluded_commands(sandbox_file: str) -> list[str] | None:

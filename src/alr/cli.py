@@ -120,6 +120,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             check_action_timeout(args.action_timeout)
 
         check_reset_flag(args.reset_failed, args.dry_run)
+        check_strict_flag(args.strict, args.dry_run)
         if wants_tui(args):
             return _open_view(args, tasks_file, answer)
 
@@ -144,6 +145,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
                 answer.sandbox_file,
                 answer.sandbox_name,
                 _added_on_real_run(answer, args.dry_run),
+                args.strict,
             ),
             stop,
         )
@@ -328,6 +330,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate the tasks file and report failed tasks without running anything",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="With --dry-run, refuse when the checks find a warning",
+    )
     # Hidden: only here to refuse the old name with a message naming the new one.
     parser.add_argument(
         "--gate-timeout", default=None, help=argparse.SUPPRESS, metavar=""
@@ -442,6 +449,12 @@ def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:
         raise UsageError(
             "--reset-failed cannot be used with --dry-run (a dry run writes nothing)"
         )
+
+
+def check_strict_flag(strict: bool, dry_run: bool) -> None:
+    """Refuse --strict without --dry-run: a real run runs no warning rule."""
+    if strict and not dry_run:
+        raise UsageError("--strict can only be used with --dry-run")
 
 
 def session_args(answer: Answer, dry_run: bool) -> list[str]:

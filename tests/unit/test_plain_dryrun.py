@@ -67,6 +67,7 @@ async def _dry_run(
     sandbox_file: str = "",
     sandbox_name: str = "",
     added_on_real_run: bool = False,
+    strict: bool = False,
 ) -> str:
     out = io.StringIO()
     await dry_run(
@@ -76,6 +77,7 @@ async def _dry_run(
         sandbox_file,
         sandbox_name,
         added_on_real_run,
+        strict,
     )
     return out.getvalue()
 
@@ -508,3 +510,63 @@ async def test_a_clean_file_prints_no_warning(tmp_path: Path) -> None:
     got = await _dry_run(tasks_file, sandbox_file=settings)
 
     assert "warning:" not in got
+
+
+# Two tasks with no Finish block, so rule 1 warns twice.
+TWO_WARNINGS_YAML = NO_FINISH_YAML + (
+    "  - id: 2\n    name: Second\n    prompt: |\n"
+    "      Do the second thing.\n\n      Completion criteria:\n      - done\n"
+)
+
+
+async def test_strict_with_warnings_refuses(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", TWO_WARNINGS_YAML)
+    out = io.StringIO()
+
+    with pytest.raises(RefusedError) as raised:
+        await dry_run(out, tasks_file, "", "", strict=True)
+
+    assert raised.value.reason == "task-file-warnings"
+    assert raised.value.message == "2 warnings"
+    assert out.getvalue().count("warning: task ") == 2
+    assert "is valid" not in out.getvalue()
+
+
+async def test_strict_with_one_warning_says_warning(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", NO_FINISH_YAML)
+
+    with pytest.raises(RefusedError) as raised:
+        await _dry_run(tasks_file, strict=True)
+
+    assert raised.value.reason == "task-file-warnings"
+    assert raised.value.message == "1 warning"
+
+
+async def test_strict_prints_the_sandbox_line_before_it_refuses(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", NO_FINISH_YAML)
+    out = io.StringIO()
+
+    with pytest.raises(RefusedError):
+        await dry_run(out, tasks_file, "", "", strict=True)
+
+    assert out.getvalue().endswith(
+        f"warning: task 1: finish-block: Completion criteria:\n{SKIPPED_LINE}"
+    )
+
+
+async def test_strict_clean_file_passes(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+
+    got = await _dry_run(tasks_file, strict=True)
+
+    assert got.endswith(f"{tasks_file} is valid\n")
+
+
+async def test_warnings_without_strict_still_pass(tmp_path: Path) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", TWO_WARNINGS_YAML)
+
+    got = await _dry_run(tasks_file)
+
+    assert got.endswith(f"{tasks_file} is valid\n")

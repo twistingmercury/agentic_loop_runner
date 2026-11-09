@@ -194,3 +194,31 @@ def test_dry_run_with_yolo_prints_the_skipped_sandbox_line(
 
     assert res.code == 0, res
     assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
+
+
+def test_dry_run_strict_refuses_a_warned_file(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    res, tasks_path = run_dry_run(tmp_path, VALID_TASKS_YAML, "--strict")
+
+    assert res.code == 3, res
+    assert res.err.startswith("error: refused: task-file-warnings: ")
+    assert "warning: task 1: finish-block: " in res.out
+    assert f"{tasks_path} is valid" not in res.out
+
+
+def test_dry_run_strict_passes_a_clean_file(tmp_path: Path, fake_claude: Path) -> None:
+    res, tasks_path = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--strict")
+
+    assert res.code == 0, res
+    assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
+
+
+def test_strict_without_dry_run_is_a_usage_error(tmp_path: Path) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
+
+    res = run_alr("-d", str(tasks_path.parent), "--strict", "--yolo")
+
+    assert res.code == 2, res
+    assert "error: --strict can only be used with --dry-run\n" in res.err
+    assert tasks_path.read_text(encoding="utf-8") == VALID_TASKS_YAML

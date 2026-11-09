@@ -746,6 +746,39 @@ def test_reset_failed_with_dry_run_is_a_usage_error(
     )
 
 
+@pytest.mark.parametrize("extra", [[], ["--plain"]], ids=["view", "plain"])
+def test_strict_without_dry_run_is_a_usage_error(
+    folder: Path, capsys: pytest.CaptureFixture[str], extra: list[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--strict", *extra])
+
+    assert code == 2
+    assert capsys.readouterr().err == (
+        "error: --strict can only be used with --dry-run\n"
+    )
+
+
+def test_the_strict_flag_is_in_the_parser() -> None:
+    args = cli._parser().parse_args(["--dry-run", "--strict"])
+
+    assert args.strict is True
+    assert cli._parser().parse_args([]).strict is False
+    assert "With --dry-run, refuse when the checks find a warning" in " ".join(
+        cli._parser().format_help().split()
+    )
+
+
+def test_a_strict_dry_run_with_a_warning_exits_3(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--dry-run", "--strict", "--yolo"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert captured.err.startswith("error: refused: task-file-warnings: ")
+    assert "is valid" not in captured.out
+
+
 @pytest.mark.usefixtures("fake_claude")
 def test_a_plain_run_with_reset_failed_runs_a_failed_task(
     folder: Path, capsys: pytest.CaptureFixture[str]

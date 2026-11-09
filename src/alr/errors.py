@@ -20,6 +20,7 @@ INVALID_TASK_FILE = "invalid-task-file"
 INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"
 LOG_UNWRITABLE = "log-unwritable"
 TASK_FILE_UNWRITABLE = "task-file-unwritable"
+TASK_FILE_WARNINGS = "task-file-warnings"
 
 
 def quote(text: str) -> str:
