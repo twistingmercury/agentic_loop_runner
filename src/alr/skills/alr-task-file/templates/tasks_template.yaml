@@ -70,6 +70,11 @@ tasks:
 
       Completion criteria:
       - GENERATE_CONCRETE_DELIVERED_BEHAVIOR_AND_RELEVANT_ACCEPTANCE_CHECKS
+
+      Finish:
+      Reply in at most 10 lines. If the task asks you to report something, give
+      it one line. The last line is the result line from the shared Finish
+      section, on its own line.
     # Optional: checks only this task needs. They run before shared.after_task.
     # Never put a commit here. Delete the key if the task needs none.
     actions:
