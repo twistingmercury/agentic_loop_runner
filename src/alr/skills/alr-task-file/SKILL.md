@@ -196,20 +196,23 @@ authorized.
    works without this skill installed. Apart from the project's own checks and
    each task's closing Finish block, keep generic rules out of task prompts;
    they live once, in `shared.prompt`.
-8. Validate `tasks.yaml` with `alr -d <run folder> --dry-run` (the run folder
-   holds `tasks.yaml`): it applies
-   the same rules a real run does and exits non-zero on an invalid file. If
-   `alr` is not installed, check YAML syntax and the field rules in step 5
-   by hand. Also check paths, runnable verification commands, safe cleanup
+8. Validate `tasks.yaml` with `alr -d <run folder> --validate` (the run folder
+   holds `tasks.yaml`), adding the sandbox flag the run will use (ask the user
+   which one when you do not know). It applies the same rules a real run does
+   and exits non-zero on an invalid file. When the file has no warnings, it
+   then starts a fresh Claude Code session that reads the file with the
+   `alr-task-review` skill and prints its findings, or `NO FINDINGS`. Run it as
+   an ordinary Bash call with the longest timeout (10 minutes). Put what it
+   prints in your report and change nothing because of the findings until the
+   user says so. Report any `error: review:` line as it is, with no fallback.
+   If this `alr` does not know `--validate` (exit 2, `unrecognized
+   arguments`), run `--dry-run` instead, say in your report that the review did
+   not run, and tell the user to run `alr --validate` themselves. If `alr` is
+   not installed, check YAML syntax and the field rules in step 5 by hand.
+   Also check paths, runnable verification commands, safe cleanup
    instructions, and preservation of project policies, and confirm no
    `GENERATE_*` token remains in the file.
-9. Review the file with the `alr-task-review` skill, in a fresh agent that did
-   not write it when you can start one, using the sandbox file the run will use
-   (ask the user which one when you do not know). If that skill is not
-   installed, tell the user to upgrade alr and run it once, and go on. Put the
-   findings in your report and change nothing because of them until the user
-   says so.
-10. Report the output path, the checks performed, and the review's findings or
+9. Report the output path, the checks performed, and the review's findings or
    `NO FINDINGS`. Do not launch the loop merely to validate generated files.
    When an action commits, also tell the user that the commit takes whatever
    is in the work tree, so a sandbox settings file kept inside the repository
