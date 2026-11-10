@@ -7,8 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-10
+
+### Added
+
+- `--dry-run` now reads the prompts and commands too and prints a warning for
+  each problem it finds (ADR-034): a task prompt that does not end on a
+  `Finish:` block (`finish-block`), one with no `Completion criteria:`
+  (`completion-criteria`), an excluded command wrapped in another command
+  (`excluded-command-wrapped`), a command that sets a variable inline
+  (`inline-variable`), a prompt or command that names `tasks.yaml`
+  (`task-file-mentioned`), and a task with no check at all (`no-check`). When
+  there is no sandbox file it prints `sandbox rules skipped: no sandbox
+  settings file`. A real run is unchanged.
+- `--strict` (only with `--dry-run`) turns any of those warnings into a
+  refusal: exit 3, reason `task-file-warnings`.
+- A second bundled skill, `alr-task-review` (ADR-033). A fresh reviewer reads a
+  task file and reports problems with order, size, the sandbox, runs that would
+  pass without doing the work, completion criteria, and the shared rules,
+  one line each. The `alr-task-file` skill runs it before its final report and changes
+  nothing because of what it finds.
+
 ### Changed
 
+- The `alr-task-file` skill ends every task prompt with a `Finish:` block that
+  names the result line, so a session is less likely to drop it (#51).
 - alr keeps its two bundled skills (`alr-task-file` and `alr-task-review`) in
   sync (ADR-035). At every start it copies them into the skills folder
   (`$CLAUDE_CONFIG_DIR/skills` when that is set, else `~/.claude/skills`) and
