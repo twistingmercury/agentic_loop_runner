@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- alr keeps its two bundled skills (`alr-task-file` and `alr-task-review`) in
+  sync (ADR-035). At every start it copies them into the skills folder
+  (`$CLAUDE_CONFIG_DIR/skills` when that is set, else `~/.claude/skills`) and
+  prints `Added <path>` or `Updated <path>` for each one it writes.
+  `--dry-run` reports what it would do and writes nothing. A symlink or file
+  sitting at one of those two names is replaced, with a warning. If the sync
+  fails, alr warns and the run goes on.
+- Breaking: `--install-skill` is gone. The sync at start replaces it.
+
 ## [0.5.0] - 2026-11-04
 
 ### Changed
