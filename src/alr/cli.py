@@ -37,7 +37,7 @@ from alr.sandboxes import (
     names_text,
     read_text,
 )
-from alr.skillinstall import SkillChange, install, pending, sync
+from alr.skillinstall import SkillChange, pending, sync
 from alr.tasks import parse_timeout
 from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
@@ -92,9 +92,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.version:
         print(_version_line())
         return 0
-
-    if args.install_skill:
-        return _install_skill()
 
     try:
         # Before anything else a real run does, so no later refusal hides the question.
@@ -213,20 +210,6 @@ def _note_ignored_folder_sandbox(dir: str) -> None:
         print(f"{path} is no longer read; pick a sandbox with --sandbox <name>")
 
 
-def _install_skill() -> int:
-    """Install the bundled skills and print where each went, one per line."""
-    try:
-        paths = install()
-    except AlrError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return exc.exit_code
-
-    for path in paths:
-        print(path)
-
-    return 0
-
-
 def _handle_missing_config_folder(dry_run: bool) -> int:
     """Offer the setup on a real run at a terminal, and refuse everywhere else.
 
@@ -343,11 +326,6 @@ def _parser() -> argparse.ArgumentParser:
         "--version",
         action="store_true",
         help="Show the current version of alr",
-    )
-    parser.add_argument(
-        "--install-skill",
-        action="store_true",
-        help="Install the bundled skills into ~/.claude/skills and exit",
     )
     parser.add_argument(
         "-d",

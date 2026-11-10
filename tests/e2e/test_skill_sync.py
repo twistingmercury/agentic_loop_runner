@@ -121,3 +121,10 @@ def test_a_dry_run_reports_and_writes_nothing(tmp_path: Path, home: Path) -> Non
         )
     )
     assert not (home / ".claude").exists()
+
+
+def test_install_skill_is_rejected(home: Path) -> None:
+    res = run_alr("--install-skill")
+
+    assert res.code == 2, res
+    assert "unrecognized arguments: --install-skill" in res.err

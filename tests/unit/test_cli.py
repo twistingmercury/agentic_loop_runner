@@ -709,30 +709,11 @@ def test_the_view_still_checks_a_given_settings_file(
     assert seen == []
 
 
-def test_install_skill_prints_one_path_per_skill_and_exits_0(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_install_skill_is_an_unknown_flag() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--install-skill"])
 
-    code = cli.main(["--install-skill"])
-
-    assert code == 0
-    skills = tmp_path / ".claude" / "skills"
-    assert capsys.readouterr().out == (
-        f"{skills / 'alr-task-file'}\n{skills / 'alr-task-review'}\n"
-    )
-
-
-def test_install_skill_reports_a_folder_it_cannot_write(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    (tmp_path / ".claude").write_text("a file, not a folder", encoding="utf-8")
-
-    code = cli.main(["--install-skill"])
-
-    assert code == 1
-    assert capsys.readouterr().err.startswith("error: ")
+    assert exit_info.value.code == 2
 
 
 def _empty_skills_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -1683,16 +1664,14 @@ def test_dry_run_refuses_a_missing_config_folder_without_asking_or_creating(
     assert not (fresh_home / ".local").exists()
 
 
-@pytest.mark.parametrize("flag", ["--version", "--install-skill"])
-def test_version_and_install_skill_neither_ask_nor_create(
-    flag: str,
+def test_version_neither_asks_nor_creates(
     fresh_home: Path,
     terminal: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _fail_if_asked(monkeypatch)
 
-    cli.main([flag])
+    cli.main(["--version"])
 
     assert not (fresh_home / ".local").exists()
 
