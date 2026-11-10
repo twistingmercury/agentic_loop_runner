@@ -570,3 +570,32 @@ async def test_warnings_without_strict_still_pass(tmp_path: Path) -> None:
     got = await _dry_run(tasks_file)
 
     assert got.endswith(f"{tasks_file} is valid\n")
+
+
+@pytest.mark.parametrize("strict", [False, True], ids=["lenient", "strict"])
+async def test_dry_run_returns_the_warning_count_zero_for_a_clean_file(
+    tmp_path: Path, strict: bool
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", VALID_TASKS_YAML)
+
+    count = await dry_run(io.StringIO(), tasks_file, "", "", strict=strict)
+
+    assert count == 0
+
+
+@pytest.mark.parametrize(
+    ("tasks_yaml", "want"),
+    [(NO_FINISH_YAML, 1), (TWO_WARNINGS_YAML, 2)],
+    ids=["one", "two"],
+)
+async def test_dry_run_returns_the_warning_count(
+    tmp_path: Path, tasks_yaml: str, want: int
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", tasks_yaml)
+    out = io.StringIO()
+
+    count = await dry_run(out, tasks_file, "", "")
+
+    # The count is the number of warning lines the dry run printed.
+    assert count == want
+    assert out.getvalue().count("warning: task ") == want

@@ -28,12 +28,14 @@ async def dry_run(
     sandbox_name: str = "",
     added_on_real_run: bool = False,
     strict: bool = False,
-) -> None:
+) -> int:
     """Apply the checks a real run starts with, in its order, and write what it would run under.
 
     sandbox_name is the sandbox picked by name, and added_on_real_run says its
     file is a shipped one that a real run would add first. With strict, a
-    warning refuses the dry run after everything is printed.
+    warning refuses the dry run after everything is printed. Returns how many
+    warnings it printed, 0 for a clean file, so --validate knows whether the
+    review is worth its tokens.
     """
     task_list = _read_for_dry_run(tasks_file)
     path = run_dir(Path(tasks_file).parent / "logs", datetime.now().astimezone())
@@ -48,6 +50,7 @@ async def dry_run(
         raise RefusedError(TASK_FILE_WARNINGS, f"{warning_count} {noun}")
 
     out.write(f"{tasks_file} is valid\n")
+    return warning_count
 
 
 def _print_sandbox(

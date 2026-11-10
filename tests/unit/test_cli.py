@@ -2140,3 +2140,213 @@ def test_the_sandbox_flag_is_documented_in_the_help() -> None:
 
     assert "--sandbox <name>" in help_text
     assert "the named file from ~/.local/alr/sandboxes/" in help_text
+
+
+REVIEW_SKIPPED = "review skipped: the dry run found problems; fix them and run again\n"
+FINDINGS = "task=1 | size | too big | five files\n"
+
+
+@pytest.fixture
+def clean_folder(folder: Path) -> Path:
+    """A run folder whose task file draws no dry-run warning, so --validate reviews it."""
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+    return folder
+
+
+def _review_logs(folder: Path) -> list[Path]:
+    """The review logs in the run folder; none when the logs folder was never made."""
+    return sorted((folder / "logs").glob("review-*.log"))
+
+
+def test_validate_prints_the_dry_run_then_the_review(
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", FINDINGS)
+    tasks_file = clean_folder / "tasks.yaml"
+
+    code = cli.main(["-d", str(clean_folder), "--validate"])
+
+    out = capsys.readouterr().out
+    [log] = _review_logs(clean_folder)
+    assert code == 0
+    assert out.endswith(
+        f"{tasks_file} is valid\n"
+        f"review: asking Claude to read {tasks_file} (this uses tokens)\n"
+        f"{FINDINGS}"
+        f"review log: {log}\n"
+    )
+    assert out.startswith("   ID  STATE      NAME\n")
+    assert len(_review_logs(clean_folder)) == 1
+
+
+def test_validate_syncs_the_skills_before_the_dry_run(
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+
+    code = cli.main(["-d", str(clean_folder), "--validate"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.startswith(
+        f"Added {skills / 'alr-task-file'}\nAdded {skills / 'alr-task-review'}\n"
+        "   ID  STATE      NAME\n"
+    )
+    assert (skills / "alr-task-review" / "SKILL.md").is_file()
+    # A plain dry run only reports; --validate really wrote them.
+    assert "skill:" not in out
+
+
+def test_validate_skips_the_review_when_the_dry_run_has_warnings(
+    folder: Path, record: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--validate"])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.endswith(f"{folder / 'tasks.yaml'} is valid\n{REVIEW_SKIPPED}")
+    assert "review:" not in captured.out
+    assert not (folder / "logs").exists()
+
+
+def test_validate_skips_the_review_under_strict_and_still_exits_3(
+    folder: Path, record: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["-d", str(folder), "--validate", "--strict"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert captured.out.endswith(REVIEW_SKIPPED)
+    assert captured.err.startswith("error: refused: task-file-warnings: ")
+    assert not (folder / "logs").exists()
+
+
+@pytest.mark.parametrize("extra", [[], ["--strict"]], ids=["lenient", "strict"])
+def test_validate_never_starts_claude_when_it_skips(
+    folder: Path, record: Path, extra: list[str]
+) -> None:
+    cli.main(["-d", str(folder), "--validate", *extra])
+
+    assert not record.exists()
+
+
+@pytest.mark.parametrize("reply", [FINDINGS, "NO FINDINGS\n"], ids=["found", "none"])
+def test_validate_exits_0_whatever_the_review_finds(
+    clean_folder: Path, record: Path, monkeypatch: pytest.MonkeyPatch, reply: str
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", reply)
+
+    assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
+
+
+def test_validate_exits_1_when_the_review_fails(
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "boom\n")
+
+    code = cli.main(["-d", str(clean_folder), "--validate"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err == "error: review: claude exited with status 1: boom\n"
+    # The dry run's lines stay, and the failure is in the log.
+    assert f"{clean_folder / 'tasks.yaml'} is valid\n" in captured.out
+    [log] = _review_logs(clean_folder)
+    assert "error: review: claude exited with status 1: boom" in log.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_validate_is_a_usage_error_with_reset_failed(
+    clean_folder: Path, record: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = cli.main(["-d", str(clean_folder), "--validate", "--reset-failed"])
+
+    assert code == 2
+    assert capsys.readouterr().err == (
+        "error: --reset-failed cannot be used with --validate (a dry run writes nothing)\n"
+    )
+    assert not record.exists()
+
+
+def test_validate_needs_dir(record: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = cli.main(["--validate"])
+
+    assert code == 2
+    assert "error: required flag --dir not set" in capsys.readouterr().err
+    assert not record.exists()
+
+
+def test_validate_beside_dry_run_means_the_same(
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", FINDINGS)
+    assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
+    alone = capsys.readouterr().out
+    [first_log] = _review_logs(clean_folder)
+    first_log.unlink()
+
+    code = cli.main(["-d", str(clean_folder), "--validate", "--dry-run"])
+
+    both = capsys.readouterr().out
+    assert code == 0
+    # The log's name carries the time, and the second run may start in a later second.
+    assert re.sub(r"review-\d{8}T\d{6}", "review-X", both) == re.sub(
+        r"review-\d{8}T\d{6}", "review-X", alone
+    )
+    assert len(_review_logs(clean_folder)) == 1
+
+
+@pytest.mark.usefixtures("terminal")
+def test_validate_never_opens_the_view(
+    clean_folder: Path, record: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[RunSettings] = []
+    # The real wants_tui decides; only the view itself is replaced.
+    monkeypatch.setattr("alr.cli.run_app", lambda settings: seen.append(settings) or 0)
+
+    code = cli.main(["-d", str(clean_folder), "--validate"])
+
+    assert code == 0
+    assert seen == []
+    assert record.exists()
+
+
+@pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.usefixtures("fake_claude")
+def test_validate_stops_on_a_signal_during_the_review(
+    clean_folder: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stop: signal.Signals,
+) -> None:
+    ready = tmp_path / "ready"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+
+    process = start_alr("-d", str(clean_folder), "--validate")
+    try:
+        claude_pid = int(wait_for_file(ready))
+        process.send_signal(stop)
+        _, err = process.communicate(timeout=10)
+    finally:
+        process.kill()
+
+    assert process.returncode == 128 + stop
+    assert err == "error: interrupted\n"
+    with pytest.raises(ProcessLookupError):
+        os.kill(claude_pid, 0)
