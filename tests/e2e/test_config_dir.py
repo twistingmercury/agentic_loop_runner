@@ -251,11 +251,8 @@ def test_dry_run_without_a_terminal_refuses_and_creates_nothing(
     assert list(home.iterdir()) == []
 
 
-@pytest.mark.parametrize("flag", ["--version", "--install-skill"])
-def test_version_and_install_skill_neither_ask_nor_create(
-    flag: str, home: Path
-) -> None:
-    res = run_alr_in_terminal(flag)
+def test_version_neither_asks_nor_creates(home: Path) -> None:
+    res = run_alr_in_terminal("--version")
 
     assert res.code == 0, res
     assert SETUP_PROMPT not in res.shown

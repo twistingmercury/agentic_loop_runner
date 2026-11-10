@@ -4,8 +4,7 @@ Plain functions live here and fixtures in conftest.py. The suite never imports
 alr; the command line is its only way in.
 
 Ported from gralph's tests/e2e. Not ported: skill_check_test.go and
-wizard_signal_linux_test.go. --install-skill and the full-screen view are
-covered by test_install_skill.py and test_tui.py.
+wizard_signal_linux_test.go. The full-screen view is covered by test_tui.py.
 """
 
 import json

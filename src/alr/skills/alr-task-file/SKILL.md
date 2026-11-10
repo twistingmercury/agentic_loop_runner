@@ -206,7 +206,7 @@ authorized.
 9. Review the file with the `alr-task-review` skill, in a fresh agent that did
    not write it when you can start one, using the sandbox file the run will use
    (ask the user which one when you do not know). If that skill is not
-   installed, tell the user to run `alr --install-skill` and go on. Put the
+   installed, tell the user to upgrade alr and run it once, and go on. Put the
    findings in your report and change nothing because of them until the user
    says so.
 10. Report the output path, the checks performed, and the review's findings or

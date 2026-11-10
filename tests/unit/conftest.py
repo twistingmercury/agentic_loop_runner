@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from alr.config import create_folder
+from alr.skillinstall import sync
 
 FAKE_CLAUDE_SOURCE = Path(__file__).parent / "fakeclaude" / "fake_claude.py"
 
@@ -53,7 +54,8 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
     No test may touch the real ~/.local/alr. The folder is created up front so
     a real run goes straight to its work instead of asking to set up; fresh_home
-    is the one without it.
+    is the one without it. The bundled skills are synced up front too, so no
+    real run prints an Added line for them.
 
     This uses its own MonkeyPatch, not the monkeypatch fixture: an autouse
     fixture that shared it would change when a test's own patches are undone.
@@ -61,7 +63,9 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     folder = tmp_path_factory.mktemp("home")
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("HOME", str(folder))
+        patch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         create_folder(folder)
+        sync(folder)
         yield folder
 
 

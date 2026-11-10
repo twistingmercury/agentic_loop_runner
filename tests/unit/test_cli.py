@@ -21,6 +21,7 @@ from alr.config import SandboxDefault
 from alr.engine.sandbox import sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
+from alr.skillinstall import sync
 from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
@@ -708,30 +709,258 @@ def test_the_view_still_checks_a_given_settings_file(
     assert seen == []
 
 
-def test_install_skill_prints_one_path_per_skill_and_exits_0(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_install_skill_is_an_unknown_flag() -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--install-skill"])
+
+    assert exit_info.value.code == 2
+
+
+def _empty_skills_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point Claude's config folder at one that does not exist yet and return its skills folder.
+
+    The autouse home already holds the synced skills, so a skill test needs a
+    skills folder somewhere else to see anything change.
+    """
+    config = tmp_path / "cfg"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    return config / "skills"
+
+
+def test_a_real_run_adds_the_skills_and_says_so(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
 
-    code = cli.main(["--install-skill"])
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
 
+    captured = capsys.readouterr()
+    task_skill = skills / "alr-task-file"
+    review_skill = skills / "alr-task-review"
+    assert captured.out == f"Added {task_skill}\nAdded {review_skill}\n"
+    assert captured.err == ""
+    assert (task_skill / "SKILL.md").is_file()
+    assert (review_skill / "SKILL.md").is_file()
+
+
+def test_a_second_real_run_says_nothing_about_skills(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _empty_skills_folder(tmp_path, monkeypatch)
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_a_real_run_updates_an_edited_skill(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    sync()
+    edited = skills / "alr-task-file" / "SKILL.md"
+    bundled_text = edited.read_text(encoding="utf-8")
+    edited.write_text("my own edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"Updated {skills / 'alr-task-file'}\n"
+    assert captured.err == ""
+    assert edited.read_text(encoding="utf-8") == bundled_text
+
+
+def test_a_symlink_at_a_skill_name_is_replaced_with_a_warning_and_an_updated_line(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    skills.mkdir(parents=True)
+    linked_target = tmp_path / "versioned-skill"
+    linked_target.mkdir()
+    (linked_target / "SKILL.md").write_text("mine\n", encoding="utf-8")
+    link = skills / "alr-task-file"
+    link.symlink_to(linked_target, target_is_directory=True)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    warning = f"warning: {link} was a symlink; replaced it with the bundled skill"
+    assert warning in captured.err.splitlines()
+    assert f"Updated {link}" in captured.out.splitlines()
+    assert not link.is_symlink()
+    assert (link / "SKILL.md").is_file()
+    assert (linked_target / "SKILL.md").read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_plain_file_at_a_skill_name_is_replaced_with_a_warning_and_an_updated_line(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    skills.mkdir(parents=True)
+    plain_file = skills / "alr-task-file"
+    plain_file.write_text("not a folder", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    warning = f"warning: {plain_file} was a file; replaced it with the bundled skill"
+    assert warning in captured.err.splitlines()
+    assert f"Updated {plain_file}" in captured.out.splitlines()
+    assert (plain_file / "SKILL.md").is_file()
+
+
+def test_dry_run_says_updated_for_a_differing_skill(
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    sync()
+    edited = skills / "alr-task-file" / "SKILL.md"
+    edited.write_text("my own edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"skill: {skills / 'alr-task-file'} (updated on a real run)\n" in out
+    assert "alr-task-review" not in out
+    assert edited.read_text(encoding="utf-8") == "my own edit\n"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "file"])
+def test_dry_run_says_what_it_would_replace(
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    sync()
+    target = skills / "alr-task-file"
+    shutil.rmtree(target)
+    linked_target = tmp_path / "versioned-skill"
+    linked_target.mkdir()
+    if kind == "symlink":
+        target.symlink_to(linked_target, target_is_directory=True)
+    else:
+        target.write_text("not a folder", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    captured = capsys.readouterr()
+    assert f"skill: {target} (replaces a {kind} on a real run)\n" in captured.out
+    assert captured.err == ""
+    assert target.is_symlink() == (kind == "symlink")
+    assert target.is_file() == (kind == "file")
+    assert list(linked_target.iterdir()) == []
+
+
+def test_the_skills_sync_before_the_task_file_is_resolved(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    no_task_file = tmp_path / "empty-run"
+    no_task_file.mkdir()
+
+    code = cli.main(["-d", str(no_task_file), "--yolo"])
+
+    assert code == 2
+    assert "no tasks.yaml" in capsys.readouterr().err
+    assert (skills / "alr-task-file" / "SKILL.md").is_file()
+    assert (skills / "alr-task-review" / "SKILL.md").is_file()
+
+
+def test_a_skills_folder_that_cannot_be_written_warns_and_the_run_goes_on(
+    folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "cfg"
+    config.write_text("a file, not a folder", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+
+    code = cli.main(["-d", str(folder), "--yolo"])
+
+    err = capsys.readouterr().err
+    assert "warning: skill alr-task-file: " in err
+    assert "warning: skill alr-task-review: " in err
+    assert record.is_file()
+    # The run's own code: a warning must not turn a good run into a failure.
     assert code == 0
-    skills = tmp_path / ".claude" / "skills"
-    assert capsys.readouterr().out == (
-        f"{skills / 'alr-task-file'}\n{skills / 'alr-task-review'}\n"
-    )
 
 
-def test_install_skill_reports_a_folder_it_cannot_write(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_dry_run_reports_the_skills_and_writes_nothing(
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    (tmp_path / ".claude").write_text("a file, not a folder", encoding="utf-8")
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
 
-    code = cli.main(["--install-skill"])
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
 
-    assert code == 1
-    assert capsys.readouterr().err.startswith("error: ")
+    out = capsys.readouterr().out
+    task_skill = skills / "alr-task-file"
+    review_skill = skills / "alr-task-review"
+    assert out.startswith(
+        f"skill: {task_skill} (added on a real run)\n"
+        f"skill: {review_skill} (added on a real run)\n"
+    )
+    assert not (tmp_path / "cfg").exists()
+
+
+def test_dry_run_says_nothing_when_the_skills_are_identical(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    assert "skill:" not in capsys.readouterr().out
+
+
+def test_version_does_not_sync(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _empty_skills_folder(tmp_path, monkeypatch)
+
+    assert cli.main(["--version"]) == 0
+
+    assert "Added" not in capsys.readouterr().out
+    assert not (tmp_path / "cfg").exists()
 
 
 @pytest.mark.parametrize("extra", [[], ["--plain"]], ids=["view", "plain"])
@@ -1547,16 +1776,14 @@ def test_dry_run_refuses_a_missing_config_folder_without_asking_or_creating(
     assert not (fresh_home / ".local").exists()
 
 
-@pytest.mark.parametrize("flag", ["--version", "--install-skill"])
-def test_version_and_install_skill_neither_ask_nor_create(
-    flag: str,
+def test_version_neither_asks_nor_creates(
     fresh_home: Path,
     terminal: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _fail_if_asked(monkeypatch)
 
-    cli.main([flag])
+    cli.main(["--version"])
 
     assert not (fresh_home / ".local").exists()
 

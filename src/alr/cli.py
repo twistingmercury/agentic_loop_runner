@@ -37,7 +37,7 @@ from alr.sandboxes import (
     names_text,
     read_text,
 )
-from alr.skillinstall import install
+from alr.skillinstall import SkillChange, pending, sync
 from alr.tasks import parse_timeout
 from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
@@ -93,9 +93,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(_version_line())
         return 0
 
-    if args.install_skill:
-        return _install_skill()
-
     try:
         # Before anything else a real run does, so no later refusal hides the question.
         if not config_folder_exists():
@@ -105,8 +102,10 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         # add would refuse, and reads a missing shipped file from the package instead.
         if args.dry_run:
             check_can_add_missing()
+            _report_pending_skills()
         else:
             _add_missing_sandboxes()
+            _sync_skills()
 
         tasks_file = resolve_dir(args.dir)
         _note_ignored_folder_sandbox(args.dir)
@@ -169,6 +168,36 @@ def _add_missing_sandboxes() -> None:
         print(f"Added {path}")
 
 
+def _sync_skills() -> None:
+    """Make the bundled skills match the installed alr, saying what changed.
+
+    A skill that cannot be synced is a warning, never an error: an unwritable
+    skills folder must not stop a run. Warnings go to stderr and the Added and
+    Updated lines to stdout; the two streams are not ordered against each
+    other, as ADR-035 words it.
+    """
+    report = sync()
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    for change in report.changes:
+        print(f"{change.verb} {change.path}")
+
+
+def _report_pending_skills() -> None:
+    """Say which skills a real run would change; a dry run writes nothing (requirement 9)."""
+    for change in pending():
+        print(f"skill: {change.path} ({_pending_reason(change)})")
+
+
+def _pending_reason(change: SkillChange) -> str:
+    """The words a dry run uses for one skill: added, updated, or what it would replace."""
+    if change.replaced:
+        return f"replaces a {change.replaced} on a real run"
+
+    return f"{change.verb.lower()} on a real run"
+
+
 def _note_ignored_folder_sandbox(dir: str) -> None:
     """Tell a user upgrading that the run folder's sandbox.json no longer answers the permission question.
 
@@ -180,20 +209,6 @@ def _note_ignored_folder_sandbox(dir: str) -> None:
     path = Path(dir) / "sandbox.json"
     if path.is_file():
         print(f"{path} is no longer read; pick a sandbox with --sandbox <name>")
-
-
-def _install_skill() -> int:
-    """Install the bundled skills and print where each went, one per line."""
-    try:
-        paths = install()
-    except AlrError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return exc.exit_code
-
-    for path in paths:
-        print(path)
-
-    return 0
 
 
 def _handle_missing_config_folder(dry_run: bool) -> int:
@@ -312,11 +327,6 @@ def _parser() -> argparse.ArgumentParser:
         "--version",
         action="store_true",
         help="Show the current version of alr",
-    )
-    parser.add_argument(
-        "--install-skill",
-        action="store_true",
-        help="Install the bundled skills into ~/.claude/skills and exit",
     )
     parser.add_argument(
         "-d",
