@@ -69,16 +69,7 @@ def _run_session(
     argv = _argv(claude, tasks_file, sandbox_file)
     prompt = _prompt(tasks_file, sandbox_file)
     try:
-        result = subprocess.run(
-            argv,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=parse_duration(limit),
-            check=False,
-        )
+        result = _communicate(argv, prompt, parse_duration(limit))
     except subprocess.TimeoutExpired as exc:
         raise ReviewError(f"claude did not finish within {limit}") from exc
     except OSError as exc:
@@ -92,6 +83,42 @@ def _run_session(
         raise ReviewError("claude replied with nothing")
 
     return result.stdout
+
+
+def _communicate(
+    argv: list[str], prompt: str, seconds: float
+) -> subprocess.CompletedProcess[str]:
+    """Run argv with the prompt on stdin and return what it wrote.
+
+    subprocess.run does not wait for its child after a KeyboardInterrupt, so a
+    stop (the signal handler raises one) would leave the killed child unreaped
+    when alr exits. This kills and waits for the child on every way out.
+    """
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        stdout, stderr = process.communicate(input=prompt, timeout=seconds)
+    except BaseException:
+        process.kill()
+        process.wait()
+        _close_pipes(process)
+        raise
+
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
+def _close_pipes(process: "subprocess.Popen[str]") -> None:
+    """Close the pipes that the interrupted communicate left open."""
+    for pipe in (process.stdin, process.stdout, process.stderr):
+        if pipe is not None:
+            pipe.close()
 
 
 def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:

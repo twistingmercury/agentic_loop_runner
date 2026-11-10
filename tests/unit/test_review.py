@@ -3,7 +3,6 @@
 import io
 import re
 import stat
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -328,13 +327,15 @@ def test_action_timeout_overrides_the_default_limit(
     seconds: float,
 ) -> None:
     limits: list[float] = []
-    real_run = subprocess.run
+    real_communicate = review_module._communicate
 
-    def run_noting_the_limit(*args: Any, **kwargs: Any) -> Any:
-        limits.append(kwargs["timeout"])
-        return real_run(*args, **kwargs)
+    def communicate_noting_the_limit(
+        argv: list[str], prompt: str, seconds: float
+    ) -> Any:
+        limits.append(seconds)
+        return real_communicate(argv, prompt, seconds)
 
-    monkeypatch.setattr(review_module.subprocess, "run", run_noting_the_limit)
+    monkeypatch.setattr(review_module, "_communicate", communicate_noting_the_limit)
 
     review(io.StringIO(), tasks_file, "", action_timeout)
 
