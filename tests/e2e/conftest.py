@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from e2e_helpers import YES, find_alr, run_alr_in_terminal
+from e2e_helpers import YES, find_alr, run_alr, run_alr_in_terminal
 
 FAKE_CLAUDE_SOURCE = Path(__file__).parent / "testdata" / "fake_claude.py"
 
@@ -82,6 +82,8 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     folder = tmp_path_factory.mktemp("home")
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("HOME", str(folder))
+        # Where the skills go follows this variable, and a test must never reach the developer's own.
+        patch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         yield folder
 
 
@@ -93,8 +95,18 @@ def set_up_config(home: Path) -> None:
     no terminal. So each test starts after the one-time setup: alr runs in a
     terminal and is answered yes. test_config_dir.py replaces this fixture,
     because it tests the setup itself.
+
+    The setup run does not sync the skills, so one cheap real run follows it:
+    it syncs them and stops at the folder that holds no tasks.yaml. Every
+    test's home then holds the skills, and no real run in a test prints an
+    Added line for them.
     """
     done = run_alr_in_terminal(keys=YES)
 
     assert done.code == 0, done
     assert (home / ".local" / "alr" / "config.yaml").is_file()
+
+    synced = run_alr("--yolo", f"--dir={home}")
+
+    assert synced.code == 2, synced
+    assert (home / ".claude" / "skills" / "alr-task-file" / "SKILL.md").is_file()

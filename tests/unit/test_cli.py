@@ -21,6 +21,7 @@ from alr.config import SandboxDefault
 from alr.engine.sandbox import sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
+from alr.skillinstall import sync
 from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
@@ -732,6 +733,141 @@ def test_install_skill_reports_a_folder_it_cannot_write(
 
     assert code == 1
     assert capsys.readouterr().err.startswith("error: ")
+
+
+def _empty_skills_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point Claude's config folder at one that does not exist yet and return its skills folder.
+
+    The autouse home already holds the synced skills, so a skill test needs a
+    skills folder somewhere else to see anything change.
+    """
+    config = tmp_path / "cfg"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    return config / "skills"
+
+
+def test_a_real_run_adds_the_skills_and_says_so(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    task_skill = skills / "alr-task-file"
+    review_skill = skills / "alr-task-review"
+    assert captured.out == f"Added {task_skill}\nAdded {review_skill}\n"
+    assert captured.err == ""
+    assert (task_skill / "SKILL.md").is_file()
+    assert (review_skill / "SKILL.md").is_file()
+
+
+def test_a_second_real_run_says_nothing_about_skills(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _empty_skills_folder(tmp_path, monkeypatch)
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_a_real_run_updates_an_edited_skill(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    sync()
+    edited = skills / "alr-task-file" / "SKILL.md"
+    bundled_text = edited.read_text(encoding="utf-8")
+    edited.write_text("my own edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"Updated {skills / 'alr-task-file'}\n"
+    assert captured.err == ""
+    assert edited.read_text(encoding="utf-8") == bundled_text
+
+
+def test_a_skills_folder_that_cannot_be_written_warns_and_the_run_goes_on(
+    folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "cfg"
+    config.write_text("a file, not a folder", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+
+    code = cli.main(["-d", str(folder), "--yolo"])
+
+    err = capsys.readouterr().err
+    assert "warning: skill alr-task-file: " in err
+    assert "warning: skill alr-task-review: " in err
+    assert record.is_file()
+    # The run's own code: a warning must not turn a good run into a failure.
+    assert code == 0
+
+
+def test_dry_run_reports_the_skills_and_writes_nothing(
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    task_skill = skills / "alr-task-file"
+    review_skill = skills / "alr-task-review"
+    assert out.startswith(
+        f"skill: {task_skill} (added on a real run)\n"
+        f"skill: {review_skill} (added on a real run)\n"
+    )
+    assert not (tmp_path / "cfg").exists()
+
+
+def test_dry_run_says_nothing_when_the_skills_are_identical(
+    folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (folder / "tasks.yaml").write_text(CLEAN_ONE_TASK_YAML, encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    assert "skill:" not in capsys.readouterr().out
+
+
+def test_version_does_not_sync(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _empty_skills_folder(tmp_path, monkeypatch)
+
+    assert cli.main(["--version"]) == 0
+
+    assert "Added" not in capsys.readouterr().out
+    assert not (tmp_path / "cfg").exists()
 
 
 @pytest.mark.parametrize("extra", [[], ["--plain"]], ids=["view", "plain"])

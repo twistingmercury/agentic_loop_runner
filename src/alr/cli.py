@@ -37,7 +37,7 @@ from alr.sandboxes import (
     names_text,
     read_text,
 )
-from alr.skillinstall import install
+from alr.skillinstall import SkillChange, install, pending, sync
 from alr.tasks import parse_timeout
 from alr.tui.app import run_app
 from alr.tui.settings import Permissions, RunSettings
@@ -105,8 +105,10 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         # add would refuse, and reads a missing shipped file from the package instead.
         if args.dry_run:
             check_can_add_missing()
+            _report_pending_skills()
         else:
             _add_missing_sandboxes()
+            _sync_skills()
 
         tasks_file = resolve_dir(args.dir)
         _note_ignored_folder_sandbox(args.dir)
@@ -167,6 +169,35 @@ def _add_missing_sandboxes() -> None:
     """Add the shipped sandboxes the folder lacks, saying so for each, so a file that comes back is not a surprise."""
     for path in add_missing():
         print(f"Added {path}")
+
+
+def _sync_skills() -> None:
+    """Make the bundled skills match the installed alr, saying what changed.
+
+    A skill that cannot be synced is a warning, never an error: an unwritable
+    skills folder must not stop a run. Warnings print first so a replaced
+    symlink is announced before its Updated line, as ADR-035 words it.
+    """
+    report = sync()
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    for change in report.changes:
+        print(f"{change.verb} {change.path}")
+
+
+def _report_pending_skills() -> None:
+    """Say which skills a real run would change; a dry run writes nothing (requirement 9)."""
+    for change in pending():
+        print(f"skill: {change.path} ({_pending_reason(change)})")
+
+
+def _pending_reason(change: SkillChange) -> str:
+    """The words a dry run uses for one skill: added, updated, or what it would replace."""
+    if change.replaced:
+        return f"replaces a {change.replaced} on a real run"
+
+    return f"{change.verb.lower()} on a real run"
 
 
 def _note_ignored_folder_sandbox(dir: str) -> None:
