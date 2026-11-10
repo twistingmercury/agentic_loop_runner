@@ -67,6 +67,16 @@ class RunLogError(AlrError):
     """The run log cannot be opened or written."""
 
 
+class ReviewError(AlrError):
+    """The review could not run or did not finish; what it finds never raises this."""
+
+    exit_code = 1
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"review: {reason}")
+        self.reason = reason
+
+
 class RunError(AlrError):
     """A task failed, or its state could not be saved."""
 
