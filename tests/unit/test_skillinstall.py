@@ -1,6 +1,8 @@
 """The skill sync: every bundled skill lands in the user's skills folder."""
 
+import os
 import shutil
+import stat
 from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
@@ -327,3 +329,143 @@ def test_pending_reports_without_writing(
 
     assert changes == expected
     assert _snapshot(tmp_path) == before
+
+
+def test_a_dangling_symlink_inside_an_installed_skill_makes_it_different(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    path = _skill(tmp_path, "alr-task-file")
+    sync(tmp_path)
+    (path / "dangling").symlink_to(tmp_path / "gone")
+
+    report = sync(tmp_path)
+
+    assert report.changes == [SkillChange(path, "Updated", "")]
+    assert report.warnings == []
+    assert not (path / "dangling").is_symlink()
+
+
+def test_an_empty_folder_inside_an_installed_skill_makes_it_different(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    path = _skill(tmp_path, "alr-task-file")
+    sync(tmp_path)
+    (path / "empty").mkdir()
+
+    report = sync(tmp_path)
+
+    assert report.changes == [SkillChange(path, "Updated", "")]
+    assert report.warnings == []
+    assert not (path / "empty").exists()
+
+
+def test_an_unreadable_folder_inside_an_installed_skill_warns_in_sync_and_is_skipped_by_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked_folder: None
+) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    sync(tmp_path)
+    locked = _skill(tmp_path, "alr-task-file") / "locked"
+    locked.mkdir()
+    locked.chmod(0o000)
+
+    try:
+        report = sync(tmp_path)
+        waiting = pending(tmp_path)
+    finally:
+        locked.chmod(0o755)
+
+    assert report.changes == []
+    assert len(report.warnings) == 1
+    assert report.warnings[0].startswith("skill alr-task-file: ")
+    assert waiting == []
+
+
+def test_a_failed_rename_puts_the_old_skill_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    path = _skill(tmp_path, "alr-task-file")
+    sync(tmp_path)
+    (path / "SKILL.md").write_text("mine", encoding="utf-8")
+    (path / "stale.txt").write_text("old", encoding="utf-8")
+    real_rename = Path.rename
+
+    def rename(self: Path, new: Path) -> Path:
+        # Only the move of the staged copy into place fails; moving the old one
+        # aside, and back, works. The staged copy keeps the skill's name.
+        if self.parent.name.startswith(".install-") and self.name == path.name:
+            raise OSError("rename blocked")
+
+        return real_rename(self, new)
+
+    monkeypatch.setattr(Path, "rename", rename)
+
+    report = sync(tmp_path)
+
+    assert report.changes == []
+    assert report.warnings == [f"skill alr-task-file: {path}: rename blocked"]
+    assert (path / "SKILL.md").read_text(encoding="utf-8") == "mine"
+    assert (path / "stale.txt").read_text(encoding="utf-8") == "old"
+    assert sorted(entry.name for entry in path.parent.iterdir()) == list(SKILLS)
+
+
+def test_a_removal_failure_after_the_swap_still_reports_updated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked_folder: None
+) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    path = _skill(tmp_path, "alr-task-file")
+    sync(tmp_path)
+    stuck = path / "stuck"
+    stuck.mkdir()
+    (stuck / "file.txt").write_text("old", encoding="utf-8")
+    stuck.chmod(0o500)
+
+    try:
+        report = sync(tmp_path)
+    finally:
+        _make_deletable(path.parent)
+
+    assert report.changes == [SkillChange(path, "Updated", "")]
+    assert report.warnings == []
+    assert (path / "SKILL.md").read_text(encoding="utf-8") == _bundled_text(
+        "alr-task-file"
+    )
+    assert not (path / "stuck").exists()
+
+
+def _make_deletable(root: Path) -> None:
+    """Undo the modes a test set, so pytest can clean the temporary folder."""
+    for folder, _, _ in os.walk(root):
+        Path(folder).chmod(0o755)
+
+
+def test_a_read_only_bundled_source_still_syncs_and_the_copy_is_writable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    package = tmp_path / "package"
+    shutil.copytree(files("alr") / "skills", package / "skills")
+    monkeypatch.setattr(skillinstall, "files", lambda _: package)
+    _set_modes(package / "skills", folder_mode=0o555, file_mode=0o444)
+    home = tmp_path / "home"
+
+    try:
+        report = sync(home)
+    finally:
+        _set_modes(package / "skills", folder_mode=0o755, file_mode=0o644)
+
+    assert report.warnings == []
+    assert len(report.changes) == len(SKILLS)
+    mode = (_skill(home, "alr-task-file") / "SKILL.md").stat().st_mode
+    assert mode & stat.S_IWUSR
+
+
+def _set_modes(root: Path, folder_mode: int, file_mode: int) -> None:
+    """Set every file and folder under root, and root itself, to the given modes."""
+    # Files first, folders deepest first, so a folder is locked only after its contents.
+    for path in sorted(root.rglob("*"), reverse=True):
+        path.chmod(folder_mode if path.is_dir() else file_mode)
+
+    root.chmod(folder_mode)

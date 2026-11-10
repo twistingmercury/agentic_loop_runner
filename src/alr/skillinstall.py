@@ -1,5 +1,6 @@
 """Keep the bundled skills in the user's skills folder: the startup sync."""
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -137,16 +138,45 @@ def _classify(source: Path, target: Path) -> SkillChange | None:
 
 
 def _same_tree(source: Path, target: Path) -> bool:
-    """Same relative file paths with the same bytes; modes and times are ignored."""
-    return _read_files(source) == _read_files(target)
+    """Same relative paths holding the same things; modes and times are ignored.
+
+    Files, folders, and symlinks all count, so an empty folder or a dangling
+    link inside an installed skill makes it different. Raises OSError when a
+    folder cannot be read: unreadable is not the same as identical.
+    """
+    return _read_entries(source) == _read_entries(target)
 
 
-def _read_files(root: Path) -> dict[Path, bytes]:
-    return {
-        path.relative_to(root): path.read_bytes()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
+def _read_entries(root: Path) -> dict[Path, tuple[str, bytes]]:
+    """Map every path under root to its kind and content, without following links.
+
+    A file holds its bytes, a symlink its link text, a folder nothing.
+    """
+    entries: dict[Path, tuple[str, bytes]] = {}
+    for folder, folder_names, file_names in os.walk(
+        root, followlinks=False, onerror=_raise
+    ):
+        for name in folder_names + file_names:
+            path = Path(folder) / name
+            entries[path.relative_to(root)] = _describe(path)
+
+    return entries
+
+
+def _raise(error: OSError) -> None:
+    """Make os.walk fail on a folder it cannot read instead of skipping it."""
+    raise error
+
+
+def _describe(path: Path) -> tuple[str, bytes]:
+    """The kind of entry at path and what it holds; a link is never followed."""
+    if path.is_symlink():
+        return ("symlink", os.fsencode(path.readlink()))
+
+    if path.is_dir():
+        return ("folder", b"")
+
+    return ("file", path.read_bytes())
 
 
 def _bundled_names(bundled: Path) -> list[str]:
@@ -159,20 +189,76 @@ def _bundled_names(bundled: Path) -> list[str]:
 
 
 def _replace(source: Path, target: Path) -> None:
-    """Copy beside the target first, so a failed copy never leaves the user without a skill."""
+    """Put a copy of source at target, keeping the old skill until the copy is in place.
+
+    The copy is made beside the target, the old entry is renamed aside inside
+    the same staging folder, and only then is the copy renamed into place. A
+    failure never leaves the user without the skill.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=target.parent, prefix=".install-") as staging:
-        staged = Path(staging) / target.name
+    staging = Path(tempfile.mkdtemp(dir=target.parent, prefix=".install-"))
+    aside = staging / "old"
+    try:
+        staged = staging / target.name
         shutil.copytree(source, staged)
-        _remove_existing(target)
+        _make_owner_writable(staged)
+        _swap(staged, target, aside)
+    finally:
+        _discard_staging(staging, aside, target)
+
+
+def _make_owner_writable(root: Path) -> None:
+    """Give the owner write access to every folder and file under root, root included.
+
+    copytree copies the modes of a read-only package, and Linux will not move
+    a folder its owner cannot write to. Symlinks are skipped: chmod would
+    follow them out of the tree.
+    """
+    root.chmod(root.stat().st_mode | 0o700)
+    for folder, folder_names, file_names in os.walk(root, followlinks=False):
+        for name in folder_names + file_names:
+            path = Path(folder) / name
+            if path.is_symlink():
+                continue
+
+            # A folder also needs read and search access, or the walk cannot enter it.
+            extra = 0o700 if path.is_dir() else 0o200
+            path.chmod(path.stat().st_mode | extra)
+
+
+def _swap(staged: Path, target: Path, aside: Path) -> None:
+    """Rename what stands at target to aside, then staged to target.
+
+    If the second rename fails the old entry is renamed back, so the user
+    keeps the skill they had.
+    """
+    if not _present(target):
         staged.rename(target)
-
-
-def _remove_existing(target: Path) -> None:
-    """Remove what stands at the target; a link is unlinked, never followed."""
-    if target.is_symlink() or target.is_file():
-        target.unlink()
         return
 
-    if target.is_dir():
-        shutil.rmtree(target)
+    target.rename(aside)
+    try:
+        staged.rename(target)
+    except OSError:
+        aside.rename(target)
+        raise
+
+
+def _discard_staging(staging: Path, aside: Path, target: Path) -> None:
+    """Remove the staging folder, and with it the old skill once the new one is in place.
+
+    A failure here is not raised: the skill is already in place (or put back),
+    so the run has done its job and the leftover is only clutter. The one
+    exception is when the old skill could not be put back; it then sits in the
+    staging folder, which is kept so the user's files are not lost.
+    """
+    if _present(aside) and not _present(target):
+        return
+
+    with contextlib.suppress(OSError):
+        shutil.rmtree(staging)
+
+
+def _present(path: Path) -> bool:
+    """True when anything stands at path, a dangling symlink included."""
+    return path.is_symlink() or path.exists()
