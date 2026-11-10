@@ -76,6 +76,41 @@ def test_an_edited_skill_is_updated(
     assert edited.read_text(encoding="utf-8") == bundled_text
 
 
+def test_a_symlinked_skill_is_replaced_with_a_warning(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    skills = home / ".claude" / "skills"
+    linked_target = tmp_path / "versioned-skill"
+    linked_target.mkdir()
+    (linked_target / "SKILL.md").write_text("mine\n", encoding="utf-8")
+    link = skills / "alr-task-file"
+    shutil.rmtree(link)
+    link.symlink_to(linked_target, target_is_directory=True)
+
+    res = real_run(tmp_path)
+
+    assert res.code == 0, res
+    warning = f"warning: {link} was a symlink; replaced it with the bundled skill"
+    assert warning in res.err.splitlines()
+    assert f"Updated {link}" in res.out.splitlines()
+    assert not link.is_symlink()
+    assert (link / "SKILL.md").is_file()
+    assert (linked_target / "SKILL.md").read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_dry_run_says_updated_for_an_edited_skill(tmp_path: Path, home: Path) -> None:
+    skills = home / ".claude" / "skills"
+    edited = skills / "alr-task-file" / "SKILL.md"
+    edited.write_text("my own edit\n", encoding="utf-8")
+    write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
+
+    res = run_alr("-d", str(tmp_path), "--dry-run")
+
+    assert res.code == 0, res
+    assert f"skill: {skills / 'alr-task-file'} (updated on a real run)\n" in res.out
+    assert edited.read_text(encoding="utf-8") == "my own edit\n"
+
+
 def test_claude_config_dir_moves_the_skills_folder(
     tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:

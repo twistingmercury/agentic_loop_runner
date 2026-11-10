@@ -786,6 +786,118 @@ def test_a_real_run_updates_an_edited_skill(
     assert edited.read_text(encoding="utf-8") == bundled_text
 
 
+def test_a_symlink_at_a_skill_name_is_replaced_with_a_warning_and_an_updated_line(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    skills.mkdir(parents=True)
+    linked_target = tmp_path / "versioned-skill"
+    linked_target.mkdir()
+    (linked_target / "SKILL.md").write_text("mine\n", encoding="utf-8")
+    link = skills / "alr-task-file"
+    link.symlink_to(linked_target, target_is_directory=True)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    warning = f"warning: {link} was a symlink; replaced it with the bundled skill"
+    assert warning in captured.err.splitlines()
+    assert f"Updated {link}" in captured.out.splitlines()
+    assert not link.is_symlink()
+    assert (link / "SKILL.md").is_file()
+    assert (linked_target / "SKILL.md").read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_plain_file_at_a_skill_name_is_replaced_with_a_warning_and_an_updated_line(
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    skills.mkdir(parents=True)
+    plain_file = skills / "alr-task-file"
+    plain_file.write_text("not a folder", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    warning = f"warning: {plain_file} was a file; replaced it with the bundled skill"
+    assert warning in captured.err.splitlines()
+    assert f"Updated {plain_file}" in captured.out.splitlines()
+    assert (plain_file / "SKILL.md").is_file()
+
+
+def test_dry_run_says_updated_for_a_differing_skill(
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    sync()
+    edited = skills / "alr-task-file" / "SKILL.md"
+    edited.write_text("my own edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"skill: {skills / 'alr-task-file'} (updated on a real run)\n" in out
+    assert "alr-task-review" not in out
+    assert edited.read_text(encoding="utf-8") == "my own edit\n"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "file"])
+def test_dry_run_says_what_it_would_replace(
+    folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    sync()
+    target = skills / "alr-task-file"
+    shutil.rmtree(target)
+    linked_target = tmp_path / "versioned-skill"
+    linked_target.mkdir()
+    if kind == "symlink":
+        target.symlink_to(linked_target, target_is_directory=True)
+    else:
+        target.write_text("not a folder", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    captured = capsys.readouterr()
+    assert f"skill: {target} (replaces a {kind} on a real run)\n" in captured.out
+    assert captured.err == ""
+    assert target.is_symlink() == (kind == "symlink")
+    assert target.is_file() == (kind == "file")
+    assert list(linked_target.iterdir()) == []
+
+
+def test_the_skills_sync_before_the_task_file_is_resolved(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills = _empty_skills_folder(tmp_path, monkeypatch)
+    no_task_file = tmp_path / "empty-run"
+    no_task_file.mkdir()
+
+    code = cli.main(["-d", str(no_task_file), "--yolo"])
+
+    assert code == 2
+    assert "no tasks.yaml" in capsys.readouterr().err
+    assert (skills / "alr-task-file" / "SKILL.md").is_file()
+    assert (skills / "alr-task-review" / "SKILL.md").is_file()
+
+
 def test_a_skills_folder_that_cannot_be_written_warns_and_the_run_goes_on(
     folder: Path,
     record: Path,

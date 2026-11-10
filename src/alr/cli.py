@@ -172,8 +172,9 @@ def _sync_skills() -> None:
     """Make the bundled skills match the installed alr, saying what changed.
 
     A skill that cannot be synced is a warning, never an error: an unwritable
-    skills folder must not stop a run. Warnings print first so a replaced
-    symlink is announced before its Updated line, as ADR-035 words it.
+    skills folder must not stop a run. Warnings go to stderr and the Added and
+    Updated lines to stdout; the two streams are not ordered against each
+    other, as ADR-035 words it.
     """
     report = sync()
     for warning in report.warnings:
