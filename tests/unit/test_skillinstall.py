@@ -40,7 +40,6 @@ def _failing_copy(partial: str) -> Callable[..., None]:
 def test_an_error_without_a_strerror_never_says_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setattr(skillinstall.shutil, "copytree", _failing_copy("part.txt"))
 
     report = sync(tmp_path)
@@ -67,11 +66,7 @@ def _snapshot(root: Path) -> dict[str, str]:
     return found
 
 
-def test_skills_folder_is_under_the_home_folder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-
+def test_skills_folder_is_under_the_home_folder(tmp_path: Path) -> None:
     assert skills_folder(tmp_path) == tmp_path / ".claude" / "skills"
 
 
@@ -91,11 +86,7 @@ def test_an_empty_claude_config_dir_counts_as_unset(
     assert skills_folder(tmp_path) == tmp_path / ".claude" / "skills"
 
 
-def test_sync_adds_every_missing_skill(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-
+def test_sync_adds_every_missing_skill(tmp_path: Path) -> None:
     report = sync(tmp_path)
 
     expected = [SkillChange(_skill(tmp_path, name), "Added", "") for name in SKILLS]
@@ -106,10 +97,7 @@ def test_sync_adds_every_missing_skill(
         ) == _bundled_text(name)
 
 
-def test_sync_changes_nothing_when_identical(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+def test_sync_changes_nothing_when_identical(tmp_path: Path) -> None:
     sync(tmp_path)
 
     report = sync(tmp_path)
@@ -118,9 +106,8 @@ def test_sync_changes_nothing_when_identical(
 
 
 def test_sync_updates_a_differing_skill_and_removes_an_extra_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     (path / "SKILL.md").write_text("edited", encoding="utf-8")
@@ -136,10 +123,7 @@ def test_sync_updates_a_differing_skill_and_removes_an_extra_file(
     assert not (path / "stale.txt").exists()
 
 
-def test_sync_leaves_a_folder_under_another_name_alone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+def test_sync_leaves_a_folder_under_another_name_alone(tmp_path: Path) -> None:
     mine = tmp_path / ".claude" / "skills" / "my-own-skill"
     mine.mkdir(parents=True)
     (mine / "SKILL.md").write_text("mine", encoding="utf-8")
@@ -152,10 +136,7 @@ def test_sync_leaves_a_folder_under_another_name_alone(
     assert note.read_text(encoding="utf-8") == "keep"
 
 
-def test_sync_replaces_a_symlink_without_touching_its_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+def test_sync_replaces_a_symlink_without_touching_its_target(tmp_path: Path) -> None:
     real = tmp_path / "real"
     real.mkdir()
     (real / "keep.txt").write_text("kept", encoding="utf-8")
@@ -178,10 +159,7 @@ def test_sync_replaces_a_symlink_without_touching_its_target(
     assert not (real / "SKILL.md").exists()
 
 
-def test_sync_replaces_a_dangling_symlink(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+def test_sync_replaces_a_dangling_symlink(tmp_path: Path) -> None:
     link = _skill(tmp_path, "alr-task-file")
     link.parent.mkdir(parents=True)
     link.symlink_to(tmp_path / "gone")
@@ -196,10 +174,7 @@ def test_sync_replaces_a_dangling_symlink(
     assert (link / "SKILL.md").is_file()
 
 
-def test_sync_replaces_a_plain_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+def test_sync_replaces_a_plain_file(tmp_path: Path) -> None:
     target = _skill(tmp_path, "alr-task-file")
     target.parent.mkdir(parents=True)
     target.write_text("mine", encoding="utf-8")
@@ -214,9 +189,8 @@ def test_sync_replaces_a_plain_file(
 
 
 def test_sync_warns_and_goes_on_when_the_folder_cannot_be_written(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     (tmp_path / ".claude").write_text("a file, not a folder", encoding="utf-8")
 
     report = sync(tmp_path)
@@ -230,7 +204,6 @@ def test_sync_warns_and_goes_on_when_the_folder_cannot_be_written(
 def test_a_failed_copy_leaves_the_old_skill_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     (path / "SKILL.md").write_text("mine", encoding="utf-8")
@@ -248,8 +221,6 @@ def test_a_failed_copy_leaves_the_old_skill_in_place(
 def test_sync_warns_when_the_home_folder_cannot_be_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-
     def no_home() -> Path:
         raise RuntimeError("Could not determine home directory.")
 
@@ -262,9 +233,8 @@ def test_sync_warns_when_the_home_folder_cannot_be_found(
 
 
 def test_an_unreadable_installed_file_warns_in_sync_and_is_skipped_by_pending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked_folder: None
+    tmp_path: Path, locked_folder: None
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     sync(tmp_path)
     locked = _skill(tmp_path, "alr-task-file") / "SKILL.md"
     locked.chmod(0o000)
@@ -282,7 +252,7 @@ def test_an_unreadable_installed_file_warns_in_sync_and_is_skipped_by_pending(
 
 
 def _arrange(tmp_path: Path, scenario: str) -> None:
-    """Install both skills, then put alr-task-file into the named state."""
+    """Sync both skills, then put alr-task-file into the named state."""
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     if scenario == "missing":
@@ -312,12 +282,10 @@ def _arrange(tmp_path: Path, scenario: str) -> None:
 )
 def test_pending_reports_without_writing(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     scenario: str,
     verb: str | None,
     replaced: str | None,
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     _arrange(tmp_path, scenario)
     before = _snapshot(tmp_path)
 
@@ -332,9 +300,8 @@ def test_pending_reports_without_writing(
 
 
 def test_a_dangling_symlink_inside_an_installed_skill_makes_it_different(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     (path / "dangling").symlink_to(tmp_path / "gone")
@@ -347,9 +314,8 @@ def test_a_dangling_symlink_inside_an_installed_skill_makes_it_different(
 
 
 def test_an_empty_folder_inside_an_installed_skill_makes_it_different(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     (path / "empty").mkdir()
@@ -362,9 +328,8 @@ def test_an_empty_folder_inside_an_installed_skill_makes_it_different(
 
 
 def test_an_unreadable_folder_inside_an_installed_skill_warns_in_sync_and_is_skipped_by_pending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked_folder: None
+    tmp_path: Path, locked_folder: None
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     sync(tmp_path)
     locked = _skill(tmp_path, "alr-task-file") / "locked"
     locked.mkdir()
@@ -385,7 +350,6 @@ def test_an_unreadable_folder_inside_an_installed_skill_warns_in_sync_and_is_ski
 def test_a_failed_rename_puts_the_old_skill_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     (path / "SKILL.md").write_text("mine", encoding="utf-8")
@@ -395,7 +359,7 @@ def test_a_failed_rename_puts_the_old_skill_back(
     def rename(self: Path, new: Path) -> Path:
         # Only the move of the staged copy into place fails; moving the old one
         # aside, and back, works. The staged copy keeps the skill's name.
-        if self.parent.name.startswith(".install-") and self.name == path.name:
+        if self.parent.name.startswith(".sync-") and self.name == path.name:
             raise OSError("rename blocked")
 
         return real_rename(self, new)
@@ -412,9 +376,8 @@ def test_a_failed_rename_puts_the_old_skill_back(
 
 
 def test_a_removal_failure_after_the_swap_still_reports_updated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked_folder: None
+    tmp_path: Path, locked_folder: None
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     path = _skill(tmp_path, "alr-task-file")
     sync(tmp_path)
     stuck = path / "stuck"
@@ -444,7 +407,6 @@ def _make_deletable(root: Path) -> None:
 def test_a_read_only_bundled_source_still_syncs_and_the_copy_is_writable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     package = tmp_path / "package"
     shutil.copytree(files("alr") / "skills", package / "skills")
     monkeypatch.setattr(skillinstall, "files", lambda _: package)

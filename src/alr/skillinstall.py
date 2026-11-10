@@ -91,13 +91,6 @@ def pending(home: Path | None = None) -> list[SkillChange]:
     return changes
 
 
-def _try_classify(source: Path, target: Path) -> SkillChange | None:
-    try:
-        return _classify(source, target)
-    except OSError:
-        return None
-
-
 def _sync_one(source: Path, target: Path) -> SyncReport:
     """Classify one skill, apply the change, and report both."""
     try:
@@ -196,7 +189,7 @@ def _replace(source: Path, target: Path) -> None:
     failure never leaves the user without the skill.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(dir=target.parent, prefix=".install-"))
+    staging = Path(tempfile.mkdtemp(dir=target.parent, prefix=".sync-"))
     aside = staging / "old"
     try:
         staged = staging / target.name
@@ -262,3 +255,11 @@ def _discard_staging(staging: Path, aside: Path, target: Path) -> None:
 def _present(path: Path) -> bool:
     """True when anything stands at path, a dangling symlink included."""
     return path.is_symlink() or path.exists()
+
+
+def _try_classify(source: Path, target: Path) -> SkillChange | None:
+    """Classify one skill for a dry run; None when it is identical or unreadable."""
+    try:
+        return _classify(source, target)
+    except OSError:
+        return None
