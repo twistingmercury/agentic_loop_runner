@@ -9,7 +9,6 @@ from collections.abc import Callable, Coroutine
 from importlib import metadata
 from dataclasses import dataclass
 from pathlib import Path
-from types import FrameType
 from typing import Any
 
 from alr.config import (
@@ -27,7 +26,6 @@ from alr.errors import (
     TASK_FILE_WARNINGS,
     AlrError,
     RefusedError,
-    ReviewError,
     RunCancelledError,
     UsageError,
 )
@@ -50,6 +48,10 @@ _INTERRUPTED = "error: interrupted"
 # The config's sandbox default that is not a sandbox name (see alr.config).
 _YOLO = "yolo"
 _YES_ANSWERS = ("y", "yes")
+_RUN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+# A closed terminal or a dropped ssh session sends SIGHUP. A real run leaves it
+# to #63; --validate handles it so the review's session does not outlive alr.
+_VALIDATE_SIGNALS = (*_RUN_SIGNALS, signal.SIGHUP)
 _REVIEW_SKIPPED = "review skipped: the dry run found problems; fix them and run again"
 
 
@@ -154,13 +156,14 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             action_timeout,
             answer.sandbox_file,
             answer.sandbox_name,
-            _added_on_real_run(answer, args.dry_run and not args.validate),
+            _added_on_real_run(answer, args.dry_run),
             args.strict,
         )
         if args.validate:
-            return _validate(
+            validating = _validate(
                 checks, tasks_file, answer.sandbox_file, action_timeout, stop
             )
+            return _run(validating, stop, signals=_VALIDATE_SIGNALS)
 
         return _run(checks, stop)
 
@@ -177,33 +180,17 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     )
 
 
-@dataclass
-class _DryRunVerdict:
-    """Whether the dry run of --validate came back clean, which is all the review needs to know."""
-
-    clean: bool = False
-
-
-def _validate(
+async def _validate(
     checks: Coroutine[Any, Any, int],
     tasks_file: str,
     sandbox_file: str,
     action_timeout: str,
     stop: Stop,
-) -> int:
-    """Run the dry run, then the review when the dry run was clean; the exit code is the dry run's own unless the review fails."""
-    verdict = _DryRunVerdict()
-    code = _run(_checks_before_review(verdict, checks), stop)
-    if code != 0 or not verdict.clean:
-        return code
-
-    return _review(tasks_file, sandbox_file, action_timeout, stop)
-
-
-async def _checks_before_review(
-    verdict: _DryRunVerdict, checks: Coroutine[Any, Any, int]
 ) -> None:
-    """Await the dry run and record whether it was clean; a warning prints why there is no review.
+    """Await the dry run, then the review when the dry run was clean.
+
+    Both run in this one coroutine, so a stop at any point is the same
+    cancellation: _run turns it into the signal's exit code.
 
     Under --strict a warning is a refusal, which carries no count, so the
     refusal's reason is what says there was one.
@@ -220,53 +207,7 @@ async def _checks_before_review(
         print(_REVIEW_SKIPPED)
         return
 
-    verdict.clean = True
-
-
-def _review(tasks_file: str, sandbox_file: str, action_timeout: str, stop: Stop) -> int:
-    """Run the review, which blocks, so that SIGINT and SIGTERM still stop alr.
-
-    The event loop is gone by now and the review waits on a child process, so a
-    handler that raises ends the wait; review._communicate then kills the
-    child's group and waits for it. The signal is recorded in stop, as _run does,
-    for the exit code, and review reads it to write the log's stopped by line.
-    """
-    handler = _raise_on_first_stop(stop)
-    stop_signals = (signal.SIGINT, signal.SIGTERM)
-    before = {sig: signal.signal(sig, handler) for sig in stop_signals}
-    try:
-        asyncio.run(review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop))
-    except ReviewError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return exc.exit_code
-    except KeyboardInterrupt:
-        print(_INTERRUPTED, file=sys.stderr)
-        return stop.exit_code()
-    finally:
-        for sig, old in before.items():
-            signal.signal(sig, old)
-
-    return 0
-
-
-def _raise_on_first_stop(stop: Stop) -> Callable[[int, FrameType | None], None]:
-    """Return a signal handler that records the first signal in stop and interrupts the wait; later ones are ignored.
-
-    Like _stop_once, a second signal must not cut short the cleanup the first
-    one started.
-    """
-    stopped = False
-
-    def handle(signum: int, _frame: FrameType | None) -> None:
-        nonlocal stopped
-        if stopped:
-            return
-
-        stopped = True
-        stop.signum = signum
-        raise KeyboardInterrupt
-
-    return handle
+    await review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
 
 
 def _add_missing_sandboxes() -> None:
@@ -649,35 +590,53 @@ def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None
     parser.print_usage(sys.stderr)
 
 
-def _run(coro: Coroutine[Any, Any, object], stop: Stop) -> int:
-    """Run coro to the end; SIGINT or SIGTERM cancels it, which stops the run.
+def _run(
+    coro: Coroutine[Any, Any, object],
+    stop: Stop,
+    signals: tuple[signal.Signals, ...] = _RUN_SIGNALS,
+) -> int:
+    """Run coro to the end; any of signals cancels it, which stops the run.
 
     A stop exits with the code of the first signal, which _with_signals records in stop.
     """
     try:
-        asyncio.run(_with_signals(coro, stop))
+        asyncio.run(_with_signals(coro, stop, signals))
     except asyncio.CancelledError:
         # The stop landed while no task was running, so there is no task to name.
-        print(_INTERRUPTED, file=sys.stderr)
+        _print_to_stderr(_INTERRUPTED)
         return stop.exit_code()
     except RunCancelledError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _print_to_stderr(f"error: {exc}")
         return stop.exit_code()
     except AlrError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _print_to_stderr(f"error: {exc}")
         return exc.exit_code
 
     return 0
 
 
-async def _with_signals(coro: Coroutine[Any, Any, object], stop: Stop) -> None:
+def _print_to_stderr(line: str) -> None:
+    """Print one line on stderr, after flushing stdout so output captured on one pipe keeps its order.
+
+    stdout is buffered when it is not a terminal and stderr is not, so without
+    the flush an error would come out ahead of the lines printed before it.
+    """
+    sys.stdout.flush()
+    print(line, file=sys.stderr)
+
+
+async def _with_signals(
+    coro: Coroutine[Any, Any, object],
+    stop: Stop,
+    signals: tuple[signal.Signals, ...],
+) -> None:
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     if task is None:
         raise RuntimeError("no running task")
 
     handler = _stop_once(task, stop)
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in signals:
         loop.add_signal_handler(sig, handler, sig)
 
     await coro

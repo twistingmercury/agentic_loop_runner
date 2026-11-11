@@ -1,5 +1,7 @@
 """--validate: the dry run, then a fresh review of the task file, run as the installed command."""
 
+import os
+import signal
 import stat
 import time
 from pathlib import Path
@@ -9,6 +11,9 @@ from e2e_helpers import (
     VALID_TASKS_YAML,
     fake_claude_records,
     run_alr,
+    start_alr,
+    wait_for_file,
+    wait_process_gone,
     write_tasks_yaml,
 )
 
@@ -143,3 +148,34 @@ def test_validate_passes_sandbox_and_action_timeout_to_the_review(
     assert limited.code == 1, limited
     assert limited.err.startswith("error: review: ")
     assert time.monotonic() - started < 20
+
+
+def test_validate_stops_on_sighup(tmp_path: Path, fake_claude: Path) -> None:
+    write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
+    ready_file = tmp_path / "ready"
+    env = {"FAKECLAUDE_BLOCK": "1", "FAKECLAUDE_READY_FILE": str(ready_file)}
+
+    with start_alr("-d", str(tmp_path), "--validate", env=env) as process:
+        try:
+            # The fake claude writes its pid once it is blocking in the review.
+            claude_pid = int(wait_for_file(ready_file, 10))
+            process.send_signal(signal.SIGHUP)
+            out, err = process.communicate(timeout=10)
+        finally:
+            process.kill()
+            kill_pid_in(ready_file)
+
+    assert process.returncode == 129, (out, err)
+    assert err == "error: interrupted\n"
+    [log] = review_logs(tmp_path)
+    assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
+    wait_process_gone(claude_pid, 10)
+
+
+def kill_pid_in(pid_file: Path) -> None:
+    """SIGKILL the process named in pid_file, so a failing test leaves no claude running."""
+    try:
+        os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+    except (OSError, ValueError):
+        # No file, or the process is already gone: nothing is left to stop.
+        pass

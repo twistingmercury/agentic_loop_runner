@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import signal
+import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -15,6 +16,7 @@ from typing import Any
 
 import pytest
 from helpers import (
+    ALR,
     chmodded,
     fake_claude_records,
     start_alr,
@@ -2416,6 +2418,87 @@ def test_validate_stop_kills_everything_the_session_started(
     assert log.read_text(encoding="utf-8").endswith(f"\n\nstopped by {stop.name}\n")
 
 
+@pytest.mark.usefixtures("fake_claude")
+def test_validate_stops_on_sighup(
+    clean_folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+
+    process = start_alr("-d", str(clean_folder), "--validate")
+    claude_pid = 0
+    try:
+        claude_pid = int(wait_for_file(ready))
+        process.send_signal(signal.SIGHUP)
+        _, err = process.communicate(timeout=10)
+    finally:
+        process.kill()
+        # A SIGHUP nobody handles kills alr and strands the blocked fake claude.
+        if claude_pid:
+            _kill_quietly(claude_pid)
+
+    assert process.returncode == 129
+    assert err == "error: interrupted\n"
+    [log] = _review_logs(clean_folder)
+    assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
+    wait_for_exit(claude_pid)
+
+
+def _kill_quietly(pid: int) -> None:
+    """SIGKILL pid, whether or not it is still there."""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def test_validate_flushes_stdout_before_the_review_error(
+    clean_folder: Path, tmp_path: Path
+) -> None:
+    # No claude on the PATH: the review fails before its first line, so the dry
+    # run's lines are still waiting in stdout's buffer when the error is printed.
+    no_claude = tmp_path / "no-claude"
+    no_claude.mkdir()
+
+    done = subprocess.run(
+        [str(ALR), "-d", str(clean_folder), "--validate"],
+        env={**os.environ, "PATH": str(no_claude)},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=60,
+    )
+
+    assert done.returncode == 1
+    valid = done.stdout.index(f"{clean_folder / 'tasks.yaml'} is valid\n")
+    failed = done.stdout.index("error: review: claude is not on the PATH\n")
+    assert valid < failed
+
+
+def test_validate_stop_before_the_session_starts_exits_with_the_signal_code(
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def stopped_as_the_dry_run_ends(*_args: object) -> int:
+        # The stop lands after the dry run's last await and before the review
+        # has started its session, where nothing is waiting to be cancelled yet.
+        signal.raise_signal(signal.SIGTERM)
+        return 0
+
+    monkeypatch.setattr("alr.cli.dry_run", stopped_as_the_dry_run_ends)
+
+    code = cli.main(["-d", str(clean_folder), "--validate"])
+
+    assert code == 143
+    assert capsys.readouterr().err == "error: interrupted\n"
+    [log] = _review_logs(clean_folder)
+    assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGTERM\n")
+
+
 def test_validate_adds_a_missing_shipped_sandbox_file_and_names_it_to_the_reviewer(
     home: Path,
     clean_folder: Path,
@@ -2485,7 +2568,8 @@ def test_validate_passes_action_timeout_to_the_review(
 
 
 def _stop_signal_handlers() -> dict[signal.Signals, Any]:
-    return {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    stops = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    return {sig: signal.getsignal(sig) for sig in stops}
 
 
 def test_validate_puts_the_signal_handlers_back(
@@ -2496,8 +2580,9 @@ def test_validate_puts_the_signal_handlers_back(
     assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
     assert _stop_signal_handlers() == before
 
-    def stopped(*_args: object) -> None:
+    async def stopped(*_args: object) -> None:
         signal.raise_signal(signal.SIGTERM)
+        await asyncio.sleep(60)
 
     monkeypatch.setattr("alr.cli.review", stopped)
 
@@ -2525,16 +2610,23 @@ def test_a_second_signal_during_the_stop_is_ignored(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def stopped_twice(*_args: object) -> None:
+    cleaned_up: list[bool] = []
+
+    async def stopped_twice(*_args: object) -> None:
         try:
             signal.raise_signal(signal.SIGINT)
+            await asyncio.sleep(60)
         finally:
-            # The review's cleanup is still running when the second signal comes.
+            # The review's cleanup is still running when the second signal
+            # comes; a second cancel would cut this wait short.
             signal.raise_signal(signal.SIGTERM)
+            await asyncio.sleep(0.1)
+            cleaned_up.append(True)
 
     monkeypatch.setattr("alr.cli.review", stopped_twice)
 
     code = cli.main(["-d", str(clean_folder), "--validate"])
 
     assert code == 130
+    assert cleaned_up == [True]
     assert capsys.readouterr().err == "error: interrupted\n"
