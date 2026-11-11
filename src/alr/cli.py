@@ -235,7 +235,7 @@ def _review(tasks_file: str, sandbox_file: str, action_timeout: str, stop: Stop)
     stop_signals = (signal.SIGINT, signal.SIGTERM)
     before = {sig: signal.signal(sig, handler) for sig in stop_signals}
     try:
-        review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
+        asyncio.run(review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop))
     except ReviewError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code

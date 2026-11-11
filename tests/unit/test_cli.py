@@ -2293,11 +2293,11 @@ def test_validate_exits_1_when_the_review_fails(
 
     captured = capsys.readouterr()
     assert code == 1
-    assert captured.err == "error: review: claude exited with status 1: boom\n"
+    assert captured.err == "error: review: claude failed (exit status 1): boom\n"
     # The dry run's lines stay, and the failure is in the log.
     assert f"{clean_folder / 'tasks.yaml'} is valid\n" in captured.out
     [log] = _review_logs(clean_folder)
-    assert "error: review: claude exited with status 1: boom" in log.read_text(
+    assert "error: review: claude failed (exit status 1): boom" in log.read_text(
         encoding="utf-8"
     )
 
@@ -2444,7 +2444,7 @@ class _ReviewCalls:
         self.sandbox_files: list[str] = []
         self.action_timeouts: list[str] = []
 
-    def review(
+    async def review(
         self,
         out: object,
         tasks_file: str,

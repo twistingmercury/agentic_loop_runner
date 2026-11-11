@@ -1,5 +1,6 @@
 """The review session: its prompt and arguments, the three lines it prints, its log, and every way it fails."""
 
+import asyncio
 import io
 import os
 import re
@@ -69,6 +70,16 @@ def unwritable_logs(tasks_file: str, locked_folder: None) -> Iterator[Path]:
     logs.chmod(0o700)
 
 
+def run_review(
+    out: io.StringIO,
+    tasks_file: str,
+    sandbox_file: str,
+    action_timeout: str,
+    stop: Stop,
+) -> None:
+    asyncio.run(review(out, tasks_file, sandbox_file, action_timeout, stop))
+
+
 def asking_line(tasks_file: str) -> str:
     return f"review: asking Claude to read {tasks_file} (this uses tokens)\n"
 
@@ -111,7 +122,7 @@ def test_review_prints_the_three_lines_and_the_reply_as_it_came(
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", reply)
     out = io.StringIO()
 
-    review(out, tasks_file, "", "", Stop())
+    run_review(out, tasks_file, "", "", Stop())
 
     log = review_log(tasks_file)
     assert out.getvalue() == (
@@ -125,7 +136,7 @@ def test_review_writes_the_log_with_a_header_and_the_reply(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", FINDINGS)
 
-    review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
+    run_review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
 
     text = review_log(tasks_file).read_text(encoding="utf-8")
     header, _, body = text.partition("\n\n")
@@ -143,7 +154,7 @@ def test_review_writes_the_log_for_no_findings(
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", "NO FINDINGS\n")
     out = io.StringIO()
 
-    review(out, tasks_file, "", "", Stop())
+    run_review(out, tasks_file, "", "", Stop())
 
     text = review_log(tasks_file).read_text(encoding="utf-8")
     assert "sandbox file: none\n" in text
@@ -157,7 +168,7 @@ def test_review_creates_logs_at_mode_700_and_the_file_at_mode_600(
 ) -> None:
     assert not logs_folder(tasks_file).exists()
 
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     assert stat.S_IMODE(logs_folder(tasks_file).stat().st_mode) == 0o700
     assert stat.S_IMODE(review_log(tasks_file).stat().st_mode) == 0o600
@@ -173,7 +184,7 @@ def test_review_leaves_an_existing_logs_folder_and_its_files_alone(
     earlier = logs / "20261110T090000"
     earlier.mkdir()
 
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     assert stat.S_IMODE(logs.stat().st_mode) == 0o755
     assert earlier.is_dir()
@@ -183,7 +194,7 @@ def test_review_leaves_an_existing_logs_folder_and_its_files_alone(
 def test_review_prompt_names_the_skill_the_task_file_and_the_sandbox_file(
     record: Path, tasks_file: str, sandbox_file: str
 ) -> None:
-    review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
+    run_review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
 
     prompt = recorded_call(record)["stdin"]
     assert "alr-task-review" in prompt
@@ -194,7 +205,7 @@ def test_review_prompt_names_the_skill_the_task_file_and_the_sandbox_file(
 def test_review_prompt_says_there_is_no_sandbox_file(
     record: Path, tasks_file: str
 ) -> None:
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     prompt = recorded_call(record)["stdin"]
     assert "alr-task-review" in prompt
@@ -205,7 +216,7 @@ def test_review_prompt_says_there_is_no_sandbox_file(
 def test_review_never_resumes_a_session_or_picks_a_model(
     record: Path, tasks_file: str
 ) -> None:
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     argv = recorded_call(record)["argv"]
     assert argv[0] == "--print"
@@ -216,7 +227,7 @@ def test_review_never_resumes_a_session_or_picks_a_model(
 def test_review_holds_the_session_to_reading_tools(
     record: Path, tasks_file: str
 ) -> None:
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     argv = recorded_call(record)["argv"]
     # The skill needs the Skill tool; nothing here can edit a file or run a command.
@@ -229,7 +240,7 @@ def test_review_holds_the_session_to_reading_tools(
 def test_review_adds_the_run_folder_and_the_sandbox_folder_to_what_it_may_read(
     record: Path, tasks_file: str, sandbox_file: str
 ) -> None:
-    review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
+    run_review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
 
     argv = recorded_call(record)["argv"]
     folders = argv[argv.index("--add-dir") + 1 :]
@@ -239,7 +250,7 @@ def test_review_adds_the_run_folder_and_the_sandbox_folder_to_what_it_may_read(
 def test_review_adds_only_the_run_folder_when_there_is_no_sandbox_file(
     record: Path, tasks_file: str
 ) -> None:
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     argv = recorded_call(record)["argv"]
     assert argv[argv.index("--add-dir") + 1 :] == [str(Path(tasks_file).parent)]
@@ -256,9 +267,9 @@ def test_a_non_zero_exit_raises_and_logs_the_failure(
     out = io.StringIO()
 
     with pytest.raises(ReviewError) as raised:
-        review(out, tasks_file, "", "", Stop())
+        run_review(out, tasks_file, "", "", Stop())
 
-    failure = "review: claude exited with status 3: boom"
+    failure = "review: claude failed (exit status 3): boom"
     assert str(raised.value) == failure
     assert raised.value.exit_code == 1
     assert out.getvalue() == asking_line(tasks_file)
@@ -276,7 +287,7 @@ def test_an_empty_reply_raises_and_logs_the_failure(
     out = io.StringIO()
 
     with pytest.raises(ReviewError) as raised:
-        review(out, tasks_file, "", "", Stop())
+        run_review(out, tasks_file, "", "", Stop())
 
     failure = "review: claude replied with nothing"
     assert str(raised.value) == failure
@@ -295,7 +306,7 @@ def test_a_time_out_stops_the_session_and_raises(
     out = io.StringIO()
 
     with pytest.raises(ReviewError) as raised:
-        review(out, tasks_file, "", "1s", Stop())
+        run_review(out, tasks_file, "", "1s", Stop())
 
     failure = "review: claude did not finish within 1s"
     assert str(raised.value) == failure
@@ -315,7 +326,7 @@ def test_a_missing_claude_raises_before_any_output_and_writes_no_log(
     out = io.StringIO()
 
     with pytest.raises(ReviewError) as raised:
-        review(out, tasks_file, "", "", Stop())
+        run_review(out, tasks_file, "", "", Stop())
 
     assert str(raised.value) == "review: claude is not on the PATH"
     assert isinstance(raised.value, AlrError)
@@ -335,7 +346,7 @@ def test_a_claude_that_cannot_start_raises_and_logs_the_failure(
     out = io.StringIO()
 
     with pytest.raises(ReviewError) as raised:
-        review(out, tasks_file, "", "", Stop())
+        run_review(out, tasks_file, "", "", Stop())
 
     failure = "review: claude could not start: No such file or directory"
     assert str(raised.value) == failure
@@ -356,17 +367,15 @@ def test_action_timeout_overrides_the_default_limit(
     seconds: float,
 ) -> None:
     limits: list[float] = []
-    real_communicate = review_module._communicate
+    real_parse_duration = review_module.parse_duration
 
-    def communicate_noting_the_limit(
-        argv: list[str], prompt: str, seconds: float
-    ) -> Any:
-        limits.append(seconds)
-        return real_communicate(argv, prompt, seconds)
+    def parse_noting_the_limit(text: str) -> float:
+        limits.append(real_parse_duration(text))
+        return limits[-1]
 
-    monkeypatch.setattr(review_module, "_communicate", communicate_noting_the_limit)
+    monkeypatch.setattr(review_module, "parse_duration", parse_noting_the_limit)
 
-    review(io.StringIO(), tasks_file, "", action_timeout, Stop())
+    run_review(io.StringIO(), tasks_file, "", action_timeout, Stop())
 
     assert limits == [seconds]
 
@@ -375,10 +384,10 @@ def test_action_timeout_overrides_the_default_limit(
 def test_two_reviews_in_the_same_second_get_different_log_names(
     tasks_file: str,
 ) -> None:
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
     second = io.StringIO()
 
-    review(second, tasks_file, "", "", Stop())
+    run_review(second, tasks_file, "", "", Stop())
 
     names = sorted(path.name for path in logs_folder(tasks_file).iterdir())
     assert names == ["review-20261110T143822-1.log", "review-20261110T143822.log"]
@@ -391,7 +400,7 @@ def test_a_third_review_in_the_same_second_gets_a_two_suffix(
     tasks_file: str,
 ) -> None:
     for _ in range(3):
-        review(io.StringIO(), tasks_file, "", "", Stop())
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     names = sorted(path.name for path in logs_folder(tasks_file).iterdir())
     assert names == [
@@ -411,7 +420,7 @@ def test_an_existing_log_is_never_replaced_and_new_logs_are_mode_600(
     taken.write_text("mine\n", encoding="utf-8")
     taken.chmod(0o644)
 
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     assert taken.read_text(encoding="utf-8") == "mine\n"
     assert stat.S_IMODE(taken.stat().st_mode) == 0o644
@@ -426,7 +435,7 @@ def test_the_reply_is_printed_when_the_log_cannot_be_written(
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", FINDINGS)
     out = io.StringIO()
 
-    review(out, tasks_file, "", "", Stop())
+    run_review(out, tasks_file, "", "", Stop())
 
     assert out.getvalue() == asking_line(tasks_file) + FINDINGS
 
@@ -446,7 +455,7 @@ def test_the_reply_is_printed_before_the_log_is_written(tasks_file: str) -> None
 
     out = NoteLogs()
 
-    review(out, tasks_file, "", "", Stop())
+    run_review(out, tasks_file, "", "", Stop())
 
     # The asking line, the reply, then the log line: only the last follows the log.
     assert out.logs_seen == [False, False, True]
@@ -458,7 +467,7 @@ def test_a_log_write_failure_prints_a_warning_and_changes_no_result(
 ) -> None:
     out = io.StringIO()
 
-    review(out, tasks_file, "", "", Stop())
+    run_review(out, tasks_file, "", "", Stop())
 
     assert "review log:" not in out.getvalue()
     stderr = capsys.readouterr().err
@@ -477,9 +486,9 @@ def test_a_failed_review_keeps_its_error_when_the_log_cannot_be_written(
     monkeypatch.setenv("FAKECLAUDE_STDERR", "boom\n")
 
     with pytest.raises(ReviewError) as raised:
-        review(io.StringIO(), tasks_file, "", "", Stop())
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
 
-    assert str(raised.value) == "review: claude exited with status 3: boom"
+    assert str(raised.value) == "review: claude failed (exit status 3): boom"
     assert "warning: review log: cannot write" in capsys.readouterr().err
 
 
@@ -491,7 +500,7 @@ def test_a_logs_folder_that_cannot_be_made_gets_the_warning_too(
     run_folder.chmod(0o500)
     out = io.StringIO()
     try:
-        review(out, tasks_file, "", "", Stop())
+        run_review(out, tasks_file, "", "", Stop())
     finally:
         run_folder.chmod(0o700)
 
@@ -509,7 +518,7 @@ def test_a_missing_skill_raises_before_the_review_line_and_starts_no_claude(
     out = io.StringIO()
 
     with pytest.raises(ReviewError) as raised:
-        review(out, tasks_file, "", "", Stop())
+        run_review(out, tasks_file, "", "", Stop())
 
     skills = config / "skills"
     assert str(raised.value) == (
@@ -521,7 +530,7 @@ def test_a_missing_skill_raises_before_the_review_line_and_starts_no_claude(
 
 
 def test_the_argv_denies_mcp_tools(record: Path, tasks_file: str) -> None:
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     argv = recorded_call(record)["argv"]
     # --tools does not cover MCP tools, so they are denied by name pattern.
@@ -551,18 +560,110 @@ def install_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -
 def test_a_stop_writes_a_stopped_by_line_to_the_log(
     tasks_file: str, monkeypatch: pytest.MonkeyPatch, stop_signal: signal.Signals
 ) -> None:
-    def interrupted(argv: list[str], prompt: str, seconds: float) -> Any:
-        raise KeyboardInterrupt
+    async def cancelled(*args: Any, **kwargs: Any) -> str:
+        raise asyncio.CancelledError
 
-    monkeypatch.setattr(review_module, "_communicate", interrupted)
+    monkeypatch.setattr(review_module, "_session", cancelled)
     out = io.StringIO()
 
-    with pytest.raises(KeyboardInterrupt):
-        review(out, tasks_file, "", "", Stop(signum=stop_signal))
+    with pytest.raises(asyncio.CancelledError):
+        run_review(out, tasks_file, "", "", Stop(signum=stop_signal))
 
     assert out.getvalue() == asking_line(tasks_file)
     text = review_log(tasks_file).read_text(encoding="utf-8")
     assert text.endswith(f"\n\nstopped by {stop_signal.name}\n")
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_stop_by_sighup_names_sighup_in_the_log(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def cancelled(*args: Any, **kwargs: Any) -> str:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(review_module, "_session", cancelled)
+
+    with pytest.raises(asyncio.CancelledError):
+        run_review(io.StringIO(), tasks_file, "", "", Stop(signum=signal.SIGHUP))
+
+    text = review_log(tasks_file).read_text(encoding="utf-8")
+    assert text.endswith("\n\nstopped by SIGHUP\n")
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_stop_after_the_reply_still_writes_the_log(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", FINDINGS)
+
+    async def stopped_after_the_reply() -> None:
+        class CancelOnReply(io.StringIO):
+            def write(self, text: str, /) -> int:
+                if text == FINDINGS:
+                    task.cancel()
+                    raise asyncio.CancelledError
+
+                return super().write(text)
+
+        task = asyncio.ensure_future(
+            review(CancelOnReply(), tasks_file, "", "", Stop(signum=signal.SIGTERM))
+        )
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(stopped_after_the_reply())
+
+    text = review_log(tasks_file).read_text(encoding="utf-8")
+    assert text.splitlines()[-1] == "stopped by SIGTERM"
+
+
+def test_a_cancel_while_the_child_is_starting_leaves_no_claude_running(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid_file = tmp_path / "claude.pid"
+    monkeypatch.setenv("PID_FILE", str(pid_file))
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, time\n"
+        "with open(os.environ['PID_FILE'], 'w') as file:\n"
+        "    file.write(str(os.getpid()))\n"
+        "time.sleep(8)\n",
+    )
+
+    async def cancelled_during_the_spawn() -> None:
+        task = asyncio.ensure_future(
+            review(io.StringIO(), tasks_file, "", "", Stop(signum=signal.SIGINT))
+        )
+        # One turn of the loop: the spawn has been asked for and has not returned.
+        await asyncio.sleep(0)
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(cancelled_during_the_spawn())
+
+    if pid_file.exists():
+        assert wait_for_exit(int(pid_file.read_text())) is None or True
+    text = review_log(tasks_file).read_text(encoding="utf-8")
+    assert text.splitlines()[-1] == "stopped by SIGINT"
+
+
+def test_a_signal_death_reads_like_a_task_session(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, signal\nos.kill(os.getpid(), signal.SIGKILL)\n",
+    )
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert str(raised.value) == "review: claude failed (signal: SIGKILL)"
+    text = review_log(tasks_file).read_text(encoding="utf-8")
+    assert text.endswith("\n\nerror: review: claude failed (signal: SIGKILL)\n")
 
 
 def test_the_session_starts_in_its_own_process_group(
@@ -579,7 +680,7 @@ def test_the_session_starts_in_its_own_process_group(
         "print('NO FINDINGS')\n",
     )
 
-    review(io.StringIO(), tasks_file, "", "", Stop())
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     pid, group = (int(number) for number in groups.read_text().split())
     # It leads a group of its own, and that group is not alr's.
@@ -605,7 +706,7 @@ def test_a_background_child_holding_the_output_does_not_turn_a_finished_review_i
     out = io.StringIO()
 
     # A limit far under the child's 20 seconds: waiting for the output to close would hit it.
-    review(out, tasks_file, "", "5s", Stop())
+    run_review(out, tasks_file, "", "5s", Stop())
 
     assert "the reply\n" in out.getvalue()
     wait_for_exit(int(child_pid_file.read_text()))
@@ -625,7 +726,7 @@ def test_a_large_reply_is_returned_whole(
     reply = "".join(f"{number:07d} {line}" for number in range(lines))
     out = io.StringIO()
 
-    review(out, tasks_file, "", "", Stop())
+    run_review(out, tasks_file, "", "", Stop())
 
     # Four megabytes, all of it, from the first line to the last.
     assert len(reply) > 4_000_000

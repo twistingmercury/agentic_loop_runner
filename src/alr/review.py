@@ -5,17 +5,18 @@ leaves a log beside the run logs, whether it finds nothing, finds problems, or
 fails.
 """
 
+import asyncio
 import os
 import shutil
 import signal
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryFile
-from typing import BinaryIO, TextIO
+from subprocess import PIPE
+from typing import TextIO
 
 from alr.durations import parse_duration
+from alr.engine import proc
 from alr.engine.stop import Stop
 from alr.errors import ReviewError
 from alr.skillinstall import skills_folder
@@ -33,7 +34,7 @@ _DIR_MODE = 0o700
 _FILE_MODE = 0o600
 
 
-def review(
+async def review(
     out: TextIO, tasks_file: str, sandbox_file: str, action_timeout: str, stop: Stop
 ) -> None:
     """Ask a fresh Claude session to review the task file, print what it says, and log it.
@@ -42,10 +43,9 @@ def review(
     for the ten minute default. A review that cannot run or finish raises
     ReviewError, after writing the failure to the log when the review had
     started. What the review finds never raises, and neither does a log that
-    cannot be written: that is a warning on stderr. A stop arrives as a
-    KeyboardInterrupt raised by the caller's signal handler, which records the
-    signal in stop first; the log says which signal it was, and the
-    interrupt goes on.
+    cannot be written: that is a warning on stderr. A stop cancels this
+    coroutine; the log says which signal it was, from stop, and the
+    cancellation goes on.
     """
     # Both found before anything prints, so a machine without claude or without
     # the skill gets one error line and no log.
@@ -55,21 +55,31 @@ def review(
     out.write(f"review: asking Claude to read {tasks_file} (this uses tokens)\n")
     # The session takes minutes; the line must show before it ends.
     out.flush()
+    body = "error: the review ended without a result"
     try:
-        reply = _run_session(claude, tasks_file, sandbox_file, action_timeout)
+        reply = await _session(claude, tasks_file, sandbox_file, action_timeout)
+        body = reply
+        # Printed before the log is written, so a log that fails never costs the reply.
+        out.write(_with_newline(reply))
     except ReviewError as exc:
-        _write_log(started, tasks_file, sandbox_file, f"error: {exc}")
+        body = f"error: {exc}"
         raise
-    except KeyboardInterrupt:
-        stopped = f"stopped by {signal.Signals(stop.signum).name}"
-        _write_log(started, tasks_file, sandbox_file, stopped)
+    except asyncio.CancelledError:
+        body = f"stopped by {_signal_name(stop.signum)}"
         raise
+    finally:
+        # In finally, so a stop or a failing print at any point still leaves a log.
+        log_path = _write_log(started, tasks_file, sandbox_file, body)
 
-    # Printed before the log is written, so a log that fails never costs the reply.
-    out.write(_with_newline(reply))
-    log_path = _write_log(started, tasks_file, sandbox_file, reply)
     if log_path is not None:
         out.write(f"review log: {log_path}\n")
+
+
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return str(signum)
 
 
 def _find_claude() -> str:
@@ -96,28 +106,71 @@ def _now() -> datetime:
     return datetime.now().astimezone()
 
 
-def _run_session(
+async def _session(
     claude: str, tasks_file: str, sandbox_file: str, action_timeout: str
 ) -> str:
     """Run the review session and return its reply, or raise ReviewError."""
     limit = action_timeout or DEFAULT_TIMEOUT
+    seconds = parse_duration(limit)
     argv = _argv(claude, tasks_file, sandbox_file)
     prompt = _prompt(tasks_file, sandbox_file)
     try:
-        result = _communicate(argv, prompt, parse_duration(limit))
-    except subprocess.TimeoutExpired as exc:
-        raise ReviewError(f"claude did not finish within {limit}") from exc
+        process = await proc.start(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE)
     except OSError as exc:
         raise ReviewError(f"claude could not start: {exc.strerror}") from exc
 
-    if result.returncode != 0:
-        raise ReviewError(_exit_reason(result.returncode, result.stderr))
+    stdout: list[bytes] = []
+    stderr: list[bytes] = []
+    drain = _pump(process, prompt.encode("utf-8"), stdout, stderr)
+    try:
+        async with asyncio.timeout(seconds):
+            # Bounded: the review is claude's own exit and reply, so a
+            # background child that keeps the pipes open must not hold it up (#61).
+            error = await proc.finish(process, drain, bounded=True)
+    except TimeoutError as exc:
+        raise ReviewError(f"claude did not finish within {limit}") from exc
 
+    _kill_leftovers(process)
+    if error is not None:
+        raise ReviewError(_exit_reason(error, _text(stderr)))
+
+    reply = _text(stdout)
     # Whitespace alone is no review: even a clean file gets NO FINDINGS.
-    if not result.stdout.strip():
+    if not reply.strip():
         raise ReviewError("claude replied with nothing")
 
-    return result.stdout
+    return reply
+
+
+def _kill_leftovers(process: asyncio.subprocess.Process) -> None:
+    """SIGKILL what the session left in its group, so nothing it started outlives the review."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+async def _pump(
+    process: asyncio.subprocess.Process,
+    prompt: bytes,
+    stdout: list[bytes],
+    stderr: list[bytes],
+) -> None:
+    """Feed the prompt and collect both outputs at the same time, so a full pipe never blocks the session."""
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        raise RuntimeError("the review was started without stdin and output pipes")
+
+    await asyncio.gather(
+        proc.feed_stdin(process.stdin, prompt),
+        proc.read_lines(process.stdout, stdout.append),
+        proc.read_lines(process.stderr, stderr.append),
+    )
+
+
+def _text(pieces: list[bytes]) -> str:
+    """Join what the session wrote, replacing bytes that are not UTF-8."""
+    return b"".join(pieces).decode("utf-8", errors="replace")
 
 
 def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:
@@ -162,62 +215,9 @@ def _prompt(tasks_file: str, sandbox_file: str) -> str:
     )
 
 
-def _communicate(
-    argv: list[str], prompt: str, seconds: float
-) -> subprocess.CompletedProcess[str]:
-    """Run argv with the prompt on stdin and return what it wrote.
-
-    Stdin, stdout, and stderr are temporary files, not pipes. Waiting on pipes
-    only ends when every holder closes them, so a background child that kept
-    the output open would turn a finished review into a time out (#61). With
-    files the wait ends when claude exits, whatever it left behind.
-    """
-    with TemporaryFile() as stdin, TemporaryFile() as stdout, TemporaryFile() as stderr:
-        stdin.write(prompt.encode("utf-8"))
-        stdin.seek(0)
-        # Its own group, so one kill reaches everything the session started.
-        process = subprocess.Popen(
-            argv, stdin=stdin, stdout=stdout, stderr=stderr, process_group=0
-        )
-        _wait_then_kill_group(process, seconds)
-        return subprocess.CompletedProcess(
-            argv, process.returncode, _read_text(stdout), _read_text(stderr)
-        )
-
-
-def _wait_then_kill_group(process: "subprocess.Popen[bytes]", seconds: float) -> None:
-    """Wait for claude to exit, then kill its group, on every way out.
-
-    The group dies when claude exits normally too, so nothing the session
-    started outlives the review. subprocess.run does not wait for its child
-    after a KeyboardInterrupt (a stop raises one), which would leave the killed
-    child unreaped when alr exits, so the child is waited for here.
-    """
-    try:
-        process.wait(timeout=seconds)
-    finally:
-        _kill_group(process)
-        process.wait()
-
-
-def _kill_group(process: "subprocess.Popen[bytes]") -> None:
-    """Send SIGKILL to the process group claude leads; nothing is left to kill when it is gone."""
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
-    except (ProcessLookupError, PermissionError):
-        pass
-
-
-def _read_text(file: BinaryIO) -> str:
-    """Read everything the session wrote to file, replacing bytes that are not UTF-8."""
-    file.seek(0)
-    return file.read().decode("utf-8", errors="replace")
-
-
-def _exit_reason(returncode: int, stderr: str) -> str:
+def _exit_reason(exit_text: str, stderr: str) -> str:
     """Say how claude ended, with the last line it wrote to stderr when it wrote any."""
-    reason = f"claude exited with status {returncode}"
+    reason = f"claude failed ({exit_text})"
     lines = stderr.strip().splitlines()
     if not lines:
         return reason

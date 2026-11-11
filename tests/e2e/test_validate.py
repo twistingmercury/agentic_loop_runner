@@ -79,9 +79,9 @@ def test_validate_reports_a_failed_review(tmp_path: Path, fake_claude: Path) -> 
     )
 
     assert res.code == 1, res
-    assert res.err == "error: review: claude exited with status 1: boom\n"
+    assert res.err == "error: review: claude failed (exit status 1): boom\n"
     [log] = review_logs(tmp_path)
-    assert "error: review: claude exited with status 1: boom" in log.read_text(
+    assert "error: review: claude failed (exit status 1): boom" in log.read_text(
         encoding="utf-8"
     )
 
