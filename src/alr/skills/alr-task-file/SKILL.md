@@ -202,9 +202,8 @@ authorized.
    and exits non-zero on an invalid file. When the file has no warnings, it
    then starts a fresh Claude Code session that reads the file with the
    `alr-task-review` skill and prints its findings, or `NO FINDINGS`. Run it as
-   an ordinary Bash call with the longest timeout (10 minutes). If the Bash
-   call itself times out, say in your report that the review did not finish
-   and tell the user to run `alr --validate` themselves. Put what it
+   a background Bash command and wait for it to finish; the review can take
+   minutes, and alr stops it itself after its own timeout. Put what it
    prints in your report and change nothing because of the findings until the
    user says so. Report any `error: review:` line as it is, with no fallback.
    If this `alr` does not know `--validate` (exit 2, `unrecognized

@@ -11,20 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--validate` (ADR-036) runs everything `--dry-run` runs, then, when the dry
   run printed no warning, asks a fresh Claude Code session to read the task
-  file with the `alr-task-review` skill. The session can only read, never
-  change anything. alr prints the reply as it came (one line per finding, or
-  `NO FINDINGS`) and keeps it in `logs/review-<timestamp>.log` in the run
-  folder. It uses tokens, so it needs `claude` on your PATH. Like a real run,
-  it syncs the bundled skills first. If the dry run found warnings, the review
-  is skipped and alr prints `review skipped: the dry run found problems; fix
-  them and run again`. Findings never change the exit code: it is the dry
-  run's own (0, or 3 with `--strict` and a warning, in which case there is no
-  review). A review that cannot run, fails, or runs past 10 minutes
+  file with the `alr-task-review` skill. The session is limited to reading
+  tools and its MCP tools are denied, but your usual Claude settings, hooks
+  included, still load. alr prints the reply as it came (one line per
+  finding, or `NO FINDINGS`) and keeps it in `logs/review-<timestamp>.log` in
+  the run folder. It uses tokens, so it needs `claude` on your PATH. Like a
+  real run, it syncs the bundled skills first. If the dry run found warnings,
+  the review is skipped and alr prints `review skipped: the dry run found
+  problems; fix them and run again`. Findings never change the exit code: it
+  is the dry run's own (0, or 3 with `--strict` and a warning, in which case
+  there is no review). A review that cannot run, fails, or runs past 10 minutes
   (`--action-timeout` changes that) prints `error: review: <reason>` and exits
   1. The session runs in its own process group, which alr kills when the review
-  ends, and the MCP tools are denied. A sandbox file the real run would add is
-  added first, as in a real run. When two reviews start in the same second, the
-  second log gets a `-1` suffix (`review-<timestamp>-1.log`).
+  ends. SIGINT, SIGTERM, and SIGHUP stop a validate and the log says which;
+  killing alr with SIGKILL leaves the session running. A sandbox file the real
+  run would add is added first, as in a real run. When two reviews start in the
+  same second, the second log gets a `-1` suffix
+  (`review-<timestamp>-1.log`).
 
 ### Changed
 
