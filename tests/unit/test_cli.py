@@ -2236,6 +2236,24 @@ def test_validate_skips_the_review_under_strict_and_still_exits_3(
     assert not (folder / "logs").exists()
 
 
+def test_validate_skips_the_review_for_exactly_one_warning(
+    folder: Path, record: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The clean task file minus its after_task list draws one warning (no check),
+    # so a skip that needs two warnings would not hold here.
+    one_warning = CLEAN_ONE_TASK_YAML.replace("  after_task: []\n", "")
+    (folder / "tasks.yaml").write_text(one_warning, encoding="utf-8")
+
+    code = cli.main(["-d", str(folder), "--validate"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.count("warning") == 1
+    assert out.endswith(REVIEW_SKIPPED)
+    assert not record.exists()
+    assert not (folder / "logs").exists()
+
+
 @pytest.mark.parametrize("extra", [[], ["--strict"]], ids=["lenient", "strict"])
 def test_validate_never_starts_claude_when_it_skips(
     folder: Path, record: Path, extra: list[str]
@@ -2353,8 +2371,13 @@ def test_validate_never_opens_the_view(
     clean_folder: Path, record: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: list[RunSettings] = []
+
+    def record_settings(settings: RunSettings) -> int:
+        seen.append(settings)
+        return 0
+
     # The real wants_tui decides; only the view itself is replaced.
-    monkeypatch.setattr("alr.cli.run_app", lambda settings: seen.append(settings) or 0)
+    monkeypatch.setattr("alr.cli.run_app", record_settings)
 
     code = cli.main(["-d", str(clean_folder), "--validate"])
 

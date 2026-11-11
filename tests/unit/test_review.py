@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 import os
 import re
 import signal
@@ -10,7 +11,7 @@ import sys
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import pytest
 from helpers import (
@@ -71,7 +72,7 @@ def unwritable_logs(tasks_file: str, locked_folder: None) -> Iterator[Path]:
 
 
 def run_review(
-    out: io.StringIO,
+    out: TextIO,
     tasks_file: str,
     sandbox_file: str,
     action_timeout: str,
@@ -142,8 +143,8 @@ def test_review_writes_the_log_with_a_header_and_the_reply(
     header, _, body = text.partition("\n\n")
     time_line, task_line, sandbox_line = header.splitlines()
     assert HEADER_TIME.fullmatch(time_line), time_line
-    assert task_line == f"task file: {tasks_file}"
-    assert sandbox_line == f"sandbox file: {sandbox_file}"
+    assert task_line == f"task file: {json.dumps(tasks_file)}"
+    assert sandbox_line == f"sandbox file: {json.dumps(sandbox_file)}"
     assert body == FINDINGS
 
 
@@ -523,6 +524,87 @@ def test_a_missing_skill_raises_before_the_review_line_and_starts_no_claude(
     skills = config / "skills"
     assert str(raised.value) == (
         f"review: the alr-task-review skill is not installed in {skills}"
+    )
+    assert out.getvalue() == ""
+    assert not logs_folder(tasks_file).exists()
+    assert fake_claude_records(record) == []
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_reply_the_stream_cannot_encode_prints_with_a_replacement_and_still_logs(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "task=1 | size \u2014 too big\n")
+    raw = io.BytesIO()
+    out = io.TextIOWrapper(raw, encoding="ascii", write_through=True)
+
+    run_review(out, tasks_file, "", "", Stop())
+
+    log = review_log(tasks_file)
+    assert raw.getvalue().decode("ascii") == (
+        asking_line(tasks_file) + "task=1 | size ? too big\n" + f"review log: {log}\n"
+    )
+    # The log is utf-8, so the reply is kept whole there.
+    assert "size \u2014 too big" in log.read_text(encoding="utf-8")
+
+
+def test_a_path_with_a_line_break_is_quoted_in_the_prompt_and_the_header(
+    record: Path, tmp_path: Path
+) -> None:
+    folder = tmp_path / "odd\nname"
+    folder.mkdir()
+    odd_tasks = write_file(folder / "tasks.yaml", TASKS_YAML)
+
+    run_review(io.StringIO(), odd_tasks, "", "", Stop())
+
+    quoted = json.dumps(odd_tasks)
+    prompt = recorded_call(record)["stdin"]
+    assert f"alr task file {quoted}." in prompt
+    assert odd_tasks not in prompt
+    header = review_log(odd_tasks).read_text(encoding="utf-8").split("\n\n")[0]
+    assert header.splitlines()[1] == f"task file: {quoted}"
+    assert len(header.splitlines()) == 3
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_the_last_stderr_line_is_the_reason(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "first line\nsecond line\n")
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert str(raised.value) == "review: claude failed (exit status 1): second line"
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_invalid_utf8_in_the_reply_is_replaced(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "bad \udcff byte\n")
+    out = io.StringIO()
+
+    run_review(out, tasks_file, "", "", Stop())
+
+    assert "bad \ufffd byte\n" in out.getvalue()
+    assert "bad \ufffd byte" in review_log(tasks_file).read_text(encoding="utf-8")
+
+
+def test_a_skills_folder_without_skill_md_fails_before_the_review_line(
+    record: Path, tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "cfg"
+    (config / "skills" / "alr-task-review").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    out = io.StringIO()
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(out, tasks_file, "", "", Stop())
+
+    assert str(raised.value) == (
+        f"review: the alr-task-review skill is not installed in {config / 'skills'}"
     )
     assert out.getvalue() == ""
     assert not logs_folder(tasks_file).exists()

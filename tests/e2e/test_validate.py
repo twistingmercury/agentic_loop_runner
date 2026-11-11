@@ -146,7 +146,7 @@ def test_validate_passes_sandbox_and_action_timeout_to_the_review(
     )
 
     assert limited.code == 1, limited
-    assert limited.err.startswith("error: review: ")
+    assert limited.err == "error: review: claude did not finish within 1s\n"
     assert time.monotonic() - started < 20
 
 

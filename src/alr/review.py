@@ -6,6 +6,7 @@ fails.
 """
 
 import asyncio
+import json
 import os
 import shutil
 import signal
@@ -60,7 +61,7 @@ async def review(
         reply = await _session(claude, tasks_file, sandbox_file, action_timeout)
         body = reply
         # Printed before the log is written, so a log that fails never costs the reply.
-        out.write(_with_newline(reply))
+        _write_safely(out, _with_newline(reply))
     except ReviewError as exc:
         body = f"error: {exc}"
         raise
@@ -73,6 +74,17 @@ async def review(
 
     if log_path is not None:
         out.write(f"review log: {log_path}\n")
+
+
+def _write_safely(out: TextIO, text: str) -> None:
+    """Write text to out, replacing characters the stream's encoding cannot show.
+
+    A reply is the model's words, so it can hold a character a terminal set to
+    ascii cannot print. That must cost a replacement character, not the log.
+    """
+    encoding = out.encoding or "utf-8"
+    shown = text.encode(encoding, errors="replace").decode(encoding)
+    out.write(shown)
 
 
 def _signal_name(signum: int) -> str:
@@ -97,6 +109,7 @@ def _check_skill_installed() -> None:
     do, for example when the startup sync could not write the folder.
     """
     folder = skills_folder()
+    # SKILL.md itself, since an empty skill folder is not a skill.
     if not (folder / _SKILL_NAME / "SKILL.md").is_file():
         raise ReviewError(f"the {_SKILL_NAME} skill is not installed in {folder}")
 
@@ -203,13 +216,16 @@ def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:
 
 
 def _prompt(tasks_file: str, sandbox_file: str) -> str:
+    # Quoted, so a path with a line break cannot add a line to the prompt.
     if sandbox_file:
-        sandbox = f"The sandbox settings file the run will use is {sandbox_file}."
+        quoted_sandbox = json.dumps(sandbox_file)
+        sandbox = f"The sandbox settings file the run will use is {quoted_sandbox}."
     else:
         sandbox = "There is no sandbox settings file for this run."
 
+    quoted_tasks = json.dumps(tasks_file)
     return (
-        f"Use the {_SKILL_NAME} skill to review the alr task file {tasks_file}.\n"
+        f"Use the {_SKILL_NAME} skill to review the alr task file {quoted_tasks}.\n"
         f"{sandbox}\n"
         "Reply with what the skill says to report and nothing else.\n"
     )
@@ -241,11 +257,7 @@ def _write_log(
     The logs folder is made when it is missing. A log that cannot be written
     never raises: the review's reply, or its own error, matters more.
     """
-    header = (
-        f"time: {started.isoformat(timespec='seconds')}\n"
-        f"task file: {tasks_file}\n"
-        f"sandbox file: {sandbox_file or 'none'}\n"
-    )
+    header = _log_header(started, tasks_file, sandbox_file)
     text = f"{header}\n{_with_newline(body)}"
     # The run log's timestamp form, in local time.
     stamp = started.strftime("%Y%m%dT%H%M%S")
@@ -256,20 +268,45 @@ def _write_log(
         _warn_log_not_written(logs / _log_name(stamp, 0), exc)
         return None
 
+    return _create_log(logs, stamp, text)
+
+
+def _log_header(started: datetime, tasks_file: str, sandbox_file: str) -> str:
+    # Quoted, so a path with a line break cannot add a line to the header.
+    sandbox = json.dumps(sandbox_file) if sandbox_file else "none"
+    return (
+        f"time: {started.isoformat(timespec='seconds')}\n"
+        f"task file: {json.dumps(tasks_file)}\n"
+        f"sandbox file: {sandbox}\n"
+    )
+
+
+def _create_log(logs: Path, stamp: str, text: str) -> Path | None:
+    """Write text to the first free log name in logs and return its path, or None after a warning."""
     number = 0
     while True:
-        path = logs / _log_name(stamp, number)
         try:
-            _write_new_file(path, text)
+            return _write_new_log(logs / _log_name(stamp, number), text)
         except FileExistsError:
             # Another review started in the same second: its log is left alone.
             number += 1
-            continue
-        except OSError as exc:
-            _warn_log_not_written(path, exc)
-            return None
 
-        return path
+
+def _write_new_log(path: Path, text: str) -> Path | None:
+    """Write text to a new file at path; return None after a warning when it cannot be written.
+
+    FileExistsError goes on to the caller, which tries the next name.
+    """
+    try:
+        _write_new_file(path, text)
+    except FileExistsError:
+        # A subclass of OSError, so it is named first to get past the warning below.
+        raise
+    except OSError as exc:
+        _warn_log_not_written(path, exc)
+        return None
+
+    return path
 
 
 def _log_name(stamp: str, number: int) -> str:
