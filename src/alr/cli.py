@@ -230,14 +230,15 @@ def _review(tasks_file: str, sandbox_file: str, action_timeout: str, stop: Stop)
     """Run the review, which blocks, so that SIGINT and SIGTERM still stop alr.
 
     The event loop is gone by now and the review waits on a child process, so a
-    handler that raises ends the wait; subprocess.run then kills the child. The
-    signal is recorded in stop, as _run does, for the exit code.
+    handler that raises ends the wait; review._communicate then kills the
+    child's group and waits for it. The signal is recorded in stop, as _run does,
+    for the exit code, and review reads it to write the log's stopped by line.
     """
     handler = _raise_on_first_stop(stop)
     stop_signals = (signal.SIGINT, signal.SIGTERM)
     before = {sig: signal.signal(sig, handler) for sig in stop_signals}
     try:
-        review(sys.stdout, tasks_file, sandbox_file, action_timeout)
+        review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
     except ReviewError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code

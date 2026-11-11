@@ -7,13 +7,16 @@ fails.
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from tempfile import TemporaryFile
+from typing import BinaryIO, TextIO
 
 from alr.durations import parse_duration
+from alr.engine.stop import Stop
 from alr.errors import ReviewError
 from alr.skillinstall import skills_folder
 
@@ -31,7 +34,7 @@ _FILE_MODE = 0o600
 
 
 def review(
-    out: TextIO, tasks_file: str, sandbox_file: str, action_timeout: str
+    out: TextIO, tasks_file: str, sandbox_file: str, action_timeout: str, stop: Stop
 ) -> None:
     """Ask a fresh Claude session to review the task file, print what it says, and log it.
 
@@ -39,7 +42,10 @@ def review(
     for the ten minute default. A review that cannot run or finish raises
     ReviewError, after writing the failure to the log when the review had
     started. What the review finds never raises, and neither does a log that
-    cannot be written: that is a warning on stderr.
+    cannot be written: that is a warning on stderr. A stop arrives as a
+    KeyboardInterrupt raised by the caller's signal handler, which records the
+    signal in stop first; the log says which signal it was, and the
+    interrupt goes on.
     """
     # Both found before anything prints, so a machine without claude or without
     # the skill gets one error line and no log.
@@ -53,6 +59,10 @@ def review(
         reply = _run_session(claude, tasks_file, sandbox_file, action_timeout)
     except ReviewError as exc:
         _write_log(started, tasks_file, sandbox_file, f"error: {exc}")
+        raise
+    except KeyboardInterrupt:
+        stopped = f"stopped by {signal.Signals(stop.signum).name}"
+        _write_log(started, tasks_file, sandbox_file, stopped)
         raise
 
     # Printed before the log is written, so a log that fails never costs the reply.
@@ -110,35 +120,52 @@ def _communicate(
 ) -> subprocess.CompletedProcess[str]:
     """Run argv with the prompt on stdin and return what it wrote.
 
-    subprocess.run does not wait for its child after a KeyboardInterrupt, so a
-    stop (the signal handler raises one) would leave the killed child unreaped
-    when alr exits. This kills and waits for the child on every way out.
+    Stdin, stdout, and stderr are temporary files, not pipes. Waiting on pipes
+    only ends when every holder closes them, so a background child that kept
+    the output open would turn a finished review into a time out (#61). With
+    files the wait ends when claude exits, whatever it left behind.
     """
-    process = subprocess.Popen(
-        argv,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    with TemporaryFile() as stdin, TemporaryFile() as stdout, TemporaryFile() as stderr:
+        stdin.write(prompt.encode("utf-8"))
+        stdin.seek(0)
+        # Its own group, so one kill reaches everything the session started.
+        process = subprocess.Popen(
+            argv, stdin=stdin, stdout=stdout, stderr=stderr, process_group=0
+        )
+        _wait_then_kill_group(process, seconds)
+        return subprocess.CompletedProcess(
+            argv, process.returncode, _read_text(stdout), _read_text(stderr)
+        )
+
+
+def _wait_then_kill_group(process: "subprocess.Popen[bytes]", seconds: float) -> None:
+    """Wait for claude to exit, then kill its group, on every way out.
+
+    The group dies when claude exits normally too, so nothing the session
+    started outlives the review. subprocess.run does not wait for its child
+    after a KeyboardInterrupt (a stop raises one), which would leave the killed
+    child unreaped when alr exits, so the child is waited for here.
+    """
     try:
-        stdout, stderr = process.communicate(input=prompt, timeout=seconds)
-    except BaseException:
-        process.kill()
+        process.wait(timeout=seconds)
+    finally:
+        _kill_group(process)
         process.wait()
-        _close_pipes(process)
-        raise
-
-    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
-def _close_pipes(process: "subprocess.Popen[str]") -> None:
-    """Close the pipes that the interrupted communicate left open."""
-    for pipe in (process.stdin, process.stdout, process.stderr):
-        if pipe is not None:
-            pipe.close()
+def _kill_group(process: "subprocess.Popen[bytes]") -> None:
+    """Send SIGKILL to the process group claude leads; nothing is left to kill when it is gone."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _read_text(file: BinaryIO) -> str:
+    """Read everything the session wrote to file, replacing bytes that are not UTF-8."""
+    file.seek(0)
+    return file.read().decode("utf-8", errors="replace")
 
 
 def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:

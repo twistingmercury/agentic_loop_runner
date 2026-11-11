@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import chmodded, fake_claude_records, start_alr, wait_for_file
+from helpers import (
+    chmodded,
+    fake_claude_records,
+    start_alr,
+    wait_for_exit,
+    wait_for_file,
+)
 
 from alr import cli
 from alr.config import SandboxDefault
@@ -2378,3 +2384,32 @@ def test_validate_stops_on_a_signal_during_the_review(
     assert err == "error: interrupted\n"
     with pytest.raises(ProcessLookupError):
         os.kill(claude_pid, 0)
+
+
+@pytest.mark.parametrize("stop", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.usefixtures("fake_claude")
+def test_validate_stop_kills_everything_the_session_started(
+    clean_folder: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stop: signal.Signals,
+) -> None:
+    ready = tmp_path / "ready"
+    descendant_file = tmp_path / "descendant.pid"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+    monkeypatch.setenv("FAKECLAUDE_DESCENDANT_PID_FILE", str(descendant_file))
+
+    process = start_alr("-d", str(clean_folder), "--validate")
+    try:
+        wait_for_file(ready)
+        descendant_pid = int(wait_for_file(descendant_file))
+        process.send_signal(stop)
+        process.communicate(timeout=10)
+    finally:
+        process.kill()
+
+    assert process.returncode == 128 + stop
+    wait_for_exit(descendant_pid)
+    [log] = _review_logs(clean_folder)
+    assert log.read_text(encoding="utf-8").endswith(f"\n\nstopped by {stop.name}\n")
