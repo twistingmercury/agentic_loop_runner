@@ -2413,3 +2413,127 @@ def test_validate_stop_kills_everything_the_session_started(
     wait_for_exit(descendant_pid)
     [log] = _review_logs(clean_folder)
     assert log.read_text(encoding="utf-8").endswith(f"\n\nstopped by {stop.name}\n")
+
+
+def test_validate_adds_a_missing_shipped_sandbox_file_and_names_it_to_the_reviewer(
+    home: Path,
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    tight.unlink()
+
+    code = cli.main(["-d", str(clean_folder), "--validate", "--sandbox", "tight"])
+
+    out = capsys.readouterr().out
+    [call] = fake_claude_records(record)
+    assert code == 0
+    assert f"Added {tight}\n" in out
+    assert f"sandbox settings: {tight} (tight)\n" in out
+    assert "added on a real run" not in out
+    assert tight.is_file()
+    assert str(tight) in call["stdin"]
+
+
+class _ReviewCalls:
+    """What cli handed to the review, captured in place of running it."""
+
+    def __init__(self) -> None:
+        self.sandbox_files: list[str] = []
+        self.action_timeouts: list[str] = []
+
+    def review(
+        self,
+        out: object,
+        tasks_file: str,
+        sandbox_file: str,
+        action_timeout: str,
+        stop: Stop,
+    ) -> None:
+        self.sandbox_files.append(sandbox_file)
+        self.action_timeouts.append(action_timeout)
+
+
+@pytest.fixture
+def review_calls(monkeypatch: pytest.MonkeyPatch) -> _ReviewCalls:
+    """Replace the review with one that only records what it was given."""
+    calls = _ReviewCalls()
+    monkeypatch.setattr("alr.cli.review", calls.review)
+    return calls
+
+
+def test_validate_passes_the_sandbox_file_to_the_review(
+    clean_folder: Path, settings: str, review_calls: _ReviewCalls
+) -> None:
+    code = cli.main(
+        ["-d", str(clean_folder), "--validate", "--sandbox-settings", settings]
+    )
+
+    assert code == 0
+    assert review_calls.sandbox_files == [settings]
+
+
+def test_validate_passes_action_timeout_to_the_review(
+    clean_folder: Path, review_calls: _ReviewCalls
+) -> None:
+    code = cli.main(["-d", str(clean_folder), "--validate", "--action-timeout", "90s"])
+
+    assert code == 0
+    assert review_calls.action_timeouts == ["90s"]
+
+
+def _stop_signal_handlers() -> dict[signal.Signals, Any]:
+    return {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+
+
+def test_validate_puts_the_signal_handlers_back(
+    clean_folder: Path, review_calls: _ReviewCalls, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = _stop_signal_handlers()
+
+    assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
+    assert _stop_signal_handlers() == before
+
+    def stopped(*_args: object) -> None:
+        signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr("alr.cli.review", stopped)
+
+    assert cli.main(["-d", str(clean_folder), "--validate"]) == 143
+    assert _stop_signal_handlers() == before
+
+
+def test_another_refusal_prints_no_review_skipped_line(
+    tmp_path: Path, record: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A folder where tasks.yaml should be: the dry run refuses as invalid-task-file.
+    (tmp_path / "tasks.yaml").mkdir()
+
+    code = cli.main(["-d", str(tmp_path), "--validate"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert captured.err.startswith("error: refused: invalid-task-file: ")
+    assert "review skipped" not in captured.out
+    assert not record.exists()
+
+
+def test_a_second_signal_during_the_stop_is_ignored(
+    clean_folder: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def stopped_twice(*_args: object) -> None:
+        try:
+            signal.raise_signal(signal.SIGINT)
+        finally:
+            # The review's cleanup is still running when the second signal comes.
+            signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr("alr.cli.review", stopped_twice)
+
+    code = cli.main(["-d", str(clean_folder), "--validate"])
+
+    assert code == 130
+    assert capsys.readouterr().err == "error: interrupted\n"

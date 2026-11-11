@@ -1,6 +1,7 @@
 """--validate: the dry run, then a fresh review of the task file, run as the installed command."""
 
 import stat
+import time
 from pathlib import Path
 
 from e2e_helpers import (
@@ -102,3 +103,43 @@ def test_validate_is_rejected_with_reset_failed(
     assert res.code == 2, res
     assert "--reset-failed cannot be used with --validate" in res.err
     assert not record.exists()
+
+
+def test_validate_passes_sandbox_and_action_timeout_to_the_review(
+    tmp_path: Path, fake_claude: Path, home: Path
+) -> None:
+    write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
+    tight = home / ".local" / "alr" / "sandboxes" / "tight.json"
+    tight.unlink()
+    record = tmp_path / "record.ndjson"
+
+    named = run_alr(
+        "-d",
+        str(tmp_path),
+        "--validate",
+        "--sandbox",
+        "tight",
+        env={"FAKECLAUDE_RECORD_FILE": str(record)},
+    )
+
+    assert named.code == 0, named
+    assert f"Added {tight}\n" in named.out
+    assert "added on a real run" not in named.out
+    assert tight.is_file()
+    [call] = fake_claude_records(record)
+    assert str(tight) in call["stdin"]
+
+    started = time.monotonic()
+    limited = run_alr(
+        "-d",
+        str(tmp_path),
+        "--validate",
+        "--action-timeout",
+        "1s",
+        env={"FAKECLAUDE_BLOCK": "1"},
+        timeout=30,
+    )
+
+    assert limited.code == 1, limited
+    assert limited.err.startswith("error: review: ")
+    assert time.monotonic() - started < 20

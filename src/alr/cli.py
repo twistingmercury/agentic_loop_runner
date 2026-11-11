@@ -108,16 +108,13 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if not config_folder_exists():
             return _handle_missing_config_folder(args.dry_run)
 
-        # A dry run writes nothing (requirement 9): it refuses what the real run's
-        # add would refuse, and reads a missing shipped file from the package instead.
-        if args.dry_run:
+        # A plain dry run writes nothing (requirement 9): it refuses what the real
+        # run's add would refuse, and reads a missing shipped file from the package
+        # instead. --validate adds and syncs as a real run does, so the review
+        # reads a sandbox file that exists and uses the skill that came with this alr.
+        if args.dry_run and not args.validate:
             check_can_add_missing()
-            if args.validate:
-                # The review needs the skill that came with this alr, so it is
-                # synced as a real run would; the sandboxes stay unwritten.
-                _sync_skills()
-            else:
-                _report_pending_skills()
+            _report_pending_skills()
         else:
             _add_missing_sandboxes()
             _sync_skills()
@@ -157,7 +154,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             action_timeout,
             answer.sandbox_file,
             answer.sandbox_name,
-            _added_on_real_run(answer, args.dry_run),
+            _added_on_real_run(answer, args.dry_run and not args.validate),
             args.strict,
         )
         if args.validate:
