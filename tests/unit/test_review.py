@@ -3,6 +3,8 @@
 import io
 import re
 import stat
+from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,23 @@ def sandbox_file(tmp_path: Path) -> str:
     folder = tmp_path / "sandboxes"
     folder.mkdir()
     return write_file(folder / "tight.json", "{}")
+
+
+@pytest.fixture
+def one_second(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every review start in the same second."""
+    moment = datetime(2026, 11, 10, 14, 38, 22, tzinfo=timezone.utc)
+    monkeypatch.setattr(review_module, "_now", lambda: moment)
+
+
+@pytest.fixture
+def unwritable_logs(tasks_file: str, locked_folder: None) -> Iterator[Path]:
+    """A logs folder that exists but cannot be written, restored so pytest can clean up."""
+    logs = logs_folder(tasks_file)
+    logs.mkdir()
+    logs.chmod(0o500)
+    yield logs
+    logs.chmod(0o700)
 
 
 def asking_line(tasks_file: str) -> str:
@@ -340,3 +359,133 @@ def test_action_timeout_overrides_the_default_limit(
     review(io.StringIO(), tasks_file, "", action_timeout)
 
     assert limits == [seconds]
+
+
+@pytest.mark.usefixtures("fake_claude", "one_second")
+def test_two_reviews_in_the_same_second_get_different_log_names(
+    tasks_file: str,
+) -> None:
+    review(io.StringIO(), tasks_file, "", "")
+    second = io.StringIO()
+
+    review(second, tasks_file, "", "")
+
+    names = sorted(path.name for path in logs_folder(tasks_file).iterdir())
+    assert names == ["review-20261110T143822-1.log", "review-20261110T143822.log"]
+    second_log = logs_folder(tasks_file) / "review-20261110T143822-1.log"
+    assert second.getvalue().endswith(f"review log: {second_log}\n")
+
+
+@pytest.mark.usefixtures("fake_claude", "one_second")
+def test_a_third_review_in_the_same_second_gets_a_two_suffix(
+    tasks_file: str,
+) -> None:
+    for _ in range(3):
+        review(io.StringIO(), tasks_file, "", "")
+
+    names = sorted(path.name for path in logs_folder(tasks_file).iterdir())
+    assert names == [
+        "review-20261110T143822-1.log",
+        "review-20261110T143822-2.log",
+        "review-20261110T143822.log",
+    ]
+
+
+@pytest.mark.usefixtures("fake_claude", "one_second")
+def test_an_existing_log_is_never_replaced_and_new_logs_are_mode_600(
+    tasks_file: str,
+) -> None:
+    logs = logs_folder(tasks_file)
+    logs.mkdir()
+    taken = logs / "review-20261110T143822.log"
+    taken.write_text("mine\n", encoding="utf-8")
+    taken.chmod(0o644)
+
+    review(io.StringIO(), tasks_file, "", "")
+
+    assert taken.read_text(encoding="utf-8") == "mine\n"
+    assert stat.S_IMODE(taken.stat().st_mode) == 0o644
+    new_log = logs_folder(tasks_file) / "review-20261110T143822-1.log"
+    assert stat.S_IMODE(new_log.stat().st_mode) == 0o600
+
+
+@pytest.mark.usefixtures("fake_claude", "unwritable_logs")
+def test_the_reply_is_printed_when_the_log_cannot_be_written(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", FINDINGS)
+    out = io.StringIO()
+
+    review(out, tasks_file, "", "")
+
+    assert out.getvalue() == asking_line(tasks_file) + FINDINGS
+
+
+@pytest.mark.usefixtures("fake_claude", "one_second")
+def test_the_reply_is_printed_before_the_log_is_written(tasks_file: str) -> None:
+    class NoteLogs(io.StringIO):
+        """Notes whether the logs folder existed when each piece was printed."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.logs_seen: list[bool] = []
+
+        def write(self, text: str, /) -> int:
+            self.logs_seen.append(logs_folder(tasks_file).exists())
+            return super().write(text)
+
+    out = NoteLogs()
+
+    review(out, tasks_file, "", "")
+
+    # The asking line, the reply, then the log line: only the last follows the log.
+    assert out.logs_seen == [False, False, True]
+
+
+@pytest.mark.usefixtures("fake_claude", "unwritable_logs")
+def test_a_log_write_failure_prints_a_warning_and_changes_no_result(
+    tasks_file: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = io.StringIO()
+
+    review(out, tasks_file, "", "")
+
+    assert "review log:" not in out.getvalue()
+    stderr = capsys.readouterr().err
+    warning = re.compile(
+        rf"warning: review log: cannot write {re.escape(str(logs_folder(tasks_file)))}"
+        r"/review-\d{8}T\d{6}\.log: Permission denied\n"
+    )
+    assert warning.fullmatch(stderr), stderr
+
+
+@pytest.mark.usefixtures("fake_claude", "unwritable_logs")
+def test_a_failed_review_keeps_its_error_when_the_log_cannot_be_written(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "3")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "boom\n")
+
+    with pytest.raises(ReviewError) as raised:
+        review(io.StringIO(), tasks_file, "", "")
+
+    assert str(raised.value) == "review: claude exited with status 3: boom"
+    assert "warning: review log: cannot write" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("fake_claude", "locked_folder")
+def test_a_logs_folder_that_cannot_be_made_gets_the_warning_too(
+    tasks_file: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_folder = Path(tasks_file).parent
+    run_folder.chmod(0o500)
+    out = io.StringIO()
+    try:
+        review(out, tasks_file, "", "")
+    finally:
+        run_folder.chmod(0o700)
+
+    assert "review log:" not in out.getvalue()
+    stderr = capsys.readouterr().err
+    assert stderr.startswith("warning: review log: cannot write ")
+    assert stderr.endswith(": Permission denied\n")

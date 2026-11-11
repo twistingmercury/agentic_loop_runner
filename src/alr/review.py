@@ -5,8 +5,10 @@ leaves a log beside the run logs, whether it finds nothing, finds problems, or
 fails.
 """
 
+import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
@@ -33,24 +35,26 @@ def review(
     sandbox_file is "" when the run would use none, and action_timeout is ""
     for the ten minute default. A review that cannot run or finish raises
     ReviewError, after writing the failure to the log when the review had
-    started. What the review finds never raises.
+    started. What the review finds never raises, and neither does a log that
+    cannot be written: that is a warning on stderr.
     """
     # Found before anything prints, so a machine without claude gets one error line.
     claude = _find_claude()
-    started = datetime.now().astimezone()
-    log_path = _log_path(tasks_file, started)
+    started = _now()
     out.write(f"review: asking Claude to read {tasks_file} (this uses tokens)\n")
     # The session takes minutes; the line must show before it ends.
     out.flush()
     try:
         reply = _run_session(claude, tasks_file, sandbox_file, action_timeout)
     except ReviewError as exc:
-        _write_log(log_path, started, tasks_file, sandbox_file, f"error: {exc}")
+        _write_log(started, tasks_file, sandbox_file, f"error: {exc}")
         raise
 
-    _write_log(log_path, started, tasks_file, sandbox_file, reply)
+    # Printed before the log is written, so a log that fails never costs the reply.
     out.write(_with_newline(reply))
-    out.write(f"review log: {log_path}\n")
+    log_path = _write_log(started, tasks_file, sandbox_file, reply)
+    if log_path is not None:
+        out.write(f"review log: {log_path}\n")
 
 
 def _find_claude() -> str:
@@ -170,29 +174,68 @@ def _exit_reason(returncode: int, stderr: str) -> str:
     return f"{reason}: {lines[-1]}"
 
 
-def _log_path(tasks_file: str, started: datetime) -> Path:
-    # The run log's timestamp form, in local time.
-    stamp = started.strftime("%Y%m%dT%H%M%S")
-    return Path(tasks_file).parent / "logs" / f"review-{stamp}.log"
+def _now() -> datetime:
+    """The start time of a review; a test replaces it to start two reviews in one second."""
+    return datetime.now().astimezone()
 
 
 def _write_log(
-    path: Path, started: datetime, tasks_file: str, sandbox_file: str, body: str
-) -> None:
-    """Write the header and body to path, making the logs folder when it is missing."""
+    started: datetime, tasks_file: str, sandbox_file: str, body: str
+) -> Path | None:
+    """Write the header and body to a new log and return its path, or warn and return None.
+
+    The logs folder is made when it is missing. A log that cannot be written
+    never raises: the review's reply, or its own error, matters more.
+    """
     header = (
         f"time: {started.isoformat(timespec='seconds')}\n"
         f"task file: {tasks_file}\n"
         f"sandbox file: {sandbox_file or 'none'}\n"
     )
     text = f"{header}\n{_with_newline(body)}"
+    # The run log's timestamp form, in local time.
+    stamp = started.strftime("%Y%m%dT%H%M%S")
+    logs = Path(tasks_file).parent / "logs"
     try:
-        path.parent.mkdir(mode=_DIR_MODE, exist_ok=True)
-        # Created empty at the private mode first, so the text is never in a file others can read.
-        path.touch(mode=_FILE_MODE)
-        path.write_text(text, encoding="utf-8", errors="replace")
+        logs.mkdir(mode=_DIR_MODE, exist_ok=True)
     except OSError as exc:
-        raise ReviewError(f"cannot write {path}: {exc.strerror}") from exc
+        _warn_log_not_written(logs / _log_name(stamp, 0), exc)
+        return None
+
+    number = 0
+    while True:
+        path = logs / _log_name(stamp, number)
+        try:
+            _write_new_file(path, text)
+        except FileExistsError:
+            # Another review started in the same second: its log is left alone.
+            number += 1
+            continue
+        except OSError as exc:
+            _warn_log_not_written(path, exc)
+            return None
+
+        return path
+
+
+def _log_name(stamp: str, number: int) -> str:
+    if number == 0:
+        return f"review-{stamp}.log"
+
+    return f"review-{stamp}-{number}.log"
+
+
+def _write_new_file(path: Path, text: str) -> None:
+    """Create path at the private mode and write text; raise FileExistsError when it exists."""
+    # O_EXCL fails on an existing file, so no other review's log is replaced, and
+    # the file is private from its first byte.
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, _FILE_MODE)
+    with os.fdopen(descriptor, "w", encoding="utf-8", errors="replace") as log:
+        log.write(text)
+
+
+def _warn_log_not_written(path: Path, exc: OSError) -> None:
+    print(f"warning: review log: cannot write {path}: {exc.strerror}", file=sys.stderr)
 
 
 def _with_newline(text: str) -> str:
