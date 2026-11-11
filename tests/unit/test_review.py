@@ -489,3 +489,32 @@ def test_a_logs_folder_that_cannot_be_made_gets_the_warning_too(
     stderr = capsys.readouterr().err
     assert stderr.startswith("warning: review log: cannot write ")
     assert stderr.endswith(": Permission denied\n")
+
+
+def test_a_missing_skill_raises_before_the_review_line_and_starts_no_claude(
+    record: Path, tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "cfg"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    out = io.StringIO()
+
+    with pytest.raises(ReviewError) as raised:
+        review(out, tasks_file, "", "")
+
+    skills = config / "skills"
+    assert str(raised.value) == (
+        f"review: the alr-task-review skill is not installed in {skills}"
+    )
+    assert out.getvalue() == ""
+    assert not logs_folder(tasks_file).exists()
+    assert fake_claude_records(record) == []
+
+
+def test_the_argv_denies_mcp_tools(record: Path, tasks_file: str) -> None:
+    review(io.StringIO(), tasks_file, "", "")
+
+    argv = recorded_call(record)["argv"]
+    # --tools does not cover MCP tools, so they are denied by name pattern.
+    assert value_after(argv, "--disallowedTools") == "mcp__*"
+    # --add-dir takes a list, so it stays last and keeps the flag out of its folders.
+    assert argv.index("--disallowedTools") < argv.index("--add-dir")

@@ -15,8 +15,11 @@ from typing import TextIO
 
 from alr.durations import parse_duration
 from alr.errors import ReviewError
+from alr.skillinstall import skills_folder
 
 DEFAULT_TIMEOUT = "10m"
+
+_SKILL_NAME = "alr-task-review"
 
 # Reading tools and the Skill tool the review itself needs. Nothing in this list
 # can edit a file or run a command.
@@ -38,8 +41,10 @@ def review(
     started. What the review finds never raises, and neither does a log that
     cannot be written: that is a warning on stderr.
     """
-    # Found before anything prints, so a machine without claude gets one error line.
+    # Both found before anything prints, so a machine without claude or without
+    # the skill gets one error line and no log.
     claude = _find_claude()
+    _check_skill_installed()
     started = _now()
     out.write(f"review: asking Claude to read {tasks_file} (this uses tokens)\n")
     # The session takes minutes; the line must show before it ends.
@@ -63,6 +68,17 @@ def _find_claude() -> str:
         raise ReviewError("claude is not on the PATH")
 
     return claude
+
+
+def _check_skill_installed() -> None:
+    """Raise ReviewError unless the review's skill is in the skills folder.
+
+    Without it the session would be started and billed for a review it cannot
+    do, for example when the startup sync could not write the folder.
+    """
+    folder = skills_folder()
+    if not (folder / _SKILL_NAME / "SKILL.md").is_file():
+        raise ReviewError(f"the {_SKILL_NAME} skill is not installed in {folder}")
 
 
 def _run_session(
@@ -136,7 +152,8 @@ def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:
     # --tools removes every other tool outright. --allowedTools approves these
     # ahead of time, since nobody can answer a prompt. dontAsk refuses
     # anything else and replaces a default mode from the user's settings, such
-    # as one that skips permission checks. --add-dir takes a list, so it goes last.
+    # as one that skips permission checks. --tools does not cover MCP tools, so
+    # --disallowedTools denies them by name pattern. --add-dir takes a list, so it goes last.
     return [
         claude,
         "--print",
@@ -144,6 +161,8 @@ def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:
         _READING_TOOLS,
         "--allowedTools",
         _READING_TOOLS,
+        "--disallowedTools",
+        "mcp__*",
         "--permission-mode",
         "dontAsk",
         "--add-dir",
@@ -158,7 +177,7 @@ def _prompt(tasks_file: str, sandbox_file: str) -> str:
         sandbox = "There is no sandbox settings file for this run."
 
     return (
-        f"Use the alr-task-review skill to review the alr task file {tasks_file}.\n"
+        f"Use the {_SKILL_NAME} skill to review the alr task file {tasks_file}.\n"
         f"{sandbox}\n"
         "Reply with what the skill says to report and nothing else.\n"
     )

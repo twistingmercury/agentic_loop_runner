@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import chmodded, start_alr, wait_for_file
+from helpers import chmodded, fake_claude_records, start_alr, wait_for_file
 
 from alr import cli
 from alr.config import SandboxDefault
@@ -2244,6 +2244,34 @@ def test_validate_exits_0_whatever_the_review_finds(
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", reply)
 
     assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
+
+
+def test_validate_fails_before_the_review_when_the_skill_cannot_be_put_in_place(
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    locked_folder: None,
+) -> None:
+    config = tmp_path / "cfg"
+    config.mkdir()
+    config.chmod(0o500)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    try:
+        code = cli.main(["-d", str(clean_folder), "--validate"])
+    finally:
+        config.chmod(0o700)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err.endswith(
+        f"error: review: the alr-task-review skill is not installed in {config / 'skills'}\n"
+    )
+    assert f"{clean_folder / 'tasks.yaml'} is valid\n" in captured.out
+    assert "review:" not in captured.out
+    assert fake_claude_records(record) == []
+    assert _review_logs(clean_folder) == []
 
 
 def test_validate_exits_1_when_the_review_fails(
