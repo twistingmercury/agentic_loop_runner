@@ -91,6 +91,11 @@ def _check_skill_installed() -> None:
         raise ReviewError(f"the {_SKILL_NAME} skill is not installed in {folder}")
 
 
+def _now() -> datetime:
+    """The start time of a review; a test replaces it to start two reviews in one second."""
+    return datetime.now().astimezone()
+
+
 def _run_session(
     claude: str, tasks_file: str, sandbox_file: str, action_timeout: str
 ) -> str:
@@ -113,6 +118,48 @@ def _run_session(
         raise ReviewError("claude replied with nothing")
 
     return result.stdout
+
+
+def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:
+    """Build the command line: a new read-only session, with no history and no model chosen."""
+    # The run folder and the sandbox file's folder are often outside the
+    # project the session starts in.
+    folders = [str(Path(tasks_file).parent)]
+    if sandbox_file:
+        folders.append(str(Path(sandbox_file).parent))
+
+    # --tools removes every other tool outright. --allowedTools approves these
+    # ahead of time, since nobody can answer a prompt. dontAsk refuses
+    # anything else and replaces a default mode from the user's settings, such
+    # as one that skips permission checks. --tools does not cover MCP tools, so
+    # --disallowedTools denies them by name pattern. --add-dir takes a list, so it goes last.
+    return [
+        claude,
+        "--print",
+        "--tools",
+        _READING_TOOLS,
+        "--allowedTools",
+        _READING_TOOLS,
+        "--disallowedTools",
+        "mcp__*",
+        "--permission-mode",
+        "dontAsk",
+        "--add-dir",
+        *folders,
+    ]
+
+
+def _prompt(tasks_file: str, sandbox_file: str) -> str:
+    if sandbox_file:
+        sandbox = f"The sandbox settings file the run will use is {sandbox_file}."
+    else:
+        sandbox = "There is no sandbox settings file for this run."
+
+    return (
+        f"Use the {_SKILL_NAME} skill to review the alr task file {tasks_file}.\n"
+        f"{sandbox}\n"
+        "Reply with what the skill says to report and nothing else.\n"
+    )
 
 
 def _communicate(
@@ -168,48 +215,6 @@ def _read_text(file: BinaryIO) -> str:
     return file.read().decode("utf-8", errors="replace")
 
 
-def _argv(claude: str, tasks_file: str, sandbox_file: str) -> list[str]:
-    """Build the command line: a new read-only session, with no history and no model chosen."""
-    # The run folder and the sandbox file's folder are often outside the
-    # project the session starts in.
-    folders = [str(Path(tasks_file).parent)]
-    if sandbox_file:
-        folders.append(str(Path(sandbox_file).parent))
-
-    # --tools removes every other tool outright. --allowedTools approves these
-    # ahead of time, since nobody can answer a prompt. dontAsk refuses
-    # anything else and replaces a default mode from the user's settings, such
-    # as one that skips permission checks. --tools does not cover MCP tools, so
-    # --disallowedTools denies them by name pattern. --add-dir takes a list, so it goes last.
-    return [
-        claude,
-        "--print",
-        "--tools",
-        _READING_TOOLS,
-        "--allowedTools",
-        _READING_TOOLS,
-        "--disallowedTools",
-        "mcp__*",
-        "--permission-mode",
-        "dontAsk",
-        "--add-dir",
-        *folders,
-    ]
-
-
-def _prompt(tasks_file: str, sandbox_file: str) -> str:
-    if sandbox_file:
-        sandbox = f"The sandbox settings file the run will use is {sandbox_file}."
-    else:
-        sandbox = "There is no sandbox settings file for this run."
-
-    return (
-        f"Use the {_SKILL_NAME} skill to review the alr task file {tasks_file}.\n"
-        f"{sandbox}\n"
-        "Reply with what the skill says to report and nothing else.\n"
-    )
-
-
 def _exit_reason(returncode: int, stderr: str) -> str:
     """Say how claude ended, with the last line it wrote to stderr when it wrote any."""
     reason = f"claude exited with status {returncode}"
@@ -220,9 +225,12 @@ def _exit_reason(returncode: int, stderr: str) -> str:
     return f"{reason}: {lines[-1]}"
 
 
-def _now() -> datetime:
-    """The start time of a review; a test replaces it to start two reviews in one second."""
-    return datetime.now().astimezone()
+def _with_newline(text: str) -> str:
+    """End text with a newline unless it has one: the only change made to a reply."""
+    if text.endswith("\n"):
+        return text
+
+    return f"{text}\n"
 
 
 def _write_log(
@@ -282,11 +290,3 @@ def _write_new_file(path: Path, text: str) -> None:
 
 def _warn_log_not_written(path: Path, exc: OSError) -> None:
     print(f"warning: review log: cannot write {path}: {exc.strerror}", file=sys.stderr)
-
-
-def _with_newline(text: str) -> str:
-    """End text with a newline unless it has one: the only change made to a reply."""
-    if text.endswith("\n"):
-        return text
-
-    return f"{text}\n"

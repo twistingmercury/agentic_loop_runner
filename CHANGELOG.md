@@ -17,10 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folder. It uses tokens, so it needs `claude` on your PATH. Like a real run,
   it syncs the bundled skills first. If the dry run found warnings, the review
   is skipped and alr prints `review skipped: the dry run found problems; fix
-  them and run again`. Findings never change the exit code, so a clean dry run
-  exits 0 (or 3 with `--strict` and a warning). A review that cannot run, fails,
-  or runs past 10 minutes (`--action-timeout` changes that) prints
-  `error: review: <reason>` and exits 1.
+  them and run again`. Findings never change the exit code: it is the dry
+  run's own (0, or 3 with `--strict` and a warning, in which case there is no
+  review). A review that cannot run, fails, or runs past 10 minutes
+  (`--action-timeout` changes that) prints `error: review: <reason>` and exits
+  1. The session runs in its own process group, which alr kills when the review
+  ends, and the MCP tools are denied. A sandbox file the real run would add is
+  added first, as in a real run. When two reviews start in the same second, the
+  second log gets a `-1` suffix (`review-<timestamp>-1.log`).
 
 ### Changed
 

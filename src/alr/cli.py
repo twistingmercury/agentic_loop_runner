@@ -565,14 +565,19 @@ def check_action_timeout(value: str) -> None:
         raise UsageError(f"--action-timeout: {exc}") from exc
 
 
-def check_reset_flag(reset_failed: bool, dry_run: bool, validate: bool = False) -> None:
+def check_reset_flag(reset_failed: bool, dry_run: bool, validate: bool) -> None:
     """Refuse --reset-failed with --dry-run or --validate, which must not change the task file."""
     if not (reset_failed and dry_run):
         return
 
-    flag = "--validate" if validate else "--dry-run"
+    if validate:
+        raise UsageError(
+            "--reset-failed cannot be used with --validate"
+            " (it changes the task file, which --validate only reads)"
+        )
+
     raise UsageError(
-        f"--reset-failed cannot be used with {flag} (a dry run writes nothing)"
+        "--reset-failed cannot be used with --dry-run (a dry run writes nothing)"
     )
 
 

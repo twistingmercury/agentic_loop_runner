@@ -2309,7 +2309,8 @@ def test_validate_is_a_usage_error_with_reset_failed(
 
     assert code == 2
     assert capsys.readouterr().err == (
-        "error: --reset-failed cannot be used with --validate (a dry run writes nothing)\n"
+        "error: --reset-failed cannot be used with --validate"
+        " (it changes the task file, which --validate only reads)\n"
     )
     assert not record.exists()
 
