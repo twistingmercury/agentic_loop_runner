@@ -309,6 +309,13 @@ def _write_new_file(path: Path, text: str) -> None:
 
 def _warn_log_not_written(path: Path, exc: OSError) -> None:
     # The reply went to stdout first; flushed, so output captured on one pipe
-    # keeps its order.
-    sys.stdout.flush()
-    print(f"warning: review log: cannot write {path}: {exc.strerror}", file=sys.stderr)
+    # keeps its order. A dead terminal makes the flush or the print fail, and
+    # that must not replace the stop or the ReviewError the caller is carrying;
+    # the warning is lost with the terminal.
+    try:
+        sys.stdout.flush()
+        print(
+            f"warning: review log: cannot write {path}: {exc.strerror}", file=sys.stderr
+        )
+    except OSError:
+        pass

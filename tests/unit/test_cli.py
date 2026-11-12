@@ -2505,6 +2505,46 @@ def test_a_hangup_with_a_dead_terminal_exits_129(
             _kill_quietly(claude_pid)
 
 
+@pytest.mark.usefixtures("fake_claude", "locked_folder")
+def test_a_hangup_with_a_dead_terminal_and_an_unwritable_log_exits_129(
+    clean_folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+    master, slave = pty.openpty()
+
+    # The warning that the log was not written goes to the terminal that just
+    # died; it must not replace the stop's exit 129.
+    process = subprocess.Popen(
+        [str(ALR), "-d", str(clean_folder), "--validate"],
+        stdin=subprocess.DEVNULL,
+        stdout=slave,
+        stderr=slave,
+    )
+    os.close(slave)
+    logs = clean_folder / "logs"
+    claude_pid = 0
+    try:
+        claude_pid = int(wait_for_file(ready))
+        # The review log is the next write, and it cannot happen.
+        logs.mkdir(exist_ok=True)
+        logs.chmod(0o500)
+        process.send_signal(signal.SIGHUP)
+        os.close(master)
+        process.wait(timeout=10)
+        assert process.returncode == 129
+        # Checked before the cleanup below, so it sees what alr itself left behind.
+        wait_for_exit(claude_pid)
+    finally:
+        logs.chmod(0o700)
+        process.kill()
+        # Only a failing test gets here with claude still running: a SIGHUP
+        # nobody handles kills alr and strands the blocked fake claude.
+        if claude_pid:
+            _kill_quietly(claude_pid)
+
+
 def _kill_quietly(pid: int) -> None:
     """SIGKILL pid, whether or not it is still there."""
     try:

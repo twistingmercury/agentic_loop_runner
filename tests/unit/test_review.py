@@ -1,6 +1,7 @@
 """The review session: its prompt and arguments, the three lines it prints, its log, and every way it fails."""
 
 import asyncio
+import errno
 import io
 import json
 import os
@@ -533,6 +534,31 @@ def test_a_failed_review_keeps_its_error_when_the_log_cannot_be_written(
 
     assert str(raised.value) == "review: claude failed (exit status 3): boom"
     assert "warning: review log: cannot write" in capsys.readouterr().err
+
+
+class DeadStream:
+    """A stream whose terminal is gone: every write and flush fails with EIO."""
+
+    def write(self, text: str) -> int:
+        raise OSError(errno.EIO, "Input/output error")
+
+    def flush(self) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+
+@pytest.mark.usefixtures("fake_claude", "unwritable_logs")
+def test_a_dead_stderr_does_not_replace_the_review_error(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "3")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "boom\n")
+    monkeypatch.setattr(sys, "stdout", DeadStream())
+    monkeypatch.setattr(sys, "stderr", DeadStream())
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert str(raised.value) == "review: claude failed (exit status 3): boom"
 
 
 @pytest.mark.usefixtures("fake_claude", "locked_folder")
