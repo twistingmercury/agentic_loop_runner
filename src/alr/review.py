@@ -20,7 +20,7 @@ from alr.durations import parse_duration
 from alr.engine import proc
 from alr.engine.stop import Stop
 from alr.errors import ReviewError
-from alr.skillinstall import skills_folder
+from alr.skillinstall import pending, skills_folder
 
 DEFAULT_TIMEOUT = "10m"
 
@@ -85,14 +85,22 @@ def _find_claude() -> str:
 
 
 def _check_skill_installed() -> None:
-    """Raise ReviewError unless the review's skill is in the skills folder.
+    """Raise ReviewError unless the review's skill is in place in the skills folder.
 
-    Without it the session would be started and billed for a review it cannot
-    do, for example when the startup sync could not write the folder.
+    In place means SKILL.md is there and the startup sync has nothing left to
+    change in the skill. Otherwise the session would be started and billed for
+    a review it cannot do, or one run by an old copy, for example when the
+    sync could not write the folder.
     """
     folder = skills_folder()
+    skill = folder / _SKILL_NAME
     # SKILL.md itself, since an empty skill folder is not a skill.
-    if not (folder / _SKILL_NAME / "SKILL.md").is_file():
+    if not (skill / "SKILL.md").is_file():
+        raise ReviewError(f"the {_SKILL_NAME} skill is not installed in {folder}")
+
+    # The sync ran at startup, so a change still pending is one it could not make.
+    stale_paths = [change.path for change in pending()]
+    if skill in stale_paths:
         raise ReviewError(f"the {_SKILL_NAME} skill is not installed in {folder}")
 
 

@@ -679,6 +679,33 @@ def test_a_skills_folder_without_skill_md_fails_before_the_review_line(
     assert fake_claude_records(record) == []
 
 
+def test_a_skill_the_sync_could_not_update_fails_the_review(
+    record: Path, tasks_file: str, home: Path
+) -> None:
+    # The autouse home fixture synced the bundled skill; this copy is an older one.
+    installed = home / ".claude" / "skills" / "alr-task-review" / "SKILL.md"
+    installed.write_text("an older skill\n", encoding="utf-8")
+    out = io.StringIO()
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(out, tasks_file, "", "", Stop())
+
+    skills = home / ".claude" / "skills"
+    assert str(raised.value) == (
+        f"review: the alr-task-review skill is not installed in {skills}"
+    )
+    assert out.getvalue() == ""
+    assert not logs_folder(tasks_file).exists()
+    assert fake_claude_records(record) == []
+
+
+def test_a_current_skill_passes_the_check(record: Path, tasks_file: str) -> None:
+    # The autouse home fixture synced the bundled skill, so it is current.
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert len(fake_claude_records(record)) == 1
+
+
 def test_the_argv_denies_mcp_tools(record: Path, tasks_file: str) -> None:
     run_review(io.StringIO(), tasks_file, "", "", Stop())
 
