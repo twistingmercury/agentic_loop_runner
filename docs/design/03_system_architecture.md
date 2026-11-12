@@ -324,7 +324,7 @@ How gralph's packages map onto this:
   everything is printed, instead of `<file> is valid`; a real run runs no rule
 - Validate (ADR-036): `--validate` runs the dry run above and, when it is clean (no refusal and no warning, with or
   without `--strict`), `review.py` starts a fresh `claude --print` session held to reading tools. The prompt names the
-  `alr-task-review` skill, the task file, and the sandbox settings file (or `none`). alr prints
+  `alr-task-review` skill, the task file, and the sandbox settings file. The log header shows `none` when there is no sandbox file. alr prints
   `review: asking Claude to read <file> (this uses tokens)`, the reply as it came, and `review log: <path>` (when warnings stop it, `review skipped: the dry run found problems; fix them and run again`), and writes
   the reply to `<run folder>/logs/review-<timestamp>.log` (mode 600, `logs/` mode 700 when it is created). The time limit is
   10 minutes, or `--action-timeout`; the session runs on `engine/proc.py` in the dry run's async path (own process group, stopped whole on a stop or a time out, reads cut off after exit), with MCP tools denied; SIGINT, SIGTERM, and SIGHUP stop it. A skill that is not in place after the sync fails the review before it starts. Findings never change the exit code; a review that cannot finish raises
