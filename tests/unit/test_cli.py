@@ -2456,17 +2456,18 @@ def test_validate_stops_on_sighup(
         claude_pid = int(wait_for_file(ready))
         process.send_signal(signal.SIGHUP)
         _, err = process.communicate(timeout=10)
+        assert process.returncode == 129
+        assert err == "error: interrupted\n"
+        [log] = _review_logs(clean_folder)
+        assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
+        # Checked before the cleanup below, so it sees what alr itself left behind.
+        wait_for_exit(claude_pid)
     finally:
         process.kill()
-        # A SIGHUP nobody handles kills alr and strands the blocked fake claude.
+        # Only a failing test gets here with claude still running: a SIGHUP
+        # nobody handles kills alr and strands the blocked fake claude.
         if claude_pid:
             _kill_quietly(claude_pid)
-
-    assert process.returncode == 129
-    assert err == "error: interrupted\n"
-    [log] = _review_logs(clean_folder)
-    assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
-    wait_for_exit(claude_pid)
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -2493,14 +2494,15 @@ def test_a_hangup_with_a_dead_terminal_exits_129(
         process.send_signal(signal.SIGHUP)
         os.close(master)
         process.wait(timeout=10)
+        assert process.returncode == 129
+        # Checked before the cleanup below, so it sees what alr itself left behind.
+        wait_for_exit(claude_pid)
     finally:
         process.kill()
-        # A SIGHUP nobody handles kills alr and strands the blocked fake claude.
+        # Only a failing test gets here with claude still running: a SIGHUP
+        # nobody handles kills alr and strands the blocked fake claude.
         if claude_pid:
             _kill_quietly(claude_pid)
-
-    assert process.returncode == 129
-    wait_for_exit(claude_pid)
 
 
 def _kill_quietly(pid: int) -> None:

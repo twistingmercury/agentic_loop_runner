@@ -161,15 +161,16 @@ def test_validate_stops_on_sighup(tmp_path: Path, fake_claude: Path) -> None:
             claude_pid = int(wait_for_file(ready_file, 10))
             process.send_signal(signal.SIGHUP)
             out, err = process.communicate(timeout=10)
+            assert process.returncode == 129, (out, err)
+            assert err == "error: interrupted\n"
+            [log] = review_logs(tmp_path)
+            assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
+            # Checked before the cleanup below, so it sees what alr itself left behind.
+            wait_process_gone(claude_pid, 10)
         finally:
             process.kill()
+            # Only a failing test gets here with claude still running.
             kill_pid_in(ready_file)
-
-    assert process.returncode == 129, (out, err)
-    assert err == "error: interrupted\n"
-    [log] = review_logs(tmp_path)
-    assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
-    wait_process_gone(claude_pid, 10)
 
 
 def kill_pid_in(pid_file: Path) -> None:

@@ -8,6 +8,7 @@ import re
 import signal
 import stat
 import sys
+import time
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -678,7 +679,9 @@ def install_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -
 
 @pytest.mark.usefixtures("fake_claude")
 @pytest.mark.parametrize(
-    "stop_signal", [signal.SIGINT, signal.SIGTERM], ids=["sigint", "sigterm"]
+    "stop_signal",
+    [signal.SIGINT, signal.SIGTERM, signal.SIGHUP],
+    ids=["sigint", "sigterm", "sighup"],
 )
 def test_a_stop_writes_a_stopped_by_line_to_the_log(
     tasks_file: str, monkeypatch: pytest.MonkeyPatch, stop_signal: signal.Signals
@@ -695,22 +698,6 @@ def test_a_stop_writes_a_stopped_by_line_to_the_log(
     assert out.getvalue() == asking_line(tasks_file)
     text = review_log(tasks_file).read_text(encoding="utf-8")
     assert text.endswith(f"\n\nstopped by {stop_signal.name}\n")
-
-
-@pytest.mark.usefixtures("fake_claude")
-def test_a_stop_by_sighup_names_sighup_in_the_log(
-    tasks_file: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def cancelled(*args: Any, **kwargs: Any) -> str:
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(review_module, "_session", cancelled)
-
-    with pytest.raises(asyncio.CancelledError):
-        run_review(io.StringIO(), tasks_file, "", "", Stop(signum=signal.SIGHUP))
-
-    text = review_log(tasks_file).read_text(encoding="utf-8")
-    assert text.endswith("\n\nstopped by SIGHUP\n")
 
 
 @pytest.mark.usefixtures("fake_claude")
@@ -766,8 +753,13 @@ def test_a_cancel_while_the_child_is_starting_leaves_no_claude_running(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(cancelled_during_the_spawn())
 
+    # A claude left running writes its pid file within moments of starting,
+    # which is after the cancel; without this wait the check below would
+    # almost always find no file and pass whatever alr did.
+    time.sleep(0.5)
     if pid_file.exists():
-        assert wait_for_exit(int(pid_file.read_text())) is None or True
+        wait_for_exit(int(pid_file.read_text()))
+
     text = review_log(tasks_file).read_text(encoding="utf-8")
     assert text.splitlines()[-1] == "stopped by SIGINT"
 
@@ -833,6 +825,43 @@ def test_a_background_child_holding_the_output_does_not_turn_a_finished_review_i
 
     assert "the reply\n" in out.getvalue()
     wait_for_exit(int(child_pid_file.read_text()))
+
+
+def test_a_failed_session_leaves_no_background_child(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("CHILD_PID_FILE", str(child_pid_file))
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, subprocess, sys\n"
+        "child = subprocess.Popen(['sleep', '20'])\n"
+        "with open(os.environ['CHILD_PID_FILE'], 'w') as file:\n"
+        "    file.write(str(child.pid))\n"
+        "sys.exit(3)\n",
+    )
+
+    with pytest.raises(ReviewError):
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    wait_for_exit(int(child_pid_file.read_text()))
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_an_unexpected_error_in_the_session_logs_the_fallback_line(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(review_module, "_session", broken)
+
+    with pytest.raises(RuntimeError):
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    text = review_log(tasks_file).read_text(encoding="utf-8")
+    assert text.endswith("\n\nerror: the review ended without a result\n")
 
 
 def test_a_review_that_ends_near_its_limit_is_not_a_time_out(
