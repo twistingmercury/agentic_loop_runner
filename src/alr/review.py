@@ -136,14 +136,15 @@ async def _session(
     stderr: list[bytes] = []
     drain = _pump(process, prompt.encode("utf-8"), stdout, stderr)
     try:
-        async with asyncio.timeout(seconds):
-            # Bounded: the review is claude's own exit and reply, so a
-            # background child that keeps the pipes open must not hold it up (#61).
-            error = await proc.finish(process, drain, bounded=True)
+        # Bounded: the review is claude's own exit and reply, so a background
+        # child that keeps the pipes open must not hold it up (#61). The limit
+        # counts claude's run, not the drain after it exits.
+        error = await proc.finish(process, drain, bounded=True, limit=seconds)
     except TimeoutError as exc:
         raise ReviewError(f"claude did not finish within {limit}") from exc
 
-    _kill_leftovers(process)
+    # So nothing the session started outlives the review.
+    proc.signal_group(process.pid, signal.SIGKILL)
     if error is not None:
         raise ReviewError(_exit_reason(error, _text(stderr)))
 
@@ -153,15 +154,6 @@ async def _session(
         raise ReviewError("claude replied with nothing")
 
     return reply
-
-
-def _kill_leftovers(process: asyncio.subprocess.Process) -> None:
-    """SIGKILL what the session left in its group, so nothing it started outlives the review."""
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
-    except (ProcessLookupError, PermissionError):
-        pass
 
 
 async def _pump(

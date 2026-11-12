@@ -794,6 +794,31 @@ def test_a_background_child_holding_the_output_does_not_turn_a_finished_review_i
     wait_for_exit(int(child_pid_file.read_text()))
 
 
+def test_a_review_that_ends_near_its_limit_is_not_a_time_out(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("CHILD_PID_FILE", str(child_pid_file))
+    # The reply comes at 0.7 of the limit; the child holds the output open, so
+    # the drain after the exit would carry the review past the limit.
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, subprocess, time\n"
+        "child = subprocess.Popen(['sleep', '20'])\n"
+        "with open(os.environ['CHILD_PID_FILE'], 'w') as file:\n"
+        "    file.write(str(child.pid))\n"
+        "time.sleep(0.7)\n"
+        "print('the reply')\n",
+    )
+    out = io.StringIO()
+
+    run_review(out, tasks_file, "", "1s", Stop())
+
+    assert "the reply\n" in out.getvalue()
+    wait_for_exit(int(child_pid_file.read_text()))
+
+
 def test_a_large_reply_is_returned_whole(
     tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
