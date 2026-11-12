@@ -827,6 +827,31 @@ def test_a_background_child_holding_the_output_does_not_turn_a_finished_review_i
     wait_for_exit(int(child_pid_file.read_text()))
 
 
+def test_a_reply_with_no_trailing_newline_survives_a_background_child(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("CHILD_PID_FILE", str(child_pid_file))
+    # The child holds the output open, so the drain is cut off while the
+    # reply, which has no newline, is still pending.
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, subprocess, sys\n"
+        "child = subprocess.Popen(['sleep', '20'])\n"
+        "with open(os.environ['CHILD_PID_FILE'], 'w') as file:\n"
+        "    file.write(str(child.pid))\n"
+        "sys.stdout.write('NO FINDINGS')\n"
+        "sys.stdout.flush()\n",
+    )
+    out = io.StringIO()
+
+    run_review(out, tasks_file, "", "5s", Stop())
+
+    assert out.getvalue().count("NO FINDINGS") == 1
+    wait_for_exit(int(child_pid_file.read_text()))
+
+
 def test_a_failed_session_leaves_no_background_child(
     tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

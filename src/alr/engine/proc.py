@@ -211,20 +211,27 @@ async def read_lines(
     StreamReader.readline fails on a line longer than its buffer, and one
     stream-json event (a tool result holding a whole file, say) can be larger.
     Reading in chunks has no line limit, and a final line with no trailing
-    newline still reaches on_line.
+    newline still reaches on_line, also when the read is cancelled because a
+    background child holds the stream open past the end of the drain.
     """
     pieces: list[bytes] = []
-    while chunk := await stream.read(_READ_SIZE):
-        *ends, rest = chunk.split(b"\n")
-        for end in ends:
-            on_line(b"".join([*pieces, end, b"\n"]))
+    try:
+        while chunk := await stream.read(_READ_SIZE):
+            *ends, rest = chunk.split(b"\n")
+            for end in ends:
+                line = b"".join([*pieces, end, b"\n"])
+                # Cleared before the call, so a callback that raises does not
+                # leave the finally below to hand the same bytes over again.
+                pieces.clear()
+                on_line(line)
+
+            if rest:
+                pieces.append(rest)
+    finally:
+        if pieces:
+            tail = b"".join(pieces)
             pieces.clear()
-
-        if rest:
-            pieces.append(rest)
-
-    if pieces:
-        on_line(b"".join(pieces))
+            on_line(tail)
 
 
 async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:

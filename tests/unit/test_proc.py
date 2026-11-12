@@ -93,6 +93,22 @@ async def test_read_lines_splits_only_on_newlines() -> None:
     assert lines == [b"one\r\n", b"two\rstill two\n", b"\n", b"last"]
 
 
+async def test_read_lines_hands_over_an_unfinished_line_when_cancelled() -> None:
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\npart")
+    stream.feed_data(b"ial")
+    lines: list[bytes] = []
+    reader = asyncio.ensure_future(proc.read_lines(stream, lines.append))
+
+    # The stream never ends, as when a background child holds the pipe open.
+    await asyncio.sleep(0.1)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+
+    assert lines == [b"one\n", b"partial"]
+
+
 @pytest.mark.parametrize(
     ("returncode", "text"),
     [
