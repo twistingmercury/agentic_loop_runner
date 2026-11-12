@@ -76,24 +76,6 @@ async def review(
         out.write(f"review log: {log_path}\n")
 
 
-def _write_safely(out: TextIO, text: str) -> None:
-    """Write text to out, replacing characters the stream's encoding cannot show.
-
-    A reply is the model's words, so it can hold a character a terminal set to
-    ascii cannot print. That must cost a replacement character, not the log.
-    """
-    encoding = out.encoding or "utf-8"
-    shown = text.encode(encoding, errors="replace").decode(encoding)
-    out.write(shown)
-
-
-def _signal_name(signum: int) -> str:
-    try:
-        return signal.Signals(signum).name
-    except ValueError:
-        return str(signum)
-
-
 def _find_claude() -> str:
     claude = shutil.which("claude")
     if claude is None:
@@ -151,7 +133,7 @@ async def _session(
     reply = _text(stdout)
     # Whitespace alone is no review: even a clean file gets NO FINDINGS.
     if not reply.strip():
-        raise ReviewError("claude replied with nothing")
+        raise ReviewError(_with_last_line("claude replied with nothing", _text(stderr)))
 
     return reply
 
@@ -225,7 +207,11 @@ def _prompt(tasks_file: str, sandbox_file: str) -> str:
 
 def _exit_reason(exit_text: str, stderr: str) -> str:
     """Say how claude ended, with the last line it wrote to stderr when it wrote any."""
-    reason = f"claude failed ({exit_text})"
+    return _with_last_line(f"claude failed ({exit_text})", stderr)
+
+
+def _with_last_line(reason: str, stderr: str) -> str:
+    """Add the last line claude wrote to stderr to reason, when it wrote any."""
     lines = stderr.strip().splitlines()
     if not lines:
         return reason
@@ -239,6 +225,21 @@ def _with_newline(text: str) -> str:
         return text
 
     return f"{text}\n"
+
+
+def _write_safely(out: TextIO, text: str) -> None:
+    """Write text to out, replacing characters the stream's encoding cannot show.
+
+    A reply is the model's words, so it can hold a character a terminal set to
+    ascii cannot print. That must cost a replacement character, not the log.
+    """
+    encoding = out.encoding or "utf-8"
+    shown = text.encode(encoding, errors="replace").decode(encoding)
+    out.write(shown)
+
+
+def _signal_name(signum: int) -> str:
+    return signal.Signals(signum).name
 
 
 def _write_log(
@@ -277,28 +278,17 @@ def _create_log(logs: Path, stamp: str, text: str) -> Path | None:
     """Write text to the first free log name in logs and return its path, or None after a warning."""
     number = 0
     while True:
+        path = logs / _log_name(stamp, number)
         try:
-            return _write_new_log(logs / _log_name(stamp, number), text)
+            _write_new_file(path, text)
         except FileExistsError:
             # Another review started in the same second: its log is left alone.
             number += 1
-
-
-def _write_new_log(path: Path, text: str) -> Path | None:
-    """Write text to a new file at path; return None after a warning when it cannot be written.
-
-    FileExistsError goes on to the caller, which tries the next name.
-    """
-    try:
-        _write_new_file(path, text)
-    except FileExistsError:
-        # A subclass of OSError, so it is named first to get past the warning below.
-        raise
-    except OSError as exc:
-        _warn_log_not_written(path, exc)
-        return None
-
-    return path
+        except OSError as exc:
+            _warn_log_not_written(path, exc)
+            return None
+        else:
+            return path
 
 
 def _log_name(stamp: str, number: int) -> str:
@@ -318,4 +308,7 @@ def _write_new_file(path: Path, text: str) -> None:
 
 
 def _warn_log_not_written(path: Path, exc: OSError) -> None:
+    # The reply went to stdout first; flushed, so output captured on one pipe
+    # keeps its order.
+    sys.stdout.flush()
     print(f"warning: review log: cannot write {path}: {exc.strerror}", file=sys.stderr)

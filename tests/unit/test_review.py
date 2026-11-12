@@ -298,6 +298,47 @@ def test_an_empty_reply_raises_and_logs_the_failure(
 
 
 @pytest.mark.usefixtures("fake_claude")
+def test_a_clean_exit_with_no_reply_keeps_the_last_stderr_line(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "first line\nrate limited\n")
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    failure = "review: claude replied with nothing: rate limited"
+    assert str(raised.value) == failure
+    text = review_log(tasks_file).read_text(encoding="utf-8")
+    assert text.endswith(f"\n\nerror: {failure}\n")
+
+
+@pytest.mark.usefixtures("fake_claude", "unwritable_logs")
+def test_the_log_warning_comes_after_stdout_is_flushed(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+
+    class NoteFlush(io.StringIO):
+        def flush(self) -> None:
+            events.append("stdout flushed")
+
+    class NoteWarning(io.StringIO):
+        def write(self, text: str, /) -> int:
+            if text.startswith("warning:"):
+                events.append("warning written")
+
+            return super().write(text)
+
+    monkeypatch.setattr(sys, "stdout", NoteFlush())
+    monkeypatch.setattr(sys, "stderr", NoteWarning())
+
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert events == ["stdout flushed", "warning written"]
+
+
+@pytest.mark.usefixtures("fake_claude")
 def test_a_time_out_stops_the_session_and_raises(
     tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
