@@ -620,9 +620,16 @@ def _print_to_stderr(line: str) -> None:
 
     stdout is buffered when it is not a terminal and stderr is not, so without
     the flush an error would come out ahead of the lines printed before it.
+
+    A dead terminal (a hangup that takes it along) fails the flush or the print
+    with OSError. The line has nowhere to go, and raising would replace the
+    exit code of the stop with a traceback.
     """
-    sys.stdout.flush()
-    print(line, file=sys.stderr)
+    try:
+        sys.stdout.flush()
+        print(line, file=sys.stderr)
+    except OSError:
+        return
 
 
 async def _with_signals(

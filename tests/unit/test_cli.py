@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import platform
+import pty
 import re
 import shutil
 import signal
@@ -2465,6 +2466,40 @@ def test_validate_stops_on_sighup(
     assert err == "error: interrupted\n"
     [log] = _review_logs(clean_folder)
     assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
+    wait_for_exit(claude_pid)
+
+
+@pytest.mark.usefixtures("fake_claude")
+def test_a_hangup_with_a_dead_terminal_exits_129(
+    clean_folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ready = tmp_path / "ready"
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
+    master, slave = pty.openpty()
+
+    # Python exits 120 when flushing stdout fails at shutdown, so a hangup that
+    # takes the terminal with it must still exit 129.
+    process = subprocess.Popen(
+        [str(ALR), "-d", str(clean_folder), "--validate"],
+        stdin=subprocess.DEVNULL,
+        stdout=slave,
+        stderr=slave,
+    )
+    os.close(slave)
+    claude_pid = 0
+    try:
+        claude_pid = int(wait_for_file(ready))
+        process.send_signal(signal.SIGHUP)
+        os.close(master)
+        process.wait(timeout=10)
+    finally:
+        process.kill()
+        # A SIGHUP nobody handles kills alr and strands the blocked fake claude.
+        if claude_pid:
+            _kill_quietly(claude_pid)
+
+    assert process.returncode == 129
     wait_for_exit(claude_pid)
 
 
