@@ -1,6 +1,7 @@
 """The command line: flags, startup checks in gralph's order, routing, and stopping on a signal."""
 
 import asyncio
+import io
 import json
 import os
 import platform
@@ -10,7 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
@@ -332,6 +333,57 @@ def test_a_stop_with_no_task_running_is_one_error_line(
 
     assert cli._run(stopped(), Stop()) == 130
     assert capsys.readouterr().err == "error: interrupted\n"
+
+
+class OrderedStream(io.StringIO):
+    """A stream that notes its flushes and writes in a list shared with its twin."""
+
+    def __init__(self, name: str, events: list[str]) -> None:
+        super().__init__()
+        self.name = name
+        self.events = events
+
+    def flush(self) -> None:
+        self.events.append(f"{self.name} flushed")
+
+    def write(self, text: str, /) -> int:
+        self.events.append(f"{self.name} wrote {text!r}")
+        return len(text)
+
+
+async def _cancelled_with_no_task() -> None:
+    raise asyncio.CancelledError
+
+
+async def _cancelled_in_a_task() -> None:
+    raise RunCancelledError("task 1: a: stopped")
+
+
+async def _refused() -> None:
+    raise RefusedError("reason", "message")
+
+
+@pytest.mark.parametrize(
+    ("failing", "text"),
+    [
+        (_cancelled_with_no_task, "error: interrupted"),
+        (_cancelled_in_a_task, "error: task 1: a: stopped"),
+        (_refused, "error: refused: reason: message"),
+    ],
+)
+def test_run_flushes_stdout_before_each_error_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    failing: Callable[[], Coroutine[Any, Any, None]],
+    text: str,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr("sys.stdout", OrderedStream("stdout", events))
+    monkeypatch.setattr("sys.stderr", OrderedStream("stderr", events))
+
+    cli._run(failing(), Stop())
+
+    # Output captured on one pipe keeps its order only if stdout is flushed first.
+    assert events == ["stdout flushed", f"stderr wrote {text!r}", "stderr wrote '\\n'"]
 
 
 @pytest.mark.parametrize(("sig", "code"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)])

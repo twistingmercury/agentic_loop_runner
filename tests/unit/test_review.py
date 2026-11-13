@@ -25,6 +25,7 @@ from helpers import (
 )
 
 from alr import review as review_module
+from alr.engine import proc
 from alr.engine.stop import Stop
 from alr.errors import AlrError, ReviewError
 from alr.review import review
@@ -648,6 +649,65 @@ def test_the_last_stderr_line_is_the_reason(
 
 
 @pytest.mark.usefixtures("fake_claude")
+def test_the_last_stderr_line_ignores_trailing_blank_lines(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Blank and whitespace-only lines after the message must not become the reason.
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "3")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "boom\n\n   \n\n")
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert str(raised.value) == "review: claude failed (exit status 3): boom"
+
+
+def test_a_sandbox_path_with_a_line_break_is_quoted_in_the_prompt(
+    record: Path, tasks_file: str, tmp_path: Path
+) -> None:
+    folder = tmp_path / "odd\nsandbox"
+    folder.mkdir()
+    odd_sandbox = write_file(folder / "tight.json", "{}")
+
+    run_review(io.StringIO(), tasks_file, odd_sandbox, "", Stop())
+
+    prompt = recorded_call(record)["stdin"]
+    lines = prompt.splitlines()
+    assert len(lines) == 3
+    quoted = json.dumps(odd_sandbox)
+    assert lines[1] == f"The sandbox settings file the run will use is {quoted}."
+
+
+def test_the_prompt_is_exactly_the_three_lines_without_a_sandbox_file(
+    record: Path, tasks_file: str
+) -> None:
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    prompt = recorded_call(record)["stdin"]
+    quoted_tasks = json.dumps(tasks_file)
+    assert prompt == (
+        f"Use the alr-task-review skill to review the alr task file {quoted_tasks}.\n"
+        "There is no sandbox settings file for this run.\n"
+        "Reply with what the skill says to report and nothing else.\n"
+    )
+
+
+def test_the_prompt_is_exactly_the_three_lines_with_a_sandbox_file(
+    record: Path, tasks_file: str, sandbox_file: str
+) -> None:
+    run_review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
+
+    prompt = recorded_call(record)["stdin"]
+    quoted_tasks = json.dumps(tasks_file)
+    quoted_sandbox = json.dumps(sandbox_file)
+    assert prompt == (
+        f"Use the alr-task-review skill to review the alr task file {quoted_tasks}.\n"
+        f"The sandbox settings file the run will use is {quoted_sandbox}.\n"
+        "Reply with what the skill says to report and nothing else.\n"
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
 def test_invalid_utf8_in_the_reply_is_replaced(
     tasks_file: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -923,6 +983,68 @@ def test_a_failed_session_leaves_no_background_child(
     with pytest.raises(ReviewError):
         run_review(io.StringIO(), tasks_file, "", "", Stop())
 
+    wait_for_exit(int(child_pid_file.read_text()))
+
+
+def test_a_child_that_ignores_sigterm_is_killed_when_the_review_ends(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("CHILD_PID_FILE", str(child_pid_file))
+    # The child ignores SIGTERM before it writes its pid, so a pid on disk means
+    # the signal is already ignored. Only SIGKILL can end it.
+    child_source = (
+        "import os, signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "with open(os.environ['CHILD_PID_FILE'], 'w') as file:\n"
+        "    file.write(str(os.getpid()))\n"
+        "time.sleep(30)\n"
+    )
+    # The child gets no pipes, so the drain never waits on it; the review ends
+    # on claude's exit and only the group kill can reach the child.
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child_source!r}],\n"
+        "    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "pid_file = os.environ['CHILD_PID_FILE']\n"
+        "while not (os.path.exists(pid_file) and os.path.getsize(pid_file)):\n"
+        "    time.sleep(0.01)\n"
+        "print('NO FINDINGS')\n",
+    )
+
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    wait_for_exit(int(child_pid_file.read_text()))
+
+
+def test_a_review_returns_quickly_while_a_background_child_holds_the_output(
+    tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("CHILD_PID_FILE", str(child_pid_file))
+    # A short grace, so the cut-off after claude's exit is quick.
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
+    # The child inherits the session's output and holds it open for 30 seconds.
+    install_claude(
+        tmp_path,
+        monkeypatch,
+        "import os, subprocess\n"
+        "child = subprocess.Popen(['sleep', '30'])\n"
+        "with open(os.environ['CHILD_PID_FILE'], 'w') as file:\n"
+        "    file.write(str(child.pid))\n"
+        "print('NO FINDINGS')\n",
+    )
+    out = io.StringIO()
+
+    started = time.monotonic()
+    run_review(out, tasks_file, "", "", Stop())
+    elapsed = time.monotonic() - started
+
+    # Far under the child's 30 seconds: waiting for the output to close would not be.
+    assert elapsed < 10
+    assert "NO FINDINGS\n" in out.getvalue()
     wait_for_exit(int(child_pid_file.read_text()))
 
 

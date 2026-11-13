@@ -419,3 +419,21 @@ def test_a_group_that_refuses_the_signal_counts_as_gone(
     monkeypatch.setattr(os, "killpg", refuse)
 
     assert proc.signal_group(1, 0) is False
+
+
+async def test_finish_without_a_limit_sets_no_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delays: list[float | None] = []
+    real_timeout = asyncio.timeout
+
+    def recording_timeout(delay: float | None) -> Any:
+        delays.append(delay)
+        return real_timeout(delay)
+
+    monkeypatch.setattr(asyncio, "timeout", recording_timeout)
+    process = await proc.start(["true"])
+
+    await proc.finish(process)
+
+    assert delays == [None]
