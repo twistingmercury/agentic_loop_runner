@@ -211,6 +211,20 @@ def _probe(pid: int) -> bool:
     return True
 
 
+def wait_for_exit(pid: int, timeout: float = 5) -> None:
+    """The same wait for a test with no event loop: fail unless pid stops running in time.
+
+    A process that was sent SIGKILL is not gone the instant the signal is sent,
+    so a test that checks right away would be racing the kernel.
+    """
+    deadline = time.monotonic() + timeout
+    while process_is_running(pid):
+        if time.monotonic() > deadline:
+            pytest.fail(f"process {pid} remained running")
+
+        time.sleep(0.01)
+
+
 async def wait_until_gone(pid: int, timeout: float = 2) -> None:
     """The same wait for a test that runs an event loop, which a sleep must not block."""
     deadline = asyncio.get_running_loop().time() + timeout

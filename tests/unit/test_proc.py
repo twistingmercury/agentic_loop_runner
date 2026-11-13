@@ -93,6 +93,22 @@ async def test_read_lines_splits_only_on_newlines() -> None:
     assert lines == [b"one\r\n", b"two\rstill two\n", b"\n", b"last"]
 
 
+async def test_read_lines_hands_over_an_unfinished_line_when_cancelled() -> None:
+    stream = asyncio.StreamReader()
+    stream.feed_data(b"one\npart")
+    stream.feed_data(b"ial")
+    lines: list[bytes] = []
+    reader = asyncio.ensure_future(proc.read_lines(stream, lines.append))
+
+    # The stream never ends, as when a background child holds the pipe open.
+    await asyncio.sleep(0.1)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+
+    assert lines == [b"one\n", b"partial"]
+
+
 @pytest.mark.parametrize(
     ("returncode", "text"),
     [
@@ -193,6 +209,46 @@ async def test_bounded_finish_cuts_off_a_drain_held_open_by_an_escaped_process(
 
     assert result is None
     assert lines == [b"line\n"]
+
+
+async def test_finish_limit_does_not_count_the_drain_after_the_child_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.5)
+    pid_file = tmp_path / "holder.pid"
+    # The child exits at 0.3 s, inside the limit, but the background process
+    # keeps the drain open for the whole grace period, past the limit.
+    process = await proc.start(
+        ["sh", "-c", f"sleep 30 & echo $! > {pid_file}; sleep 0.3"],
+        stdout=asyncio.subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    lines: list[bytes] = []
+
+    try:
+        result = await proc.finish(
+            process,
+            proc.read_lines(process.stdout, lines.append),
+            bounded=True,
+            limit=0.6,
+        )
+    finally:
+        await kill_holder_and_let_pipes_close(pid_file)
+
+    assert result is None
+
+
+async def test_finish_limit_stops_the_group_and_raises_when_the_child_runs_on(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    process = await proc.start(["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"])
+
+    with pytest.raises(TimeoutError):
+        await proc.finish(process, limit=0.3)
+
+    assert process.returncode == -signal.SIGKILL
+    await wait_until_gone(int(pid_file.read_text()))
 
 
 async def test_unbounded_finish_waits_for_a_drain_held_open_by_a_background_process(
@@ -362,4 +418,4 @@ def test_a_group_that_refuses_the_signal_counts_as_gone(
 
     monkeypatch.setattr(os, "killpg", refuse)
 
-    assert proc._signal_group(1, 0) is False
+    assert proc.signal_group(1, 0) is False

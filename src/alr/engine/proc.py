@@ -75,6 +75,7 @@ async def finish(
     drain: Awaitable[None] | None = None,
     *,
     bounded: bool = False,
+    limit: float | None = None,
 ) -> str | None:
     """Run drain alongside process until both are done and return the exit text.
 
@@ -82,21 +83,29 @@ async def finish(
     group is stopped before the error carries on.
     bounded: once the process has exited, a drain still held open by a
     background process is cut off after a grace period, keeping what it had
-    read, and the process's pipes are closed. For an action, whose own exit is its
-    result. Leave it off for a session, whose output must be read to the end.
+    read, and the process's pipes are closed. For the plain and stream
+    frontends and the review, whose own exit is their result. Leave it off
+    when the output must be read to the end.
+    limit: seconds the process may run, counted from this call until it
+    exits. The drain after the exit is not counted. When the process runs
+    past it, the group is stopped and TimeoutError propagates.
     """
-    return exit_text(await _run_to_exit(process, drain, bounded))
+    return exit_text(await _run_to_exit(process, drain, bounded, limit))
 
 
 async def _run_to_exit(
     process: asyncio.subprocess.Process,
     drain: Awaitable[None] | None,
     bounded: bool = False,
+    limit: float | None = None,
 ) -> int:
     """Wait for the child to exit, then for the drain; stop the group if either fails."""
     task = None if drain is None else asyncio.ensure_future(drain)
     try:
-        await _wait_for_exit(process, task)
+        # The limit covers the child only; the drain has its own grace period.
+        async with asyncio.timeout(limit):
+            await _wait_for_exit(process, task)
+
         if task is not None:
             await _finish_drain(process, task, bounded)
     except BaseException:
@@ -202,20 +211,27 @@ async def read_lines(
     StreamReader.readline fails on a line longer than its buffer, and one
     stream-json event (a tool result holding a whole file, say) can be larger.
     Reading in chunks has no line limit, and a final line with no trailing
-    newline still reaches on_line.
+    newline still reaches on_line, also when the read is cancelled because a
+    background child holds the stream open past the end of the drain.
     """
     pieces: list[bytes] = []
-    while chunk := await stream.read(_READ_SIZE):
-        *ends, rest = chunk.split(b"\n")
-        for end in ends:
-            on_line(b"".join([*pieces, end, b"\n"]))
+    try:
+        while chunk := await stream.read(_READ_SIZE):
+            *ends, rest = chunk.split(b"\n")
+            for end in ends:
+                line = b"".join([*pieces, end, b"\n"])
+                # Cleared before the call, so a callback that raises does not
+                # leave the finally below to hand the same bytes over again.
+                pieces.clear()
+                on_line(line)
+
+            if rest:
+                pieces.append(rest)
+    finally:
+        if pieces:
+            tail = b"".join(pieces)
             pieces.clear()
-
-        if rest:
-            pieces.append(rest)
-
-    if pieces:
-        on_line(b"".join(pieces))
+            on_line(tail)
 
 
 async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:
@@ -231,7 +247,7 @@ async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:
 
 
 async def _stop_group(process: asyncio.subprocess.Process) -> None:
-    _signal_group(process.pid, signal.SIGKILL)
+    signal_group(process.pid, signal.SIGKILL)
     # Not process.wait(): on 3.12 it also waits for the pipes to close, and a
     # descendant that left the group still holds them.
     await _wait_for_exit(process, None)
@@ -254,7 +270,7 @@ def _close_transport(process: asyncio.subprocess.Process) -> None:
     cast(_HasTransport, process)._transport.close()
 
 
-def _signal_group(pgid: int, sig: int) -> bool:
+def signal_group(pgid: int, sig: int) -> bool:
     """Send sig to the group; False when the group is already gone."""
     try:
         os.killpg(pgid, sig)

@@ -23,6 +23,7 @@ from alr.engine.sandbox import bypass_args, sandbox_args, settings_args
 from alr.engine.stop import Stop
 from alr.errors import (
     CONFIG_SETUP_MISSING,
+    TASK_FILE_WARNINGS,
     AlrError,
     RefusedError,
     RunCancelledError,
@@ -30,6 +31,7 @@ from alr.errors import (
 )
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
+from alr.review import review
 from alr.sandboxes import (
     add_missing,
     check_can_add_missing,
@@ -46,6 +48,11 @@ _INTERRUPTED = "error: interrupted"
 # The config's sandbox default that is not a sandbox name (see alr.config).
 _YOLO = "yolo"
 _YES_ANSWERS = ("y", "yes")
+_RUN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+# A closed terminal or a dropped ssh session sends SIGHUP. A real run leaves it
+# to #63; --validate handles it so the review's session does not outlive alr.
+_VALIDATE_SIGNALS = (*_RUN_SIGNALS, signal.SIGHUP)
+_REVIEW_SKIPPED = "review skipped: the dry run found problems; fix them and run again"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,14 +100,21 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(_version_line())
         return 0
 
+    # --validate is a dry run that also syncs the skills and reviews, so every
+    # check below that decides on a dry run decides the same for it.
+    if args.validate:
+        args.dry_run = True
+
     try:
         # Before anything else a real run does, so no later refusal hides the question.
         if not config_folder_exists():
             return _handle_missing_config_folder(args.dry_run)
 
-        # A dry run writes nothing (requirement 9): it refuses what the real run's
-        # add would refuse, and reads a missing shipped file from the package instead.
-        if args.dry_run:
+        # A plain dry run writes nothing (requirement 9): it refuses what the real
+        # run's add would refuse, and reads a missing shipped file from the package
+        # instead. --validate adds and syncs as a real run does, so the review
+        # reads a sandbox file that exists and uses the skill that came with this alr.
+        if args.dry_run and not args.validate:
             check_can_add_missing()
             _report_pending_skills()
         else:
@@ -118,7 +132,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if args.action_timeout is not None:
             check_action_timeout(args.action_timeout)
 
-        check_reset_flag(args.reset_failed, args.dry_run)
+        check_reset_flag(args.reset_failed, args.dry_run, args.validate)
         check_strict_flag(args.strict, args.dry_run)
         if wants_tui(args):
             return _open_view(args, tasks_file, answer)
@@ -136,18 +150,22 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     action_timeout = args.action_timeout or ""
     stop = Stop()
     if args.dry_run:
-        return _run(
-            dry_run(
-                sys.stdout,
-                tasks_file,
-                action_timeout,
-                answer.sandbox_file,
-                answer.sandbox_name,
-                _added_on_real_run(answer, args.dry_run),
-                args.strict,
-            ),
-            stop,
+        checks = dry_run(
+            sys.stdout,
+            tasks_file,
+            action_timeout,
+            answer.sandbox_file,
+            answer.sandbox_name,
+            _added_on_real_run(answer, args.dry_run),
+            args.strict,
         )
+        if args.validate:
+            validating = _validate(
+                checks, tasks_file, answer.sandbox_file, action_timeout, stop
+            )
+            return _run(validating, stop, signals=_VALIDATE_SIGNALS)
+
+        return _run(checks, stop)
 
     return _run(
         start(
@@ -160,6 +178,36 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         ),
         stop,
     )
+
+
+async def _validate(
+    checks: Coroutine[Any, Any, int],
+    tasks_file: str,
+    sandbox_file: str,
+    action_timeout: str,
+    stop: Stop,
+) -> None:
+    """Await the dry run, then the review when the dry run was clean.
+
+    Both run in this one coroutine, so a stop at any point is the same
+    cancellation: _run turns it into the signal's exit code.
+
+    Under --strict a warning is a refusal, which carries no count, so the
+    refusal's reason is what says there was one.
+    """
+    try:
+        warnings = await checks
+    except RefusedError as exc:
+        if exc.reason == TASK_FILE_WARNINGS:
+            print(_REVIEW_SKIPPED)
+
+        raise
+
+    if warnings:
+        print(_REVIEW_SKIPPED)
+        return
+
+    await review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
 
 
 def _add_missing_sandboxes() -> None:
@@ -333,12 +381,17 @@ def _parser() -> argparse.ArgumentParser:
         "--dir",
         metavar="",
         default="",
-        help="Run folder holding tasks.yaml; required with --plain or --dry-run, and the full-screen view asks for it when it is missing",
+        help="Run folder holding tasks.yaml; required with --plain, --dry-run, or --validate, and the full-screen view asks for it when it is missing",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate the tasks file and report failed tasks without running anything",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run the dry run, then have Claude review the task file",
     )
     parser.add_argument(
         "--strict",
@@ -453,12 +506,20 @@ def check_action_timeout(value: str) -> None:
         raise UsageError(f"--action-timeout: {exc}") from exc
 
 
-def check_reset_flag(reset_failed: bool, dry_run: bool) -> None:
-    """Refuse --reset-failed with --dry-run, which must write nothing."""
-    if reset_failed and dry_run:
+def check_reset_flag(reset_failed: bool, dry_run: bool, validate: bool) -> None:
+    """Refuse --reset-failed with --dry-run or --validate, which must not change the task file."""
+    if not (reset_failed and dry_run):
+        return
+
+    if validate:
         raise UsageError(
-            "--reset-failed cannot be used with --dry-run (a dry run writes nothing)"
+            "--reset-failed cannot be used with --validate"
+            " (it changes the task file, which --validate only reads)"
         )
+
+    raise UsageError(
+        "--reset-failed cannot be used with --dry-run (a dry run writes nothing)"
+    )
 
 
 def check_strict_flag(strict: bool, dry_run: bool) -> None:
@@ -529,35 +590,60 @@ def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None
     parser.print_usage(sys.stderr)
 
 
-def _run(coro: Coroutine[Any, Any, None], stop: Stop) -> int:
-    """Run coro to the end; SIGINT or SIGTERM cancels it, which stops the run.
+def _run(
+    coro: Coroutine[Any, Any, object],
+    stop: Stop,
+    signals: tuple[signal.Signals, ...] = _RUN_SIGNALS,
+) -> int:
+    """Run coro to the end; any of signals cancels it, which stops the run.
 
     A stop exits with the code of the first signal, which _with_signals records in stop.
     """
     try:
-        asyncio.run(_with_signals(coro, stop))
+        asyncio.run(_with_signals(coro, stop, signals))
     except asyncio.CancelledError:
         # The stop landed while no task was running, so there is no task to name.
-        print(_INTERRUPTED, file=sys.stderr)
+        _print_to_stderr(_INTERRUPTED)
         return stop.exit_code()
     except RunCancelledError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _print_to_stderr(f"error: {exc}")
         return stop.exit_code()
     except AlrError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _print_to_stderr(f"error: {exc}")
         return exc.exit_code
 
     return 0
 
 
-async def _with_signals(coro: Coroutine[Any, Any, None], stop: Stop) -> None:
+def _print_to_stderr(line: str) -> None:
+    """Print one line on stderr, after flushing stdout so output captured on one pipe keeps its order.
+
+    stdout is buffered when it is not a terminal and stderr is not, so without
+    the flush an error would come out ahead of the lines printed before it.
+
+    A dead terminal (a hangup that takes it along) fails the flush or the print
+    with OSError. The line has nowhere to go, and raising would replace the
+    exit code of the stop with a traceback.
+    """
+    try:
+        sys.stdout.flush()
+        print(line, file=sys.stderr)
+    except OSError:
+        return
+
+
+async def _with_signals(
+    coro: Coroutine[Any, Any, object],
+    stop: Stop,
+    signals: tuple[signal.Signals, ...],
+) -> None:
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     if task is None:
         raise RuntimeError("no running task")
 
     handler = _stop_once(task, stop)
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in signals:
         loop.add_signal_handler(sig, handler, sig)
 
     await coro
