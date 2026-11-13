@@ -648,6 +648,65 @@ def test_the_last_stderr_line_is_the_reason(
 
 
 @pytest.mark.usefixtures("fake_claude")
+def test_the_last_stderr_line_ignores_trailing_blank_lines(
+    tasks_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Blank and whitespace-only lines after the message must not become the reason.
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "3")
+    monkeypatch.setenv("FAKECLAUDE_STDERR", "boom\n\n   \n\n")
+
+    with pytest.raises(ReviewError) as raised:
+        run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    assert str(raised.value) == "review: claude failed (exit status 3): boom"
+
+
+def test_a_sandbox_path_with_a_line_break_is_quoted_in_the_prompt(
+    record: Path, tasks_file: str, tmp_path: Path
+) -> None:
+    folder = tmp_path / "odd\nsandbox"
+    folder.mkdir()
+    odd_sandbox = write_file(folder / "tight.json", "{}")
+
+    run_review(io.StringIO(), tasks_file, odd_sandbox, "", Stop())
+
+    prompt = recorded_call(record)["stdin"]
+    lines = prompt.splitlines()
+    assert len(lines) == 3
+    quoted = json.dumps(odd_sandbox)
+    assert lines[1] == f"The sandbox settings file the run will use is {quoted}."
+
+
+def test_the_prompt_is_exactly_the_three_lines_without_a_sandbox_file(
+    record: Path, tasks_file: str
+) -> None:
+    run_review(io.StringIO(), tasks_file, "", "", Stop())
+
+    prompt = recorded_call(record)["stdin"]
+    quoted_tasks = json.dumps(tasks_file)
+    assert prompt == (
+        f"Use the alr-task-review skill to review the alr task file {quoted_tasks}.\n"
+        "There is no sandbox settings file for this run.\n"
+        "Reply with what the skill says to report and nothing else.\n"
+    )
+
+
+def test_the_prompt_is_exactly_the_three_lines_with_a_sandbox_file(
+    record: Path, tasks_file: str, sandbox_file: str
+) -> None:
+    run_review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
+
+    prompt = recorded_call(record)["stdin"]
+    quoted_tasks = json.dumps(tasks_file)
+    quoted_sandbox = json.dumps(sandbox_file)
+    assert prompt == (
+        f"Use the alr-task-review skill to review the alr task file {quoted_tasks}.\n"
+        f"The sandbox settings file the run will use is {quoted_sandbox}.\n"
+        "Reply with what the skill says to report and nothing else.\n"
+    )
+
+
+@pytest.mark.usefixtures("fake_claude")
 def test_invalid_utf8_in_the_reply_is_replaced(
     tasks_file: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
