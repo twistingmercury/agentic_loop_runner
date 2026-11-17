@@ -1,5 +1,6 @@
 """The sandboxes folder: shipped files added when missing, listed, and found by name."""
 
+import errno
 import json
 import os
 from collections.abc import Callable
@@ -18,14 +19,17 @@ from alr.errors import (
 )
 from alr.sandboxes import (
     Sandbox,
+    SandboxChange,
     add_missing,
     check_can_add_missing,
     find,
     list_sandboxes,
     names_in,
     names_text,
+    pending_changes,
     read_text,
     sandboxes_dir,
+    sync_shipped,
 )
 
 SHIPPED = ("large.json", "tight.json")
@@ -520,3 +524,266 @@ def test_names_text_joins_names_or_says_none(set_up_home: Path) -> None:
     add_missing(set_up_home)
 
     assert names_text(set_up_home) == "large, tight"
+
+
+EDITED = b'{"sandbox": {"network": {}}}\n'
+
+
+def snapshot(folder: Path) -> dict[str, tuple[str, bytes]]:
+    """Name each entry of a folder with its kind and content, links not followed."""
+    entries: dict[str, tuple[str, bytes]] = {}
+    for entry in sorted(folder.iterdir()):
+        if entry.is_symlink():
+            entries[entry.name] = ("symlink", os.fsencode(entry.readlink()))
+        elif entry.is_dir():
+            entries[entry.name] = ("folder", b"")
+        else:
+            entries[entry.name] = ("file", entry.read_bytes())
+
+    return entries
+
+
+def test_sync_shipped_adds_both_files_to_an_empty_folder(set_up_home: Path) -> None:
+    folder = sandboxes_dir(set_up_home)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == [
+        SandboxChange(folder / "large.json", "Added", ""),
+        SandboxChange(folder / "tight.json", "Added", ""),
+    ]
+    assert report.warnings == []
+    for name in SHIPPED:
+        assert (folder / name).read_bytes() == package_copy(name)
+
+
+def test_sync_shipped_says_nothing_when_the_files_are_identical(
+    set_up_home: Path,
+) -> None:
+    sync_shipped(set_up_home)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == []
+    assert report.warnings == []
+
+
+def test_sync_shipped_updates_an_edited_file(set_up_home: Path) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "large.json").write_bytes(EDITED)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == [SandboxChange(folder / "large.json", "Updated", "")]
+    assert report.warnings == []
+    assert (folder / "large.json").read_bytes() == package_copy("large.json")
+
+
+def test_sync_shipped_orders_added_and_updated_by_name(set_up_home: Path) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "large.json").unlink()
+    (folder / "tight.json").write_bytes(EDITED)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == [
+        SandboxChange(folder / "large.json", "Added", ""),
+        SandboxChange(folder / "tight.json", "Updated", ""),
+    ]
+
+
+def test_sync_shipped_orders_an_update_before_an_added_file_when_its_name_sorts_first(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "tight.json").unlink()
+    (folder / "large.json").write_bytes(EDITED)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == [
+        SandboxChange(folder / "large.json", "Updated", ""),
+        SandboxChange(folder / "tight.json", "Added", ""),
+    ]
+
+
+def test_sync_shipped_replaces_a_symlink_and_leaves_its_target(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    mine = set_up_home / "mine.json"
+    mine.write_bytes(EDITED)
+    link = folder / "large.json"
+    link.unlink()
+    link.symlink_to(mine)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == [SandboxChange(link, "Updated", "symlink")]
+    assert report.warnings == [
+        f"{link} was a symlink; replaced it with the shipped sandbox"
+    ]
+    assert not link.is_symlink()
+    assert link.read_bytes() == package_copy("large.json")
+    assert mine.read_bytes() == EDITED
+
+
+def test_sync_shipped_replaces_a_dangling_symlink(set_up_home: Path) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    link = folder / "tight.json"
+    link.unlink()
+    link.symlink_to(set_up_home / "gone.json")
+
+    report = sync_shipped(set_up_home)
+
+    assert report.changes == [SandboxChange(link, "Updated", "symlink")]
+    assert not link.is_symlink()
+    assert link.read_bytes() == package_copy("tight.json")
+
+
+def test_sync_shipped_warns_about_a_folder_at_an_owned_name(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    folder.mkdir()
+    (folder / "large.json").mkdir()
+
+    report = sync_shipped(set_up_home)
+
+    assert (folder / "large.json").is_dir()
+    assert report.warnings == [
+        f"sandbox large: {folder / 'large.json'}: is a folder, not a file"
+    ]
+    assert report.changes == [SandboxChange(folder / "tight.json", "Added", "")]
+    assert (folder / "tight.json").read_bytes() == package_copy("tight.json")
+
+
+def test_sync_shipped_warns_and_goes_on_when_an_update_cannot_be_written(
+    set_up_home: Path, locked_folder: None
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "large.json").write_bytes(EDITED)
+
+    with chmodded(folder, 0o500):
+        report = sync_shipped(set_up_home)
+
+    assert report.changes == []
+    assert report.warnings == [
+        f"sandbox large: {folder / 'large.json'}: {os.strerror(errno.EACCES)}"
+    ]
+    assert (folder / "large.json").read_bytes() == EDITED
+
+
+def test_sync_shipped_removes_its_temporary_file_when_the_replace_fails(
+    set_up_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "large.json").write_bytes(EDITED)
+
+    def replace_fails(source: str, target: Path) -> None:
+        raise OSError(errno.EIO, os.strerror(errno.EIO))
+
+    monkeypatch.setattr("alr.sandboxes.os.replace", replace_fails)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.warnings == [
+        f"sandbox large: {folder / 'large.json'}: {os.strerror(errno.EIO)}"
+    ]
+    assert (folder / "large.json").read_bytes() == EDITED
+    assert sorted(path.name for path in folder.iterdir()) == list(SHIPPED)
+
+
+def test_sync_shipped_leaves_a_file_under_another_name_alone(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    mine = folder / "my_large.json"
+    mine.write_bytes(EDITED)
+    (folder / "large.json").write_bytes(b"{}\n")
+
+    sync_shipped(set_up_home)
+
+    assert mine.read_bytes() == EDITED
+
+
+def test_sync_shipped_leaves_no_temporary_file_behind(set_up_home: Path) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "mine.json").write_bytes(EDITED)
+    (folder / "large.json").write_bytes(EDITED)
+
+    sync_shipped(set_up_home)
+
+    left = sorted(path.name for path in folder.iterdir())
+    assert left == ["large.json", "mine.json", "tight.json"]
+
+
+def test_sync_shipped_refuses_what_add_missing_refuses(
+    set_up_home: Path, locked_folder: None
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    folder.mkdir()
+    (folder / "tight.json").write_bytes(package_copy("tight.json"))
+
+    with chmodded(folder, 0o500):
+        expected = refusal_of(add_missing, set_up_home)
+        refused = refusal_of(sync_shipped, set_up_home)
+
+    assert refused.reason == CONFIG_UNWRITABLE
+    assert refused.message == expected.message
+
+
+def test_pending_changes_reports_what_sync_would_change_and_writes_nothing(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "large.json").unlink()
+    (folder / "tight.json").write_bytes(EDITED)
+    before = snapshot(folder)
+
+    pending = pending_changes(set_up_home)
+
+    assert snapshot(folder) == before
+    assert pending == [
+        SandboxChange(folder / "large.json", "Added", ""),
+        SandboxChange(folder / "tight.json", "Updated", ""),
+    ]
+    assert pending == sync_shipped(set_up_home).changes
+
+    mine = set_up_home / "mine.json"
+    mine.write_bytes(EDITED)
+    (folder / "large.json").unlink()
+    (folder / "large.json").symlink_to(mine)
+    before = snapshot(folder)
+
+    pending = pending_changes(set_up_home)
+
+    assert snapshot(folder) == before
+    assert pending == [SandboxChange(folder / "large.json", "Updated", "symlink")]
+    assert pending == sync_shipped(set_up_home).changes
+
+
+def test_pending_changes_is_empty_when_everything_matches(set_up_home: Path) -> None:
+    sync_shipped(set_up_home)
+
+    assert pending_changes(set_up_home) == []
+
+
+def test_pending_changes_leaves_out_what_it_cannot_read(set_up_home: Path) -> None:
+    folder = sandboxes_dir(set_up_home)
+    folder.mkdir()
+    (folder / "large.json").mkdir()
+
+    pending = pending_changes(set_up_home)
+
+    assert pending == [SandboxChange(folder / "tight.json", "Added", "")]
