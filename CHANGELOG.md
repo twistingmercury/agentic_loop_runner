@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A SIGHUP, from a closed terminal or a dropped ssh session, now stops a run
+  the way SIGTERM does and exits 129, so no session outlives alr (issue #63,
+  ADR-040). A SIGHUP that was ignored at start, as `nohup` leaves it, is left
+  ignored.
+
 ## [0.5.4] - 2026-11-17
 
 ### Added
