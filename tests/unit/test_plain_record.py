@@ -19,6 +19,7 @@ from alr.record.events import (
     Event,
     ActionFinished,
     ActionStarted,
+    ResultRetried,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -90,6 +91,15 @@ async def test_action_started_is_reported_once_after_its_marker_and_before_it_fi
     assert events.index(started) == marker + 1
     [finished] = [e for e in events if isinstance(e, ActionFinished)]
     assert events.index(started) < events.index(finished)
+
+
+def test_plain_front_end_reports_a_result_retry() -> None:
+    events: list[Event] = []
+    task = Task(id=1, name="First", prompt="p1")
+
+    PlainFrontEnd(events.append).result_retried(task, "abc", True)
+
+    assert events == [ResultRetried(task, "abc", True)]
 
 
 async def test_claude_stdout_lines_arrive_in_order_with_the_last_unterminated(

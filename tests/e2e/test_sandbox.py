@@ -28,6 +28,7 @@ from e2e_helpers import (
     run_log,
     shared_block,
     task_states,
+    without_session_id,
     write_tasks_yaml,
 )
 
@@ -156,7 +157,7 @@ def with_auto_allow(doc: dict[str, Any]) -> dict[str, Any]:
 def assert_sandboxed(argv: list[str]) -> None:
     """The settings travel inline; their key order is not part of the contract, so they are compared parsed."""
     assert argv[:4] == ["--print", "--permission-mode", "acceptEdits", "--settings"]
-    assert len(argv) == 5
+    assert len(without_session_id(argv)) == 5
     assert json.loads(argv[4]) == FORCED_SETTINGS
 
 
@@ -194,7 +195,9 @@ def test_sandbox_every_task_gets_the_same_settings(
     assert run.res.code == 0, run.res
     assert len(run.records) == 2
     assert_sandboxed(run.records[0]["argv"])
-    assert run.records[1]["argv"] == run.records[0]["argv"]
+    assert without_session_id(run.records[1]["argv"]) == without_session_id(
+        run.records[0]["argv"]
+    )
     assert [record["stdin"] for record in run.records] == [
         expected_stdin(SHARED_PROMPT, 1, "First task", "Do the first thing."),
         expected_stdin(SHARED_PROMPT, 2, "Second task", "Do the second thing."),
@@ -363,7 +366,7 @@ def test_a_sandbox_of_the_users_own_runs_with_its_settings_and_the_forced_keys(
     assert run.res.code == 0, run.res
     argv = run.records[0]["argv"]
     assert argv[:4] == ["--print", "--permission-mode", "acceptEdits", "--settings"]
-    assert len(argv) == 5
+    assert len(without_session_id(argv)) == 5
     assert json.loads(argv[4]) == {
         "permissions": {"deny": ["WebFetch"]},
         "sandbox": {**FORCED_SETTINGS["sandbox"]},
@@ -637,7 +640,7 @@ def test_a_folders_sandbox_json_is_ignored_with_one_notice(
     assert run.res.code == 0, run.res
     assert run.res.out.count("is no longer read") == 1
     assert folder_notice(folder) in run.res.out
-    assert [record["argv"] for record in run.records] == [
+    assert [without_session_id(record["argv"]) for record in run.records] == [
         ["--print", "--dangerously-skip-permissions"]
     ]
 

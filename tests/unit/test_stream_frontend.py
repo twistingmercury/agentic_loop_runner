@@ -12,6 +12,7 @@ from helpers import (
     kill_holder_and_let_pipes_close,
     run_loop,
     wait_for_text,
+    without_session_id,
     write_file,
 )
 
@@ -25,6 +26,7 @@ from alr.record.events import (
     Event,
     ActionFinished,
     ActionStarted,
+    ResultRetried,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -93,7 +95,7 @@ async def test_session_argv_and_stdin(record: Path, tmp_path: Path) -> None:
     await _run(_task_list(), tmp_path / "tasks.yaml")
 
     [call] = fake_claude_records(record)
-    assert call["argv"] == [
+    assert without_session_id(call["argv"]) == [
         "--print",
         "--output-format",
         "stream-json",
@@ -109,7 +111,7 @@ async def test_session_argv_with_sandbox_args(record: Path, tmp_path: Path) -> N
     await _run(_task_list(), tmp_path / "tasks.yaml", session_args=session_args)
 
     [call] = fake_claude_records(record)
-    assert call["argv"] == [
+    assert without_session_id(call["argv"]) == [
         "--print",
         "--output-format",
         "stream-json",
@@ -265,6 +267,15 @@ async def test_session_finished_carries_a_failed_outcome(
     [session] = _of(events, SessionFinished)
     assert session.task.state == FAILED
     assert session.task.error == "boom"
+
+
+def test_stream_front_end_reports_a_result_retry() -> None:
+    events: list[Event] = []
+    task = Task(id=1, name="First", prompt="p1")
+
+    StreamFrontEnd(events.append).result_retried(task, "abc", True)
+
+    assert events == [ResultRetried(task, "abc", True)]
 
 
 async def test_action_output_arrives_as_activity(tmp_path: Path) -> None:

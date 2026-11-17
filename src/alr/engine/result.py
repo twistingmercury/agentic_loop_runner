@@ -5,7 +5,16 @@ import re
 
 from alr.tasks import COMPLETED, FAILED
 
-_NO_RESULT = "no valid result line in session output"
+_NO_RESULT = "session exited 0 but wrote no result line, even after one follow-up"
+
+# Fixed on purpose: the follow-up must read the same on every run (ADR-039).
+RESULT_REQUEST = (
+    "Your last message did not end with the result line. "
+    "Do not run any tools and do not change anything. "
+    'Reply with only the result line: {"state": "completed", "error": ""} '
+    'if the task is done, or {"state": "failed", "error": "<why>"} '
+    "if it is not."
+)
 _FAILED_WITHOUT_ERROR = "session reported failed with no error"
 _LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 

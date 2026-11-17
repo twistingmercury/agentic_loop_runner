@@ -19,6 +19,7 @@ from alr.record.events import (
     Event,
     ActionFinished,
     ActionStarted,
+    ResultRetried,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -238,6 +239,18 @@ def test_record_completed_run(opened: tuple[RunLog, Path]) -> None:
     assert read_lines(detail) == [
         "14:02:11 working",
         "14:02:11 → action go test ./...",
+    ]
+
+
+def test_result_retry_is_written_to_the_ledger(opened: tuple[RunLog, Path]) -> None:
+    log, path = opened
+    task = Task(id=1, name="First", prompt="p1")
+
+    record(log, ResultRetried(task, "abc", True))
+
+    assert ledger_lines(path)[1:] == [
+        "{" + STAMP + ',"event":"result_retry","task":1,'
+        '"session_id":"abc","recovered":true}'
     ]
 
 

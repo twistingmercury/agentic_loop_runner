@@ -12,6 +12,7 @@ from e2e_helpers import (
     read_tasks_yaml,
     run_alr,
     run_args,
+    run_log,
     shared_block,
     task_errors,
     task_states,
@@ -26,7 +27,7 @@ ONE_TASK_YAML = (
     prompt: Do the first thing.
 """
 )
-NO_RESULT_LINE = "no valid result line in session output"
+NO_RESULT_LINE = "session exited 0 but wrote no result line, even after one follow-up"
 
 
 def run_one_task(tmp_path: Path, env: dict[str, str]) -> tuple[Result, Path]:
@@ -180,3 +181,38 @@ def test_loop_stale_error_cleared_when_task_completes(
     # The key is gone, not merely blank.
     assert "error:" not in tasks_path.read_text(encoding="utf-8")
     assert_no_tmp_file(tasks_path)
+
+
+def test_a_dropped_result_line_is_recovered_by_one_follow_up(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    tasks_path = write_tasks_yaml(tmp_path, ONE_TASK_YAML)
+    record_file = tmp_path / "record.ndjson"
+    completed_line = '{"state":"completed","error":""}\n'
+
+    res = run_alr(
+        *run_args(tasks_path),
+        env={
+            "FAKECLAUDE_RECORD_FILE": str(record_file),
+            "FAKECLAUDE_OUTPUT": "",
+            "FAKECLAUDE_RESUME_OUTPUT": completed_line,
+        },
+    )
+
+    assert res.code == 0, res
+    after = read_tasks_yaml(tasks_path)
+    assert task_states(after)[1] == "completed"
+    assert task_errors(after)[1] == ""
+    assert_no_tmp_file(tasks_path)
+
+    first, second = fake_claude_records(record_file)
+    assert first["argv"][-2] == "--session-id"
+    assert "--resume" not in first["argv"]
+    session_id = first["argv"][-1]
+    assert second["argv"][-2:] == ["--resume", session_id]
+
+    ledger = run_log(tmp_path)
+    (retry,) = [entry for entry in ledger if entry["event"] == "result_retry"]
+    assert retry["task"] == 1
+    assert retry["session_id"] == session_id
+    assert retry["recovered"] is True
