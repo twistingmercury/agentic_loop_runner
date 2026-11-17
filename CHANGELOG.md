@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Breaking: alr now owns `tight.json` and `large.json` in
+  `~/.local/alr/sandboxes/` (ADR-037). On every real run it overwrites a copy
+  that differs from the shipped file, with no backup, and prints
+  `Updated <path>`. A copy under another name is never touched, so keep a
+  tailored sandbox under its own name. `--dry-run` reports the change with
+  `sandbox: <path> (updated on a real run)` and writes nothing, and
+  `--validate` syncs the files like a real run.
+
+### Fixed
+
+- The shipped Large sandbox can now write the caches of uv, pip, npm, Go,
+  Cargo, .NET, Maven, and Gradle, and reach `api.nuget.org` and
+  `repo.maven.apache.org` (issue #49, ADR-037). Existing users get it through
+  the sync above.
+
 ## [0.5.2] - 2026-11-12
 
 ### Added

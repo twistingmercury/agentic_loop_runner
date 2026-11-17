@@ -532,8 +532,9 @@ an action now: put it in shared.after_task, see the README (Migrating from commi
    `--dry-run`, which never writes, it is refused as `config-setup-missing` at once and nothing is asked. A path that
    is a file or a symlink is refused as `invalid-config`, and a home alr cannot find or write to as `config-unwritable`.
    On a real run that goes on, alr then creates `sandboxes/` when it is missing and copies in each shipped sandbox file
-   that is not there, never overwriting a file (a temporary file, then a link that cannot replace one; losing a race is
-   not an error), and prints `Added <path>` for each. A `sandboxes` path that is not a folder is refused as
+   that is not there (a temporary file, then a link that cannot replace one; losing a race is not an error), and prints
+   `Added <path>` for each. A shipped file that differs from its copy is written beside it and renamed over it, with
+   `Updated <path>` and no backup; a file under any other name is never touched (ADR-037). A `sandboxes` path that is not a folder is refused as
    `invalid-config`, and a file alr cannot write as `config-unwritable`. A `--dry-run` writes nothing (ADR-032)
    Then alr syncs the bundled skills (ADR-035) in the skills folder, which is `$CLAUDE_CONFIG_DIR/skills` when that
    variable is set and not empty and `~/.claude/skills` otherwise: for each one, in sorted name order, an identical
