@@ -208,6 +208,63 @@ async def test_sigterm_stops_a_run_like_ctrl_c(
         assert app.outcome == "stopped"
 
 
+@pytest.mark.usefixtures("fake_claude")
+async def test_sighup_stops_a_run_like_ctrl_c(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.state is AppState.RUNNING)
+
+        os.kill(os.getpid(), signal.SIGHUP)
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        assert app.exit_code == 129
+
+
+@pytest.mark.usefixtures("fake_claude")
+async def test_an_ignored_sighup_does_not_stop_the_view(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        app = AlrApp(_settings(work_dir))
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await until(lambda: app.state is AppState.RUNNING)
+
+            os.kill(os.getpid(), signal.SIGHUP)
+            await pilot.pause(0.5)
+
+            assert app.state is AppState.RUNNING
+
+            await pilot.press("ctrl+c")
+            await _finished(app)
+    finally:
+        signal.signal(signal.SIGHUP, before)
+
+
+@pytest.mark.parametrize("sighup_before", [signal.SIG_DFL, signal.SIG_IGN])
+async def test_mount_and_unmount_leave_the_signal_handlers_as_they_were(
+    work_dir: Path, sighup_before: signal.Handlers
+) -> None:
+    original_sighup = signal.signal(signal.SIGHUP, sighup_before)
+    try:
+        sigterm_before = signal.getsignal(signal.SIGTERM)
+        app = AlrApp(_settings(work_dir))
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+        assert signal.getsignal(signal.SIGTERM) == sigterm_before
+        assert signal.getsignal(signal.SIGHUP) == sighup_before
+    finally:
+        signal.signal(signal.SIGHUP, original_sighup)
+
+
 async def test_ctrl_c_when_nothing_runs_quits(work_dir: Path) -> None:
     app = AlrApp(_settings(work_dir))
     async with app.run_test() as pilot:
@@ -535,6 +592,23 @@ async def test_sigterm_during_prepare_finishes_stopped_with_exit_code_143(
         assert app.exit_code == 143
 
 
+async def test_sighup_during_prepare_finishes_stopped_with_exit_code_129(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), signal.SIGHUP)
+        await _finished(app)
+
+        assert app.outcome == "stopped"
+        assert app.exit_code == 129
+
+
 async def test_a_ctrl_c_after_sigterm_during_prepare_keeps_exit_code_143(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -569,6 +643,24 @@ async def test_a_second_sigterm_while_stopping_quits_with_exit_code_143(
         await until(lambda: not app.is_running)
 
     assert app.exit_code == 143
+
+
+async def test_a_second_sighup_while_stopping_quits_with_exit_code_129(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), signal.SIGHUP)
+        await until(lambda: app._stopping)
+        os.kill(os.getpid(), signal.SIGHUP)
+        await until(lambda: not app.is_running)
+
+    assert app.exit_code == 129
 
 
 async def test_a_second_stop_button_press_while_stopping_does_nothing(

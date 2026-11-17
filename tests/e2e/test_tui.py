@@ -1,6 +1,7 @@
 """The full-screen view, driven through a pseudo-terminal like a user would."""
 
 import os
+import signal
 from pathlib import Path
 
 import pexpect
@@ -11,6 +12,7 @@ from e2e_helpers import (
     shared_block,
     task_states,
     wait_for_file,
+    wait_process_gone,
     write_tasks_yaml,
 )
 
@@ -88,6 +90,43 @@ def test_view_stop_ends_a_blocked_run_as_stopped(
         child.close(force=True)
 
     assert child.exitstatus == 130
+    # A stopped run saves nothing, so the next run picks the task up again.
+    assert tasks_path.read_text(encoding="utf-8") == before
+    assert_no_tmp_file(tasks_path)
+
+
+def test_sighup_stops_the_view_and_its_session(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    folder = tmp_path / "run"
+    folder.mkdir()
+    tasks_path = write_tasks_yaml(folder, TASKS)
+    before = tasks_path.read_text(encoding="utf-8")
+    ready_file = tmp_path / "ready"
+    descendant_pid_file = tmp_path / "descendant.pid"
+    child = _spawn(
+        folder,
+        {
+            "FAKECLAUDE_BLOCK": "1",
+            "FAKECLAUDE_READY_FILE": str(ready_file),
+            "FAKECLAUDE_DESCENDANT_PID_FILE": str(descendant_pid_file),
+        },
+    )
+    try:
+        child.send("s")
+        claude_pid = int(wait_for_file(ready_file, 20))
+        descendant_pid = int(wait_for_file(descendant_pid_file, 5))
+        # The running mark, so the screen is drained and the app has seen the task start.
+        child.expect("▶")
+        child.kill(signal.SIGHUP)
+        child.expect(pexpect.EOF)
+    finally:
+        child.close(force=True)
+
+    assert child.exitstatus == 129
+    # The descendant proves the whole group was stopped, not just the direct child.
+    wait_process_gone(claude_pid, 10)
+    wait_process_gone(descendant_pid, 10)
     # A stopped run saves nothing, so the next run picks the task up again.
     assert tasks_path.read_text(encoding="utf-8") == before
     assert_no_tmp_file(tasks_path)
