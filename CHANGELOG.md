@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A session that exits 0 without a result line is now resumed once and asked
+  for only that line (issue #51, ADR-039), so a finished task is no longer
+  failed over a dropped last line. Every task session also gets its own
+  `--session-id` so it can be resumed, and the run log records a
+  `result_retry` line saying whether the follow-up got the result line back.
+
+### Changed
+
+- A session that still has no result line after the follow-up now fails with
+  `session exited 0 but wrote no result line, even after one follow-up`. It
+  used to say `no valid result line in session output`. A non-zero exit
+  fails as before, with no follow-up.
+
 ## [0.5.3] - 2026-11-17
 
 ### Changed
