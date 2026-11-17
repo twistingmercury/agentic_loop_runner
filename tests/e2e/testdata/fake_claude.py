@@ -13,6 +13,15 @@ interface.
                                     `{"state":"completed","error":""}` on a
                                     zero exit and nothing on a non-zero exit
     FAKECLAUDE_EXIT_CODE            exit code to return (default 0)
+    FAKECLAUDE_RESUME_OUTPUT        used instead of FAKECLAUDE_OUTPUT, with the
+                                    same rules, but only on a call whose argv
+                                    contains "--resume"; when unset, that call
+                                    falls back to FAKECLAUDE_OUTPUT. The empty
+                                    string is a real value that writes nothing
+    FAKECLAUDE_RESUME_EXIT_CODE     used instead of FAKECLAUDE_EXIT_CODE, but only
+                                    on a call whose argv contains "--resume";
+                                    when unset, that call falls back to
+                                    FAKECLAUDE_EXIT_CODE
     FAKECLAUDE_STDERR               text written verbatim to stderr just before
                                     exiting
     FAKECLAUDE_RECORD_FILE          path to append one JSON line per call:
@@ -74,11 +83,11 @@ def main() -> NoReturn:
     if os.environ.get("FAKECLAUDE_BLOCK") == "1" or (block_on and block_on in stdin):
         block_forever()
 
-    code = exit_code()
+    code = exit_code(args)
     if stream_mode(args):
-        write_stream(code)
+        write_stream(args, code)
     else:
-        write_output(code)
+        write_output(args, code)
 
     sys.stdout.flush()
     sys.stderr.buffer.write(os.environb.get(b"FAKECLAUDE_STDERR", b""))
@@ -117,23 +126,39 @@ def spawn_descendant() -> None:
         fail(f"write descendant pid file: {exc}")
 
 
-def exit_code() -> int:
-    raw = os.environ.get("FAKECLAUDE_EXIT_CODE")
+def exit_code(args: list[str]) -> int:
+    name = variable_name(args, "EXIT_CODE")
+    raw = os.environ.get(name)
     if not raw:
         return 0
 
     try:
         return int(raw)
     except ValueError as exc:
-        fail(f"invalid FAKECLAUDE_EXIT_CODE {raw!r}: {exc}")
+        fail(f"invalid {name} {raw!r}: {exc}")
+
+
+def variable_name(args: list[str], suffix: str) -> str:
+    # A resumed call reads its own variable so a test can script a first
+    # session and its follow-up differently; unset, it shares the plain one.
+    resume_name = f"FAKECLAUDE_RESUME_{suffix}"
+    if "--resume" in args and resume_name in os.environ:
+        return resume_name
+
+    return f"FAKECLAUDE_{suffix}"
+
+
+def output_override(args: list[str]) -> bytes | None:
+    name = variable_name(args, "OUTPUT")
+    return os.environb.get(name.encode("utf-8"))
 
 
 def stream_mode(args: list[str]) -> bool:
     return ("--output-format", "stream-json") in zip(args, args[1:])
 
 
-def write_output(code: int) -> None:
-    output = os.environb.get(b"FAKECLAUDE_OUTPUT")
+def write_output(args: list[str], code: int) -> None:
+    output = output_override(args)
     if output is not None:
         sys.stdout.buffer.write(output)
         return
@@ -142,7 +167,7 @@ def write_output(code: int) -> None:
         sys.stdout.buffer.write(DEFAULT_RESULT.encode("utf-8") + b"\n")
 
 
-def write_stream(code: int) -> None:
+def write_stream(args: list[str], code: int) -> None:
     print('{"type":"system","subtype":"init"}')
     print(
         '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}'
@@ -151,7 +176,8 @@ def write_stream(code: int) -> None:
     if code != 0:
         return
 
-    text = os.environ.get("FAKECLAUDE_OUTPUT", DEFAULT_RESULT)
+    output = output_override(args)
+    text = DEFAULT_RESULT if output is None else output.decode("utf-8", "replace")
     print(f'{{"type":"result","subtype":"success","result":{json.dumps(text)}}}')
 
 
