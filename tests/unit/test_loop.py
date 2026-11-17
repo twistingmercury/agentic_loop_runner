@@ -641,6 +641,54 @@ async def test_run_loop_a_first_valid_line_gets_no_follow_up(
     assert len(fake_claude_records(record)) == 1
 
 
+class _FollowUpFrontEnd(PlainFrontEnd):
+    """The plain front end that notes each follow-up report and each finished session."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.retries: list[tuple[int, str, bool]] = []
+        self.finished: list[int] = []
+
+    def result_retried(self, task: Task, session_id: str, recovered: bool) -> None:
+        self.retries.append((task.id, session_id, recovered))
+
+    def session_finished(self, task: Task, seconds: float) -> None:
+        self.finished.append(task.id)
+
+
+@pytest.mark.parametrize(
+    ("first_output", "resume_output", "expected_retries"),
+    [
+        pytest.param("", COMPLETED_LINE, [True], id="recovered"),
+        pytest.param(
+            "", '{"state":"failed","error":"boom"}', [True], id="recovered as failed"
+        ),
+        pytest.param("", "not json at all", [False], id="not recovered"),
+        pytest.param(COMPLETED_LINE, "", [], id="first line valid"),
+    ],
+)
+async def test_run_loop_reports_the_follow_up_to_the_front_end(
+    record: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    first_output: str,
+    resume_output: str,
+    expected_retries: list[bool],
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", first_output)
+    monkeypatch.setenv("FAKECLAUDE_RESUME_OUTPUT", resume_output)
+    front_end = _FollowUpFrontEnd()
+
+    # A failed or unrecovered line ends the run with an error; only the reports matter.
+    with contextlib.suppress(RunError):
+        await run_loop(_one_task_list(), tmp_path / "tasks.yaml", front_end=front_end)
+
+    calls = fake_claude_records(record)
+    session_id = calls[0]["argv"][-1]
+    assert front_end.retries == [(1, session_id, ok) for ok in expected_retries]
+    assert front_end.finished == [1]
+
+
 async def test_run_loop_stop_during_the_follow_up_leaves_the_task_pending(
     record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

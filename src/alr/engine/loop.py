@@ -289,11 +289,13 @@ async def _session_result(
     follow_up = await front_end.run_session(
         replace(task), resume_argv, f"{RESULT_REQUEST}\n"
     )
-    if follow_up.error is not None:
-        return result
-
-    # A follow-up with no valid line is no better than the session's own.
-    if parse_result(last_result_line(follow_up.text)) is None:
+    recovered = (
+        follow_up.error is None
+        and parse_result(last_result_line(follow_up.text)) is not None
+    )
+    front_end.result_retried(replace(task), session_id, recovered)
+    # A follow-up with an error or no valid line is no better than the session's own.
+    if not recovered:
         return result
 
     return follow_up
