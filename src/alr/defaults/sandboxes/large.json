@@ -23,6 +23,17 @@
         "~/.config/gh",
         "~/.netrc",
         "~/.claude"
+      ],
+      "allowWrite": [
+        "~/.cache/uv",
+        "~/.cache/pip",
+        "~/.npm",
+        "~/go/pkg",
+        "~/.cache/go-build",
+        "~/.cargo/registry",
+        "~/.nuget/packages",
+        "~/.m2/repository",
+        "~/.gradle"
       ]
     },
     "network": {
@@ -36,7 +47,9 @@
         "registry.npmjs.org",
         "proxy.golang.org",
         "sum.golang.org",
-        "storage.googleapis.com"
+        "storage.googleapis.com",
+        "api.nuget.org",
+        "repo.maven.apache.org"
       ]
     }
   }

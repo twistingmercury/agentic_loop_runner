@@ -1,5 +1,6 @@
 """The sandboxes folder: shipped files added when missing, listed, and found by name."""
 
+import json
 import os
 from collections.abc import Callable
 from importlib.resources import files
@@ -50,6 +51,24 @@ def test_first_run_folder_has_both_sandboxes(tmp_path: Path) -> None:
 
     for name in SHIPPED:
         assert (sandboxes_dir(tmp_path) / name).read_bytes() == package_copy(name)
+
+
+def test_shipped_large_sandbox_can_write_tool_caches() -> None:
+    settings = json.loads(package_copy("large.json"))["sandbox"]
+
+    assert settings["filesystem"]["allowWrite"] == [
+        "~/.cache/uv",
+        "~/.cache/pip",
+        "~/.npm",
+        "~/go/pkg",
+        "~/.cache/go-build",
+        "~/.cargo/registry",
+        "~/.nuget/packages",
+        "~/.m2/repository",
+        "~/.gradle",
+    ]
+    assert "api.nuget.org" in settings["network"]["allowedDomains"]
+    assert "repo.maven.apache.org" in settings["network"]["allowedDomains"]
 
 
 def test_add_missing_adds_a_deleted_file(set_up_home: Path) -> None:
