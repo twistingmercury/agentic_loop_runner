@@ -41,6 +41,7 @@ FORCED_SETTINGS = {
         "enabled": True,
         "allowUnsandboxedCommands": False,
         "failIfUnavailable": True,
+        "autoAllowBashIfSandboxed": True,
         "filesystem": {"denyRead": ["~/"]},
     }
 }
@@ -145,6 +146,11 @@ def run_with_flags(
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
     return SandboxRun(res, fake_claude_records(record_file), tasks_path)
+
+
+def with_auto_allow(doc: dict[str, Any]) -> dict[str, Any]:
+    """The shipped file as claude gets it: alr adds the fourth forced key, which the files do not carry."""
+    return {"sandbox": {**doc["sandbox"], "autoAllowBashIfSandboxed": True}}
 
 
 def assert_sandboxed(argv: list[str]) -> None:
@@ -328,7 +334,7 @@ def test_sandbox_name_passes_the_shipped_file_to_claude(
     assert json.loads(path.read_text(encoding="utf-8")) == doc
     argv = run.records[0]["argv"]
     assert argv[:4] == ["--print", "--permission-mode", "acceptEdits", "--settings"]
-    assert json.loads(argv[4]) == doc
+    assert json.loads(argv[4]) == with_auto_allow(doc)
     assert not (run.tasks_path.parent / "sandbox.json").exists()
     logged = run_log(run.tasks_path.parent)[0]["sandbox_settings"]
     assert logged == str(path)
@@ -344,6 +350,7 @@ def test_a_sandbox_of_the_users_own_runs_with_its_settings_and_the_forced_keys(
             "enabled": False,
             "allowUnsandboxedCommands": True,
             "failIfUnavailable": False,
+            "autoAllowBashIfSandboxed": False,
             "filesystem": {"denyRead": ["~/"]},
         },
     }
@@ -466,7 +473,7 @@ def test_a_real_run_with_the_sandboxes_folder_gone_adds_both_files(
     assert run.res.code == 0, run.res
     assert f"Added {folder / 'large.json'}\n" in run.res.out
     assert f"Added {folder / 'tight.json'}\n" in run.res.out
-    assert json.loads(run.records[0]["argv"][4]) == TIGHT_DOC
+    assert json.loads(run.records[0]["argv"][4]) == with_auto_allow(TIGHT_DOC)
 
 
 def test_a_dry_run_with_the_sandboxes_folder_gone_reads_the_package_and_creates_nothing(
@@ -537,7 +544,7 @@ def test_a_named_sandbox_leaves_the_folders_sandbox_json_alone(
 
     assert run.res.code == 0, run.res
     assert (folder / "sandbox.json").read_text(encoding="utf-8") == mine
-    assert json.loads(run.records[0]["argv"][4]) == LARGE_DOC
+    assert json.loads(run.records[0]["argv"][4]) == with_auto_allow(LARGE_DOC)
 
 
 def test_a_dry_run_notices_the_folders_sandbox_json_and_names_no_sandbox(

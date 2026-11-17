@@ -58,7 +58,7 @@ SANDBOXED = [
     "--permission-mode",
     "acceptEdits",
     "--settings",
-    '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true}}',
+    '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true,"autoAllowBashIfSandboxed":true}}',
 ]
 BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
 PRESET_CONFLICT = "--sandbox cannot be used with --sandbox-settings or --yolo"
@@ -1284,6 +1284,7 @@ def test_a_sandbox_that_weakens_the_forced_keys_still_runs_sandboxed(
             "enabled": False,
             "allowUnsandboxedCommands": True,
             "failIfUnavailable": False,
+            "autoAllowBashIfSandboxed": False,
         }
     }
     _write_sandbox(home, "weak", json.dumps(weak))
@@ -1295,6 +1296,7 @@ def test_a_sandbox_that_weakens_the_forced_keys_still_runs_sandboxed(
         "enabled": True,
         "allowUnsandboxedCommands": False,
         "failIfUnavailable": True,
+        "autoAllowBashIfSandboxed": True,
     }
 
 
