@@ -41,6 +41,30 @@ class Sandbox:
     problem: str
 
 
+@dataclass(frozen=True)
+class SandboxChange:
+    """One shipped sandbox file the sync adds or replaces.
+
+    `verb` is "Added" or "Updated". `replaced` is "symlink" when a symlink
+    stood at the name, and "" otherwise.
+    """
+
+    path: Path
+    verb: str
+    replaced: str
+
+
+@dataclass(frozen=True)
+class SandboxSyncReport:
+    """What a sync did: the files it changed and the warnings it raised.
+
+    Each warning is the text after `warning: `.
+    """
+
+    changes: list[SandboxChange]
+    warnings: list[str]
+
+
 def sandboxes_dir(home: Path | None = None) -> Path:
     """Name the folder the sandbox files live in, so every caller agrees where it is."""
     return config_dir(home) / SANDBOXES
@@ -49,8 +73,9 @@ def sandboxes_dir(home: Path | None = None) -> Path:
 def add_missing(home: Path | None = None) -> list[Path]:
     """Copy each shipped sandbox that is not in the folder yet, and return the files added.
 
-    The folder is made when it is missing. A file already there, edited or
-    not, is never touched: the user's edits must survive every run.
+    The folder is made when it is missing. It adds only what is missing and
+    never touches a file that exists; sync_shipped is what updates the shipped
+    files (ADR-037).
     """
     folder = sandboxes_dir(home)
     try:
@@ -59,6 +84,51 @@ def add_missing(home: Path | None = None) -> list[Path]:
         return _copy_missing(folder)
     except OSError as error:
         raise _cannot_add(folder, _reason(error)) from error
+
+
+def sync_shipped(home: Path | None = None) -> SandboxSyncReport:
+    """Make each shipped sandbox file in the folder match the shipped copy.
+
+    The missing files are added by add_missing, so its race, atomic-write, and
+    refusal behavior stay in one place and its refusals propagate unchanged.
+    A file that is there and differs is replaced; one that cannot be replaced
+    becomes a warning and the rest go on, so a read-only folder never stops a
+    run that already has its files.
+    """
+    folder = sandboxes_dir(home)
+    added = add_missing(home)
+    changes = [SandboxChange(path, "Added", "") for path in added]
+    warnings: list[str] = []
+    for file_name in _shipped_names():
+        one = _sync_one(folder / file_name)
+        changes.extend(one.changes)
+        warnings.extend(one.warnings)
+
+    return SandboxSyncReport(
+        changes=sorted(changes, key=_file_name_of), warnings=warnings
+    )
+
+
+def pending_changes(home: Path | None = None) -> list[SandboxChange]:
+    """What sync_shipped would change, in the same order, without writing anything.
+
+    A file that cannot be read is left out: a real run reports it as a
+    warning, and a dry run has no business failing over it. So is an update
+    in a folder a real run could not write to: it would only warn.
+    """
+    folder = sandboxes_dir(home)
+    changes: list[SandboxChange] = []
+    for file_name in _shipped_names():
+        change = _try_classify(folder / file_name)
+        if change is None:
+            continue
+
+        if change.verb == "Updated" and not _update_can_land(folder):
+            continue
+
+        changes.append(change)
+
+    return changes
 
 
 def check_can_add_missing(home: Path | None = None) -> None:
@@ -140,11 +210,29 @@ def find(name: str, home: Path | None = None, dry_run: bool = False) -> Path:
     return path
 
 
-def read_text(path: Path) -> str:
+def is_shipped_sandbox(path: Path) -> bool:
+    """Say whether path is a file alr owns: a shipped name inside the sandboxes folder.
+
+    The rule for which file a real run would have synced to the shipped text
+    before reading it. A file of the same name anywhere else is the user's own.
+    """
+    if path.name not in _shipped_names():
+        return False
+
+    return path.parent.resolve() == sandboxes_dir().resolve()
+
+
+def read_text(path: Path, dry_run: bool = False) -> str:
     """Return the text of a sandbox file, or of the package copy when it is a missing shipped file.
 
+    A dry run writes nothing, but a real run would sync a shipped sandbox in the
+    folder to the shipped text first, so with dry_run set that file reads as the
+    package copy even when the file on disk differs. Everything else reads as given.
     Undecodable bytes are replaced, as sandbox_args does when a run reads the file.
     """
+    if dry_run and is_shipped_sandbox(path) and _update_can_land(path.parent):
+        return _shipped_text(path.name)
+
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
@@ -163,13 +251,18 @@ def names_in(folder: Path, dry_run: bool) -> list[str]:
     """List the names a run could pick from a sandboxes folder.
 
     A dry run adds the shipped names a real run would add, so both give the
-    same verdict. Config validation calls this with the folder it is parsing.
+    same verdict. A symlink at a shipped name counts too, dangling or not,
+    because the sync replaces it. Config validation calls this with the
+    folder it is parsing.
     """
     names = [sandbox.name for sandbox in _list_in(folder)]
     if not dry_run:
         return names
 
     for shipped in _missing_shipped(folder):
+        names.append(shipped.removesuffix(_SUFFIX))
+
+    for shipped in _symlinked_shipped(folder):
         names.append(shipped.removesuffix(_SUFFIX))
 
     return sorted(set(names))
@@ -200,6 +293,26 @@ def _exists(path: Path) -> bool:
 def _missing_shipped(folder: Path) -> list[str]:
     """List the shipped file names the folder lacks, so the real run, the dry run, and the check agree on them."""
     return [name for name in _shipped_names() if not _exists(folder / name)]
+
+
+def _symlinked_shipped(folder: Path) -> list[str]:
+    """List the shipped file names that are symlinks a real run would replace.
+
+    Only when the update can land; otherwise the sync only warns and the link stays.
+    """
+    if not _update_can_land(folder):
+        return []
+
+    return [name for name in _shipped_names() if (folder / name).is_symlink()]
+
+
+def _update_can_land(folder: Path) -> bool:
+    """Say whether a real run could replace a file in the folder.
+
+    The new file is made beside the old and renamed over it, which takes the
+    write and the search permission on the folder, as check_can_add_missing needs.
+    """
+    return os.access(folder, os.W_OK | os.X_OK)
 
 
 def _reason(error: OSError) -> str:
@@ -259,6 +372,80 @@ def _link_copy(source: Path, target: Path) -> bool:
             return False
 
     return True
+
+
+def _file_name_of(change: SandboxChange) -> str:
+    return change.path.name
+
+
+def _sync_one(target: Path) -> SandboxSyncReport:
+    """Classify one shipped file, apply the change, and report both."""
+    try:
+        change = _classify(target)
+        if change is None:
+            return SandboxSyncReport(changes=[], warnings=[])
+
+        _write_over(target, _shipped_bytes(target.name))
+    except OSError as error:
+        warning = f"sandbox {target.stem}: {target}: {_reason(error)}"
+        return SandboxSyncReport(changes=[], warnings=[warning])
+
+    if not change.replaced:
+        return SandboxSyncReport(changes=[change], warnings=[])
+
+    warning = f"{target} was a {change.replaced}; replaced it with the shipped sandbox"
+    return SandboxSyncReport(changes=[change], warnings=[warning])
+
+
+def _try_classify(target: Path) -> SandboxChange | None:
+    """Classify one shipped file for a dry run; None when it is identical or unreadable."""
+    try:
+        return _classify(target)
+    except OSError:
+        return None
+
+
+def _classify(target: Path) -> SandboxChange | None:
+    """Decide what one shipped file needs; None means the file is identical.
+
+    Raises OSError when the file cannot be read, and for a folder at the name,
+    which alr cannot replace: unreadable is not the same as identical.
+    """
+    # is_symlink comes first: exists() follows a link, so a dangling one would look missing.
+    if target.is_symlink():
+        return SandboxChange(target, "Updated", "symlink")
+
+    if not target.exists():
+        return SandboxChange(target, "Added", "")
+
+    if target.is_dir():
+        raise IsADirectoryError(errno.EISDIR, "is a folder, not a file")
+
+    if target.read_bytes() == _shipped_bytes(target.name):
+        return None
+
+    return SandboxChange(target, "Updated", "")
+
+
+def _shipped_bytes(file_name: str) -> bytes:
+    shipped = files("alr") / "defaults" / SANDBOXES / file_name
+    return shipped.read_bytes()
+
+
+def _write_over(target: Path, content: bytes) -> None:
+    """Replace target with content, keeping the old file until the new one is in place.
+
+    The content is written to a temporary file in the same folder and renamed
+    over the target, so a failed write leaves the old file, and the rename
+    replaces a symlink itself instead of following it. The context manager
+    removes the temporary file when the rename did not consume it.
+    """
+    with tempfile.NamedTemporaryFile(
+        dir=target.parent, prefix=".alr-update-", delete_on_close=False
+    ) as staged:
+        staged.write(content)
+        staged.close()
+        os.replace(staged.name, target)
 
 
 def _is_listed(entry: Path) -> bool:

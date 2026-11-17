@@ -31,7 +31,7 @@ from alr.config import SandboxDefault
 from alr.engine.sandbox import sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
-from alr.skillinstall import sync
+from alr.skillinstall import skills_folder, sync
 from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
@@ -58,7 +58,7 @@ SANDBOXED = [
     "--permission-mode",
     "acceptEdits",
     "--settings",
-    '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true}}',
+    '{"sandbox":{"enabled":true,"allowUnsandboxedCommands":false,"failIfUnavailable":true,"autoAllowBashIfSandboxed":true}}',
 ]
 BOTH_PERMISSIONS = "--sandbox-settings and --yolo cannot be used together"
 PRESET_CONFLICT = "--sandbox cannot be used with --sandbox-settings or --yolo"
@@ -1284,6 +1284,7 @@ def test_a_sandbox_that_weakens_the_forced_keys_still_runs_sandboxed(
             "enabled": False,
             "allowUnsandboxedCommands": True,
             "failIfUnavailable": False,
+            "autoAllowBashIfSandboxed": False,
         }
     }
     _write_sandbox(home, "weak", json.dumps(weak))
@@ -1295,6 +1296,7 @@ def test_a_sandbox_that_weakens_the_forced_keys_still_runs_sandboxed(
         "enabled": True,
         "allowUnsandboxedCommands": False,
         "failIfUnavailable": True,
+        "autoAllowBashIfSandboxed": True,
     }
 
 
@@ -1959,14 +1961,147 @@ def test_a_real_run_adds_a_deleted_shipped_sandbox_and_says_so_once(
     assert capsys.readouterr().out == ""
 
 
-def test_a_real_run_leaves_an_edited_shipped_sandbox_alone(
-    home: Path, folder: Path, sessions: list[list[str]]
+def test_a_real_run_prints_updated_for_an_edited_shipped_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    shipped = large.read_bytes()
+    large.write_text("my edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"Updated {large}\n"
+    assert captured.err == ""
+    assert large.read_bytes() == shipped
+
+
+def test_a_second_real_run_says_nothing_about_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (_sandboxes(home) / "large.json").write_text("my edit\n", encoding="utf-8")
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_a_symlinked_shipped_sandbox_warns_on_stderr_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    shipped = large.read_bytes()
+    linked_target = tmp_path / "versioned-large.json"
+    linked_target.write_text("mine\n", encoding="utf-8")
+    large.unlink()
+    large.symlink_to(linked_target)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    warning = f"warning: {large} was a symlink; replaced it with the shipped sandbox"
+    assert captured.err == f"{warning}\n"
+    assert captured.out == f"Updated {large}\n"
+    assert not large.is_symlink()
+    assert large.read_bytes() == shipped
+    assert linked_target.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_dry_run_reports_an_edited_sandbox_and_writes_nothing_sandbox_sync(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     large = _sandboxes(home) / "large.json"
     large.write_text("my edit\n", encoding="utf-8")
 
-    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"sandbox: {large} (updated on a real run)\n" in out
+    assert "tight.json" not in out
     assert large.read_text(encoding="utf-8") == "my edit\n"
+
+
+def test_a_dry_run_reports_a_symlinked_sandbox_as_updated_sandbox_sync(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    linked_target = tmp_path / "versioned-large.json"
+    linked_target.write_text("mine\n", encoding="utf-8")
+    large.unlink()
+    large.symlink_to(linked_target)
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    captured = capsys.readouterr()
+    assert f"sandbox: {large} (updated on a real run)\n" in captured.out
+    assert captured.err == ""
+    assert large.is_symlink()
+    assert linked_target.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_dry_run_reports_a_missing_sandbox_sandbox_sync(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    tight.unlink()
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"sandbox: {tight} (added on a real run)\n" in out
+    assert "large.json" not in out
+    assert not tight.exists()
+
+
+def test_validate_syncs_the_sandbox_files_like_a_real_run_sandbox_sync(
+    home: Path,
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    shipped = large.read_bytes()
+    large.write_text("my edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"Updated {large}\n   ID  STATE      NAME\n")
+    # A plain dry run only reports; --validate really wrote the file.
+    assert "sandbox:" not in out
+    assert large.read_bytes() == shipped
+
+
+def test_a_sandbox_under_another_name_is_left_alone_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mine = _write_sandbox(home, "my_large", "my own sandbox\n")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+    assert "my_large" not in capsys.readouterr().out
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert mine.read_text(encoding="utf-8") == "my own sandbox\n"
 
 
 def test_a_dry_run_adds_no_sandbox(
@@ -1975,21 +2110,21 @@ def test_a_dry_run_adds_no_sandbox(
     tight = _sandboxes(home) / "tight.json"
     tight.unlink()
 
-    def add_missing() -> list[Path]:
-        pytest.fail("a dry run added a sandbox")
+    def sync_shipped() -> Any:
+        pytest.fail("a dry run synced a sandbox")
 
-    monkeypatch.setattr(cli, "add_missing", add_missing)
+    monkeypatch.setattr(cli, "sync_shipped", sync_shipped)
 
     assert cli.main(["-d", str(folder), "--dry-run", "--yolo"]) == 0
     assert not tight.exists()
 
 
-def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read(
+def test_sandboxes_are_synced_between_the_config_folder_check_and_the_config_read(
     folder: Path, sessions: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
     real_check = cli.config_folder_exists
-    real_add = cli.add_missing
+    real_sync = cli.sync_shipped
     real_dir = cli.resolve_dir
     real_load = cli.load
 
@@ -1997,9 +2132,9 @@ def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read
         calls.append("check")
         return real_check()
 
-    def add() -> list[Path]:
-        calls.append("add")
-        return real_add()
+    def sync() -> Any:
+        calls.append("sync")
+        return real_sync()
 
     def resolve(dir: str) -> str:
         calls.append("dir")
@@ -2010,12 +2145,32 @@ def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read
         return real_load(**kwargs)
 
     monkeypatch.setattr(cli, "config_folder_exists", check)
-    monkeypatch.setattr(cli, "add_missing", add)
+    monkeypatch.setattr(cli, "sync_shipped", sync)
     monkeypatch.setattr(cli, "resolve_dir", resolve)
     monkeypatch.setattr(cli, "load", load)
 
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
-    assert calls == ["check", "add", "dir", "load"]
+    assert calls == ["check", "sync", "dir", "load"]
+
+
+def test_a_sandbox_refusal_leaves_no_skill_written(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    locked_folder: None,
+) -> None:
+    # The home fixture already synced the skills; take them away so a write shows.
+    shutil.rmtree(skills_folder(home))
+    shutil.rmtree(_sandboxes(home))
+
+    # Sandboxes sync first, so its refusal must come before any skill is written.
+    with chmodded(home / ".local" / "alr", 0o500):
+        code = cli.main(["-d", str(folder), "--yolo"])
+
+    assert code == 3
+    assert "config-unwritable" in capsys.readouterr().err
+    assert not skills_folder(home).exists()
 
 
 def test_the_run_folder_notice_comes_after_the_sandboxes_are_added_and_before_the_config_is_read(
@@ -2043,17 +2198,17 @@ def test_the_run_folder_notice_comes_after_the_sandboxes_are_added_and_before_th
     assert capsys.readouterr().out == ""
 
 
-def test_a_machine_that_is_not_set_up_gets_no_sandbox_added_and_no_name_check(
+def test_a_machine_that_is_not_set_up_gets_no_sandbox_synced_and_no_name_check(
     folder: Path,
     fresh_home: Path,
     no_terminal: None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def add_missing() -> list[Path]:
-        pytest.fail("added a sandbox before the config folder exists")
+    def sync_shipped() -> Any:
+        pytest.fail("synced a sandbox before the config folder exists")
 
-    monkeypatch.setattr(cli, "add_missing", add_missing)
+    monkeypatch.setattr(cli, "sync_shipped", sync_shipped)
 
     assert cli.main(["-d", str(folder), "--sandbox", "typo"]) == 3
     assert capsys.readouterr().err.startswith(REFUSED_SETUP)
@@ -2782,3 +2937,67 @@ def test_a_second_signal_during_the_stop_is_ignored(
     assert code == 130
     assert cleaned_up == [True]
     assert capsys.readouterr().err == "error: interrupted\n"
+
+
+def test_session_args_in_a_dry_run_read_the_shipped_text_for_an_edited_sandbox_sandbox_text(
+    home: Path,
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    large.write_text("not json", encoding="utf-8")
+    answer = cli.Answer(str(large), False, "large")
+
+    flags = cli.session_args(answer, dry_run=True)
+
+    # The edit is not JSON, so a refusal here would mean the dry run read it.
+    assert flags == sandbox_args(str(_package_sandbox("large.json")), "large")
+    assert large.read_text(encoding="utf-8") == "not json"
+
+
+def test_session_args_in_a_dry_run_read_a_sandbox_under_another_name_from_the_folder_sandbox_text(
+    home: Path,
+) -> None:
+    mine = _write_sandbox(home, "my_large", '{"mine": true}')
+    answer = cli.Answer(str(mine), False, "my_large")
+
+    flags = cli.session_args(answer, dry_run=True)
+
+    assert '"mine":true' in flags[-1]
+
+
+def test_session_args_in_a_dry_run_read_a_same_named_file_elsewhere_as_given_sandbox_text(
+    tmp_path: Path,
+) -> None:
+    elsewhere = tmp_path / "large.json"
+    elsewhere.write_text('{"mine": true}', encoding="utf-8")
+
+    flags = cli.session_args(cli.Answer(str(elsewhere), False, ""), dry_run=True)
+
+    assert '"mine":true' in flags[-1]
+
+
+def test_a_real_run_still_reads_the_file_on_disk_sandbox_text(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    locked_folder: None,
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    large.write_text('{"mine": true}', encoding="utf-8")
+
+    # A read-only folder makes the sync warn instead of replace, so the edit stays on disk.
+    with chmodded(_sandboxes(home), 0o500):
+        code = cli.main(["-d", str(folder), "--sandbox", "large"])
+
+    assert code == 0
+    assert (
+        f"warning: sandbox large: {large}: Permission denied" in capsys.readouterr().err
+    )
+    (session,) = sessions
+    assert '"mine":true' in session[-1]
+    assert "excludedCommands" not in session[-1]
+
+
+def _package_sandbox(file_name: str) -> Path:
+    """The shipped copy of a sandbox file, as the package holds it."""
+    return Path(cli.__file__).parent / "defaults" / "sandboxes" / file_name

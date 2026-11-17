@@ -10,6 +10,7 @@ from helpers import write_file
 from alr.errors import FailedTasksError, RefusedError
 from alr.plain.dryrun import dry_run
 from alr.plain.dryrun_checks import check_task_list
+from alr.sandboxes import sandboxes_dir
 from alr.tasks import parse_tasks
 
 # What a dry run with no sandbox settings file prints where the sandbox line goes.
@@ -599,3 +600,59 @@ async def test_dry_run_returns_the_warning_count(
     # The count is the number of warning lines the dry run printed.
     assert count == want
     assert out.getvalue().count("warning: task ") == want
+
+
+WRAPPED_BUILD_WARNING = (
+    "warning: task 1: excluded-command-wrapped: ./build/build.sh > build.log\n"
+)
+# Settings that exclude nothing, so unlike the shipped Large they never match the wrapped build.
+EXCLUDES_NOTHING = '{"sandbox": {"excludedCommands": []}}'
+EXCLUDES_THE_BUILD = '{"sandbox": {"excludedCommands": ["./build/build.sh"]}}'
+
+
+async def test_a_dry_run_reads_the_shipped_text_for_an_edited_sandbox_sandbox_text(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", WRAPPED_BUILD_YAML)
+    large = sandboxes_dir() / "large.json"
+    large.write_text(EXCLUDES_NOTHING, encoding="utf-8")
+
+    got = await _dry_run(tasks_file, sandbox_file=str(large), sandbox_name="large")
+
+    # The shipped Large excludes the build; the edit does not, and a real run would sync it away first.
+    assert WRAPPED_BUILD_WARNING in got
+    assert f"sandbox settings: {large} (large)\n" in got
+    # A dry run writes nothing, so the edit is still on disk.
+    assert large.read_text(encoding="utf-8") == EXCLUDES_NOTHING
+
+
+async def test_a_dry_run_reads_a_sandbox_under_another_name_from_the_folder_sandbox_text(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", WRAPPED_BUILD_YAML)
+    mine = sandboxes_dir() / "my_large.json"
+    mine.write_text(EXCLUDES_THE_BUILD, encoding="utf-8")
+    plain = sandboxes_dir() / "plain.json"
+    plain.write_text(EXCLUDES_NOTHING, encoding="utf-8")
+
+    with_the_build = await _dry_run(
+        tasks_file, sandbox_file=str(mine), sandbox_name="my_large"
+    )
+    without_it = await _dry_run(
+        tasks_file, sandbox_file=str(plain), sandbox_name="plain"
+    )
+
+    assert WRAPPED_BUILD_WARNING in with_the_build
+    assert WRAPPED_BUILD_WARNING not in without_it
+
+
+async def test_a_dry_run_reads_a_same_named_file_elsewhere_as_given_sandbox_text(
+    tmp_path: Path,
+) -> None:
+    tasks_file = write_file(tmp_path / "tasks.yaml", WRAPPED_BUILD_YAML)
+    elsewhere = write_file(tmp_path / "large.json", EXCLUDES_NOTHING)
+
+    got = await _dry_run(tasks_file, sandbox_file=elsewhere)
+
+    # The shipped Large would warn here; this file is not the one in the folder.
+    assert WRAPPED_BUILD_WARNING not in got

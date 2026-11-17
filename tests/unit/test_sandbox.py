@@ -6,7 +6,12 @@ import pytest
 from alr.engine.sandbox import sandbox_args, settings_args, settings_problem
 from alr.errors import RefusedError
 
-FORCED = {"allowUnsandboxedCommands": False, "enabled": True, "failIfUnavailable": True}
+FORCED = {
+    "allowUnsandboxedCommands": False,
+    "autoAllowBashIfSandboxed": True,
+    "enabled": True,
+    "failIfUnavailable": True,
+}
 
 PASS_THROUGH_IN = """{
   "permissions": {"deny": ["WebFetch"]},
@@ -17,7 +22,7 @@ PASS_THROUGH_IN = """{
 }"""
 PASS_THROUGH_WANT = (
     '{"permissions":{"deny":["WebFetch"]},"sandbox":{"allowUnsandboxedCommands":false,'
-    '"enabled":true,"failIfUnavailable":true,"filesystem":{"denyRead":["~/"],'
+    '"autoAllowBashIfSandboxed":true,"enabled":true,"failIfUnavailable":true,"filesystem":{"denyRead":["~/"],'
     '"allowWrite":["/tmp/build"]},"network":{"allowedDomains":["proxy.golang.org"],'
     '"httpProxyPort":12345678901234567890}}}'
 )
@@ -35,12 +40,12 @@ def _write_settings(tmp_path: Path, content: str) -> Path:
     [
         pytest.param(
             "{}",
-            '{"sandbox":{"allowUnsandboxedCommands":false,"enabled":true,"failIfUnavailable":true}}',
+            '{"sandbox":{"allowUnsandboxedCommands":false,"autoAllowBashIfSandboxed":true,"enabled":true,"failIfUnavailable":true}}',
             id="empty object",
         ),
         pytest.param(
             '{"sandbox":{"enabled":false,"allowUnsandboxedCommands":true,"failIfUnavailable":false}}',
-            '{"sandbox":{"allowUnsandboxedCommands":false,"enabled":true,"failIfUnavailable":true}}',
+            '{"sandbox":{"allowUnsandboxedCommands":false,"autoAllowBashIfSandboxed":true,"enabled":true,"failIfUnavailable":true}}',
             id="forced keys set the other way",
         ),
         pytest.param(
@@ -63,6 +68,26 @@ def test_sandbox_args_forces_sandbox_keys(
     assert "\n" not in args[3]
     # The settings file must not be written.
     assert path.read_text(encoding="utf-8") == content
+
+
+def test_sandbox_args_turns_auto_allow_bash_on_when_the_file_omits_it(
+    tmp_path: Path,
+) -> None:
+    path = _write_settings(tmp_path, '{"sandbox":{"enabled":true}}')
+
+    args = sandbox_args(str(path))
+
+    settings = json.loads(args[3])
+    assert settings["sandbox"]["autoAllowBashIfSandboxed"] is True
+
+
+def test_sandbox_args_overrides_auto_allow_bash_set_to_false(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path, '{"sandbox":{"autoAllowBashIfSandboxed":false}}')
+
+    args = sandbox_args(str(path))
+
+    settings = json.loads(args[3])
+    assert settings["sandbox"]["autoAllowBashIfSandboxed"] is True
 
 
 @pytest.mark.parametrize(

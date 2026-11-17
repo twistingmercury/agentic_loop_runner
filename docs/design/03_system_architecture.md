@@ -264,7 +264,7 @@ How gralph's packages map onto this:
   (a stop during an `after_task` action included), and a stop during `after_run` leaves the tasks `completed`
 - Never look for a settings file in the run folder: a sandbox is a file picked by name from `~/.local/alr/sandboxes/`
   or given with `--sandbox-settings` (ADR-032)
-- Build the session flags: for `--sandbox-settings`, merge the file with the three forced sandbox keys and return
+- Build the session flags: for `--sandbox-settings`, merge the file with the four forced sandbox keys and return
   `--permission-mode acceptEdits --settings <merged JSON>`; for `--yolo`, return
   `--dangerously-skip-permissions`
 
@@ -532,8 +532,9 @@ an action now: put it in shared.after_task, see the README (Migrating from commi
    `--dry-run`, which never writes, it is refused as `config-setup-missing` at once and nothing is asked. A path that
    is a file or a symlink is refused as `invalid-config`, and a home alr cannot find or write to as `config-unwritable`.
    On a real run that goes on, alr then creates `sandboxes/` when it is missing and copies in each shipped sandbox file
-   that is not there, never overwriting a file (a temporary file, then a link that cannot replace one; losing a race is
-   not an error), and prints `Added <path>` for each. A `sandboxes` path that is not a folder is refused as
+   that is not there (a temporary file, then a link that cannot replace one; losing a race is not an error), and prints
+   `Added <path>` for each. A shipped file that differs from its copy is written beside it and renamed over it, with
+   `Updated <path>` and no backup; a file under any other name is never touched (ADR-037). A `sandboxes` path that is not a folder is refused as
    `invalid-config`, and a file alr cannot write as `config-unwritable`. A `--dry-run` writes nothing (ADR-032)
    Then alr syncs the bundled skills (ADR-035) in the skills folder, which is `$CLAUDE_CONFIG_DIR/skills` when that
    variable is set and not empty and `~/.claude/skills` otherwise: for each one, in sorted name order, an identical
@@ -718,7 +719,7 @@ graph LR
 | Boundary                    | What Crosses                     | Rules                                                                                                                                                                                                                                                                                                                                     |
 | --------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | alr reads the filesystem    | Task file                        | Treated as code the user chose to run (its prompts go to Claude, its `shared.after_task` and `shared.after_run` actions to `sh -c`); not sanitized                                                                                                                                                                                        |
-| alr reads the filesystem    | Sandbox settings file            | Read once, never written; must be a JSON object; three sandbox keys forced, the rest passed through. Comes from `~/.local/alr/sandboxes/` or `--sandbox-settings`, both chosen by the user; a run folder's `sandbox.json` is never read                                                                                                   |
+| alr reads the filesystem    | Sandbox settings file            | Read once; only the two shipped files are written (ADR-037); a JSON object; four sandbox keys forced, the rest passed through. Comes from `~/.local/alr/sandboxes/` or `--sandbox-settings`, both chosen by the user; a run folder's `sandbox.json` is never read                                                                         |
 | alr reads the filesystem    | Config folder                    | `~/.local/alr/config.yaml` and the prompt files it names, read at every start except `--version`; a key alr does not know is refused; never written by a read                                                                                                                                                                             |
 | alr writes the filesystem   | Config folder                    | Only after a typed yes at a terminal: `~/.local/alr` and `~/.local` are created, the folder all at once, and an existing file is never overwritten, a file or symlink in its place never removed                                                                                                                                          |
 | alr writes the filesystem   | Task state                       | Atomic: temp file, then rename                                                                                                                                                                                                                                                                                                            |

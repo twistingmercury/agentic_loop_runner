@@ -41,6 +41,7 @@ FORCED_SETTINGS = {
         "enabled": True,
         "allowUnsandboxedCommands": False,
         "failIfUnavailable": True,
+        "autoAllowBashIfSandboxed": True,
         "filesystem": {"denyRead": ["~/"]},
     }
 }
@@ -68,6 +69,20 @@ LARGE_DOC = {
     "sandbox": {
         **TIGHT_DOC["sandbox"],
         "excludedCommands": ["docker *", "./build/build.sh", "./build/build.sh *"],
+        "filesystem": {
+            **TIGHT_DOC["sandbox"]["filesystem"],
+            "allowWrite": [
+                "~/.cache/uv",
+                "~/.cache/pip",
+                "~/.npm",
+                "~/go/pkg",
+                "~/.cache/go-build",
+                "~/.cargo/registry",
+                "~/.nuget/packages",
+                "~/.m2/repository",
+                "~/.gradle",
+            ],
+        },
         "network": {
             "allowedDomains": [
                 "github.com",
@@ -80,6 +95,8 @@ LARGE_DOC = {
                 "proxy.golang.org",
                 "sum.golang.org",
                 "storage.googleapis.com",
+                "api.nuget.org",
+                "repo.maven.apache.org",
             ]
         },
     },
@@ -129,6 +146,11 @@ def run_with_flags(
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
     return SandboxRun(res, fake_claude_records(record_file), tasks_path)
+
+
+def with_auto_allow(doc: dict[str, Any]) -> dict[str, Any]:
+    """The shipped file as claude gets it: alr adds the fourth forced key, which the files do not carry."""
+    return {**doc, "sandbox": {**doc["sandbox"], "autoAllowBashIfSandboxed": True}}
 
 
 def assert_sandboxed(argv: list[str]) -> None:
@@ -312,7 +334,7 @@ def test_sandbox_name_passes_the_shipped_file_to_claude(
     assert json.loads(path.read_text(encoding="utf-8")) == doc
     argv = run.records[0]["argv"]
     assert argv[:4] == ["--print", "--permission-mode", "acceptEdits", "--settings"]
-    assert json.loads(argv[4]) == doc
+    assert json.loads(argv[4]) == with_auto_allow(doc)
     assert not (run.tasks_path.parent / "sandbox.json").exists()
     logged = run_log(run.tasks_path.parent)[0]["sandbox_settings"]
     assert logged == str(path)
@@ -328,6 +350,7 @@ def test_a_sandbox_of_the_users_own_runs_with_its_settings_and_the_forced_keys(
             "enabled": False,
             "allowUnsandboxedCommands": True,
             "failIfUnavailable": False,
+            "autoAllowBashIfSandboxed": False,
             "filesystem": {"denyRead": ["~/"]},
         },
     }
@@ -414,21 +437,27 @@ def test_sandbox_with_another_permission_flag_exits_2_before_the_name_is_checked
     assert run.records == [], "claude must not run"
 
 
-def test_a_later_run_adds_a_deleted_sandbox_and_leaves_an_edited_one(
+def test_a_later_run_adds_a_deleted_sandbox_and_updates_an_edited_one(
     tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:
     folder = sandboxes_folder(home)
     (folder / "tight.json").unlink()
-    edited = '{"sandbox": {"note": "my large"}}\n'
-    (folder / "large.json").write_text(edited, encoding="utf-8")
+    (folder / "large.json").write_text(
+        '{"sandbox": {"note": "my large"}}\n', encoding="utf-8"
+    )
+    mine = folder / "my_large.json"
+    mine.write_text('{"sandbox": {"note": "my own"}}\n', encoding="utf-8")
+    mine_before = mine.read_bytes()
 
     first = run_with_flags(tmp_path, "--yolo")
 
     assert first.res.code == 0, first.res
     assert f"Added {folder / 'tight.json'}\n" in first.res.out
-    assert "large.json" not in first.res.out
+    assert f"Updated {folder / 'large.json'}\n" in first.res.out
+    assert "my_large" not in first.res.out
     assert json.loads((folder / "tight.json").read_text(encoding="utf-8")) == TIGHT_DOC
-    assert (folder / "large.json").read_text(encoding="utf-8") == edited
+    assert json.loads((folder / "large.json").read_text(encoding="utf-8")) == LARGE_DOC
+    assert mine.read_bytes() == mine_before
 
     again = tmp_path / "again"
     again.mkdir()
@@ -436,7 +465,119 @@ def test_a_later_run_adds_a_deleted_sandbox_and_leaves_an_edited_one(
 
     assert second.res.code == 0, second.res
     assert "Added" not in second.res.out
-    assert (folder / "large.json").read_text(encoding="utf-8") == edited
+    assert "Updated" not in second.res.out
+    assert json.loads((folder / "large.json").read_text(encoding="utf-8")) == LARGE_DOC
+    assert mine.read_bytes() == mine_before
+
+
+def edit_large(home: Path) -> tuple[Path, bytes]:
+    """Edit the synced large.json in place; return its path and the shipped bytes it held."""
+    path = sandboxes_folder(home) / "large.json"
+    shipped = path.read_bytes()
+    path.write_text('{"sandbox": {"note": "my large"}}\n', encoding="utf-8")
+    return path, shipped
+
+
+def test_a_second_run_says_nothing_about_the_shipped_sandboxes(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = sandboxes_folder(home)
+    path, shipped = edit_large(home)
+    first = run_with_flags(tmp_path, "--yolo")
+    assert f"Updated {path}\n" in first.res.out, (
+        "the first run must have had work to do"
+    )
+    again = tmp_path / "again"
+    again.mkdir()
+
+    second = run_with_flags(again, "--yolo")
+
+    assert second.res.code == 0, second.res
+    assert str(folder) not in second.res.out
+    assert "Added" not in second.res.out
+    assert "Updated" not in second.res.out
+    assert "warning" not in second.res.err
+    assert path.read_bytes() == shipped
+
+
+def test_an_edited_shipped_sandbox_is_updated_and_named_on_stdout(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = sandboxes_folder(home)
+    path, shipped = edit_large(home)
+    tight_before = (folder / "tight.json").read_bytes()
+
+    run = run_with_flags(tmp_path, "--yolo")
+
+    assert run.res.code == 0, run.res
+    assert f"Updated {path}" in run.res.out.splitlines()
+    assert str(folder / "tight.json") not in run.res.out
+    assert path.read_bytes() == shipped
+    assert (folder / "tight.json").read_bytes() == tight_before
+    assert [file.name for file in folder.iterdir() if file.name.startswith(".")] == []
+
+
+def test_a_symlinked_shipped_sandbox_is_replaced_with_a_warning(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    path = sandboxes_folder(home) / "large.json"
+    shipped = path.read_bytes()
+    linked_target = tmp_path / "versioned-large.json"
+    linked_target.write_text('{"sandbox": {"note": "mine"}}\n', encoding="utf-8")
+    path.unlink()
+    path.symlink_to(linked_target)
+
+    run = run_with_flags(tmp_path, "--yolo")
+
+    assert run.res.code == 0, run.res
+    warning = f"warning: {path} was a symlink; replaced it with the shipped sandbox"
+    assert warning in run.res.err.splitlines()
+    assert f"Updated {path}" in run.res.out.splitlines()
+    assert not path.is_symlink()
+    assert path.read_bytes() == shipped
+    assert linked_target.read_text(encoding="utf-8") == (
+        '{"sandbox": {"note": "mine"}}\n'
+    )
+
+
+def test_a_dry_run_reports_an_edited_sandbox_and_changes_nothing(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = sandboxes_folder(home)
+    path, shipped = edit_large(home)
+    edited = path.read_bytes()
+    assert edited != shipped, "the edit must change the file"
+
+    res, _ = run_dry_run(tmp_path, DRY_RUN_TASKS_YAML, "--sandbox", "large")
+
+    assert res.code == 0, res
+    assert f"sandbox: {path} (updated on a real run)\n" in res.out
+    assert f"sandbox: {folder / 'tight.json'}" not in res.out
+    assert "Updated" not in res.out
+    assert path.read_bytes() == edited
+
+
+def test_a_sandbox_under_another_name_survives_the_sync(
+    tmp_path: Path, home: Path, fake_claude: Path
+) -> None:
+    folder = sandboxes_folder(home)
+    path, _ = edit_large(home)
+    # A copy of the shipped Large under another name is the user's file, whatever it holds.
+    mine = folder / "my_large.json"
+    mine.write_text('{"sandbox": {"note": "my own"}}\n', encoding="utf-8")
+    other = folder / "notes.txt"
+    other.write_text("not a sandbox\n", encoding="utf-8")
+    before = {file: file.read_bytes() for file in (mine, other)}
+
+    run = run_with_flags(tmp_path, "--sandbox", "my_large")
+
+    assert run.res.code == 0, run.res
+    assert f"Updated {path}" in run.res.out.splitlines()
+    assert "my_large" not in run.res.out
+    assert "notes.txt" not in run.res.out
+    assert {file: file.read_bytes() for file in (mine, other)} == before
+    argv = run.records[0]["argv"]
+    assert json.loads(argv[4])["sandbox"]["note"] == "my own"
 
 
 def test_a_real_run_with_the_sandboxes_folder_gone_adds_both_files(
@@ -450,7 +591,7 @@ def test_a_real_run_with_the_sandboxes_folder_gone_adds_both_files(
     assert run.res.code == 0, run.res
     assert f"Added {folder / 'large.json'}\n" in run.res.out
     assert f"Added {folder / 'tight.json'}\n" in run.res.out
-    assert json.loads(run.records[0]["argv"][4]) == TIGHT_DOC
+    assert json.loads(run.records[0]["argv"][4]) == with_auto_allow(TIGHT_DOC)
 
 
 def test_a_dry_run_with_the_sandboxes_folder_gone_reads_the_package_and_creates_nothing(
@@ -521,7 +662,7 @@ def test_a_named_sandbox_leaves_the_folders_sandbox_json_alone(
 
     assert run.res.code == 0, run.res
     assert (folder / "sandbox.json").read_text(encoding="utf-8") == mine
-    assert json.loads(run.records[0]["argv"][4]) == LARGE_DOC
+    assert json.loads(run.records[0]["argv"][4]) == with_auto_allow(LARGE_DOC)
 
 
 def test_a_dry_run_notices_the_folders_sandbox_json_and_names_no_sandbox(

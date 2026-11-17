@@ -113,10 +113,11 @@ def _read_settings(path: str, source: str) -> str:
 
 
 def _force_sandbox(text: str, source: str) -> str:
-    """Return the settings with the three sandbox keys a file must not weaken set.
+    """Return the settings with the four sandbox keys a file must not weaken set.
 
-    They turn the sandbox on, leave the session no way to ask its way out, and
-    stop it carrying on unsandboxed when the sandbox cannot start.
+    They turn the sandbox on, leave the session no way to ask its way out, stop
+    it carrying on unsandboxed when the sandbox cannot start, and let a
+    sandboxed Bash command run without asking, since no one is there to answer.
     """
     try:
         settings = parse_settings(text)
@@ -129,6 +130,7 @@ def _force_sandbox(text: str, source: str) -> str:
     sandbox["enabled"] = True
     sandbox["allowUnsandboxedCommands"] = False
     sandbox["failIfUnavailable"] = True
+    sandbox["autoAllowBashIfSandboxed"] = True
     settings["sandbox"] = sandbox
     # ASCII only, so the argument can be encoded whatever the file holds, a
     # lone surrogate included.
