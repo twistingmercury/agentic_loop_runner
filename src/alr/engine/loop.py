@@ -8,9 +8,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import NamedTuple
 
-from alr.engine.frontend import FrontEnd
+from alr.engine.frontend import FrontEnd, SessionResult
 from alr.engine.actions import action_env, run_actions
-from alr.engine.result import last_result_line, outcome
+from alr.engine.result import RESULT_REQUEST, last_result_line, outcome, parse_result
 from alr.engine.stop import Stop
 from alr.errors import (
     FAILED_TASKS_MESSAGE,
@@ -271,6 +271,34 @@ def _session_argv(
     ]
 
 
+async def _session_result(
+    task: Task, stdin_text: str, options: RunOptions, front_end: FrontEnd
+) -> SessionResult:
+    """Run the task's session; when it dropped its result line, ask once for only that line."""
+    session_id = new_session_id()
+    argv = _session_argv(front_end, options, "--session-id", session_id)
+    result = await front_end.run_session(replace(task), argv, stdin_text)
+    if result.error is not None:
+        return result
+
+    if parse_result(last_result_line(result.text)) is not None:
+        return result
+
+    # The same id and flags resume the same conversation under the same sandbox.
+    resume_argv = _session_argv(front_end, options, "--resume", session_id)
+    follow_up = await front_end.run_session(
+        replace(task), resume_argv, f"{RESULT_REQUEST}\n"
+    )
+    if follow_up.error is not None:
+        return result
+
+    # A follow-up with no valid line is no better than the session's own.
+    if parse_result(last_result_line(follow_up.text)) is None:
+        return result
+
+    return follow_up
+
+
 async def _run_task(
     task: Task,
     task_list: TaskList,
@@ -282,11 +310,9 @@ async def _run_task(
     Returns the state and error to save.
     """
     stdin_text = f"{task_list.shared.prompt}\n\n{task.text()}\n"
-    session_id = new_session_id()
-    argv = _session_argv(front_end, options, "--session-id", session_id)
     started = time.monotonic()
     try:
-        result = await front_end.run_session(replace(task), argv, stdin_text)
+        result = await _session_result(task, stdin_text, options, front_end)
     except asyncio.CancelledError:
         # Nothing is saved, so the next run picks the task up again.
         raise RunCancelledError(f"task {task.id}: {task.name}: stopped") from None

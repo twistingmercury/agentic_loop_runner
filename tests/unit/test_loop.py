@@ -1,6 +1,7 @@
 """The run loop: loading the inputs, one session per pending task, a save after each."""
 
 import asyncio
+import contextlib
 import signal
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +20,7 @@ from helpers import (
 
 from alr import tasks
 from alr.engine import loop
+from alr.engine.result import RESULT_REQUEST
 from alr.engine.sandbox import bypass_args
 from alr.engine.stop import Stop
 from alr.errors import (
@@ -520,6 +522,144 @@ async def test_run_loop_result_line_failure_stops_later_tasks(
         (FAILED, "tests failed"),
         (PENDING, ""),
     ]
+
+
+COMPLETED_LINE = '{"state":"completed","error":""}'
+NAMED_ERROR = "session exited 0 but wrote no result line, even after one follow-up"
+
+
+def _one_task_list() -> TaskList:
+    return TaskList(shared=SHARED, tasks=[Task(id=1, name="Only", prompt="p")])
+
+
+async def test_run_loop_recovers_a_dropped_result_line(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv("FAKECLAUDE_RESUME_OUTPUT", COMPLETED_LINE)
+
+    await run_loop(_one_task_list(), tasks_file)
+
+    calls = fake_claude_records(record)
+    assert len(calls) == 2
+    session_id = calls[0]["argv"][-1]
+    assert calls[1]["argv"][-2:] == ["--resume", session_id]
+    assert "--session-id" not in calls[1]["argv"]
+    assert calls[1]["stdin"].strip() == RESULT_REQUEST
+    assert [task.state for task in saved_tasks(tasks_file).tasks] == [COMPLETED]
+
+
+async def test_run_loop_recovers_a_fenced_result_line(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv("FAKECLAUDE_RESUME_OUTPUT", f"```json\n{COMPLETED_LINE}\n```\n")
+
+    await run_loop(_one_task_list(), tasks_file)
+
+    assert [task.state for task in saved_tasks(tasks_file).tasks] == [COMPLETED]
+
+
+async def test_run_loop_a_follow_up_that_says_failed_fails_the_task(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv(
+        "FAKECLAUDE_RESUME_OUTPUT", '{"state":"failed","error":"tests broke"}'
+    )
+
+    with pytest.raises(RunError, match="tests broke"):
+        await run_loop(_one_task_list(), tasks_file)
+
+    assert len(fake_claude_records(record)) == 2
+    saved = saved_tasks(tasks_file)
+    assert [(task.state, task.error) for task in saved.tasks] == [
+        (FAILED, "tests broke")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("resume_output", "resume_exit_code"),
+    [
+        pytest.param("", "", id="follow-up writes nothing"),
+        pytest.param(COMPLETED_LINE, "1", id="follow-up exits non-zero with a line"),
+        pytest.param("not json at all", "", id="follow-up is not JSON"),
+    ],
+)
+async def test_run_loop_a_dropped_result_line_not_recovered_fails_with_the_named_error(
+    record: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resume_output: str,
+    resume_exit_code: str,
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv("FAKECLAUDE_RESUME_OUTPUT", resume_output)
+    if resume_exit_code:
+        monkeypatch.setenv("FAKECLAUDE_RESUME_EXIT_CODE", resume_exit_code)
+
+    with pytest.raises(RunError, match=NAMED_ERROR):
+        await run_loop(_one_task_list(), tasks_file)
+
+    assert len(fake_claude_records(record)) == 2
+    saved = saved_tasks(tasks_file)
+    assert [(task.state, task.error) for task in saved.tasks] == [(FAILED, NAMED_ERROR)]
+
+
+async def test_run_loop_a_first_session_that_exits_non_zero_gets_no_follow_up(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    monkeypatch.setenv("FAKECLAUDE_EXIT_CODE", "1")
+
+    with pytest.raises(RunError, match="exit status 1"):
+        await run_loop(_one_task_list(), tasks_file)
+
+    assert len(fake_claude_records(record)) == 1
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        pytest.param(COMPLETED_LINE, id="completed"),
+        pytest.param('{"state":"failed","error":"boom"}', id="failed"),
+    ],
+)
+async def test_run_loop_a_first_valid_line_gets_no_follow_up(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, line: str
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", line)
+
+    # A failed line ends the run with an error; only the call count matters here.
+    with contextlib.suppress(RunError):
+        await run_loop(_one_task_list(), tmp_path / "tasks.yaml")
+
+    assert len(fake_claude_records(record)) == 1
+
+
+async def test_run_loop_stop_during_the_follow_up_leaves_the_task_pending(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks_file = tmp_path / "tasks.yaml"
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv("FAKECLAUDE_BLOCK_ON", "Reply with only the result line")
+    write_file(tasks_file, TWO_PENDING_YAML)
+    task_list = tasks.parse_tasks(TWO_PENDING_YAML)
+
+    run = asyncio.ensure_future(run_loop(task_list, tasks_file))
+    # The first session exits at once, so the second record is the follow-up.
+    await _wait_until(
+        lambda: len(fake_claude_records(record)) == 2,
+        "fake claude never started the follow-up",
+    )
+    error = await cancel_run(run)
+
+    assert "task 1" in str(error)
+    assert [task.state for task in saved_tasks(tasks_file).tasks] == [PENDING, PENDING]
 
 
 async def test_run_loop_cancel_mid_task_stops_quickly(
