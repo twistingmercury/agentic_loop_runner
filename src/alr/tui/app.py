@@ -38,6 +38,7 @@ from alr.tui.prepare import Prepared, prepare
 from alr.tui.progress import Progress
 from alr.tasks import FAILED, PENDING, Action, Task, TaskList
 from alr.tui.settings import Permissions, RunSettings
+from alr.tui.terminal import use_hangup_safe_writer
 
 
 _STOPPED = "stopped"
@@ -673,6 +674,7 @@ def _outcome(event: RunDone, stopping: bool) -> str:
 
 def run_app(settings: RunSettings) -> int:
     """Run the view to the end; it exits with the final run's code, from the table plain mode uses."""
+    use_hangup_safe_writer()
     app = AlrApp(settings)
     # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
     app.run(mouse=False)

@@ -2,6 +2,7 @@
 
 import os
 import signal
+import time
 from pathlib import Path
 
 import pexpect
@@ -12,6 +13,7 @@ from e2e_helpers import (
     shared_block,
     task_states,
     wait_for_file,
+    process_is_running,
     wait_process_gone,
     write_tasks_yaml,
 )
@@ -128,5 +130,69 @@ def test_sighup_stops_the_view_and_its_session(
     wait_process_gone(claude_pid, 10)
     wait_process_gone(descendant_pid, 10)
     # A stopped run saves nothing, so the next run picks the task up again.
+    assert tasks_path.read_text(encoding="utf-8") == before
+    assert_no_tmp_file(tasks_path)
+
+
+def _ignore_hangup() -> None:
+    """Start the child as nohup does: with SIGHUP ignored."""
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+
+def test_a_view_that_ignored_sighup_still_stops_on_sigterm_after_its_terminal_closed(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    """The run outlives the terminal, then a SIGTERM stops it: the dead terminal must not freeze alr."""
+    folder = tmp_path / "run"
+    folder.mkdir()
+    tasks_path = write_tasks_yaml(folder, TASKS)
+    before = tasks_path.read_text(encoding="utf-8")
+    ready_file = tmp_path / "ready"
+    descendant_pid_file = tmp_path / "descendant.pid"
+    env = {
+        **os.environ,
+        "TERM": "xterm-256color",
+        "FAKECLAUDE_BLOCK": "1",
+        "FAKECLAUDE_READY_FILE": str(ready_file),
+        "FAKECLAUDE_DESCENDANT_PID_FILE": str(descendant_pid_file),
+    }
+    child = pexpect.spawn(
+        find_alr(),
+        ["-d", str(folder), "--yolo"],
+        env=env,
+        encoding="utf-8",
+        timeout=30,
+        dimensions=(40, 140),
+        preexec_fn=_ignore_hangup,
+    )
+    try:
+        child.expect(r"\(s\)tart")
+        child.send("s")
+        claude_pid = int(wait_for_file(ready_file, 20))
+        descendant_pid = int(wait_for_file(descendant_pid_file, 5))
+        child.expect("▶")
+
+        # Closing the master end hangs the terminal up for real: with SIGHUP
+        # ignored the run goes on, and every write to the terminal now fails.
+        os.close(child.child_fd)
+        # Long enough for the view's redraws to fill the output queue of a writer
+        # that gave up at the first failed write.
+        time.sleep(6)
+        assert process_is_running(child.pid)
+        assert process_is_running(claude_pid)
+
+        os.kill(child.pid, signal.SIGTERM)
+        deadline = time.monotonic() + 15
+        while child.isalive() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        assert not child.isalive(), "alr did not exit after SIGTERM"
+    finally:
+        if child.isalive():
+            os.kill(child.pid, signal.SIGKILL)
+
+    assert child.exitstatus == 143
+    wait_process_gone(claude_pid, 10)
+    wait_process_gone(descendant_pid, 10)
     assert tasks_path.read_text(encoding="utf-8") == before
     assert_no_tmp_file(tasks_path)

@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second Stop press does, instead of leaving the summary open; Stop and Ctrl-C
   still leave it open. A second signal of another kind no longer changes the
   view's exit code: the first stop decides.
+- The full-screen view no longer freezes when its terminal goes away while it
+  ignores SIGHUP (as `nohup` leaves it): a later SIGTERM stops it and its
+  sessions instead of needing SIGKILL.
 
 ## [0.5.4] - 2026-11-17
 
