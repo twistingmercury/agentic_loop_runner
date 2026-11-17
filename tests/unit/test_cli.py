@@ -31,7 +31,7 @@ from alr.config import SandboxDefault
 from alr.engine.sandbox import sandbox_args
 from alr.engine.stop import Stop
 from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
-from alr.skillinstall import sync
+from alr.skillinstall import skills_folder, sync
 from alr.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
@@ -2151,6 +2151,26 @@ def test_sandboxes_are_synced_between_the_config_folder_check_and_the_config_rea
 
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
     assert calls == ["check", "sync", "dir", "load"]
+
+
+def test_a_sandbox_refusal_leaves_no_skill_written(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    locked_folder: None,
+) -> None:
+    # The home fixture already synced the skills; take them away so a write shows.
+    shutil.rmtree(skills_folder(home))
+    shutil.rmtree(_sandboxes(home))
+
+    # Sandboxes sync first, so its refusal must come before any skill is written.
+    with chmodded(home / ".local" / "alr", 0o500):
+        code = cli.main(["-d", str(folder), "--yolo"])
+
+    assert code == 3
+    assert "config-unwritable" in capsys.readouterr().err
+    assert not skills_folder(home).exists()
 
 
 def test_the_run_folder_notice_comes_after_the_sandboxes_are_added_and_before_the_config_is_read(

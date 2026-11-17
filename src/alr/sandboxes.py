@@ -73,8 +73,9 @@ def sandboxes_dir(home: Path | None = None) -> Path:
 def add_missing(home: Path | None = None) -> list[Path]:
     """Copy each shipped sandbox that is not in the folder yet, and return the files added.
 
-    The folder is made when it is missing. A file already there, edited or
-    not, is never touched: the user's edits must survive every run.
+    The folder is made when it is missing. It adds only what is missing and
+    never touches a file that exists; sync_shipped is what updates the shipped
+    files (ADR-037).
     """
     folder = sandboxes_dir(home)
     try:
@@ -112,14 +113,20 @@ def pending_changes(home: Path | None = None) -> list[SandboxChange]:
     """What sync_shipped would change, in the same order, without writing anything.
 
     A file that cannot be read is left out: a real run reports it as a
-    warning, and a dry run has no business failing over it.
+    warning, and a dry run has no business failing over it. So is an update
+    in a folder a real run could not write to: it would only warn.
     """
     folder = sandboxes_dir(home)
     changes: list[SandboxChange] = []
     for file_name in _shipped_names():
         change = _try_classify(folder / file_name)
-        if change is not None:
-            changes.append(change)
+        if change is None:
+            continue
+
+        if change.verb == "Updated" and not _update_can_land(folder):
+            continue
+
+        changes.append(change)
 
     return changes
 
@@ -223,7 +230,7 @@ def read_text(path: Path, dry_run: bool = False) -> str:
     package copy even when the file on disk differs. Everything else reads as given.
     Undecodable bytes are replaced, as sandbox_args does when a run reads the file.
     """
-    if dry_run and is_shipped_sandbox(path):
+    if dry_run and is_shipped_sandbox(path) and _update_can_land(path.parent):
         return _shipped_text(path.name)
 
     try:
@@ -244,13 +251,18 @@ def names_in(folder: Path, dry_run: bool) -> list[str]:
     """List the names a run could pick from a sandboxes folder.
 
     A dry run adds the shipped names a real run would add, so both give the
-    same verdict. Config validation calls this with the folder it is parsing.
+    same verdict. A symlink at a shipped name counts too, dangling or not,
+    because the sync replaces it. Config validation calls this with the
+    folder it is parsing.
     """
     names = [sandbox.name for sandbox in _list_in(folder)]
     if not dry_run:
         return names
 
     for shipped in _missing_shipped(folder):
+        names.append(shipped.removesuffix(_SUFFIX))
+
+    for shipped in _symlinked_shipped(folder):
         names.append(shipped.removesuffix(_SUFFIX))
 
     return sorted(set(names))
@@ -281,6 +293,26 @@ def _exists(path: Path) -> bool:
 def _missing_shipped(folder: Path) -> list[str]:
     """List the shipped file names the folder lacks, so the real run, the dry run, and the check agree on them."""
     return [name for name in _shipped_names() if not _exists(folder / name)]
+
+
+def _symlinked_shipped(folder: Path) -> list[str]:
+    """List the shipped file names that are symlinks a real run would replace.
+
+    Only when the update can land; otherwise the sync only warns and the link stays.
+    """
+    if not _update_can_land(folder):
+        return []
+
+    return [name for name in _shipped_names() if (folder / name).is_symlink()]
+
+
+def _update_can_land(folder: Path) -> bool:
+    """Say whether a real run could replace a file in the folder.
+
+    The new file is made beside the old and renamed over it, which takes the
+    write and the search permission on the folder, as check_can_add_missing needs.
+    """
+    return os.access(folder, os.W_OK | os.X_OK)
 
 
 def _reason(error: OSError) -> str:

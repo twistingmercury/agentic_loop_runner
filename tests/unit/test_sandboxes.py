@@ -23,6 +23,7 @@ from alr.sandboxes import (
     add_missing,
     check_can_add_missing,
     find,
+    is_shipped_sandbox,
     list_sandboxes,
     names_in,
     names_text,
@@ -799,3 +800,95 @@ def test_the_sandbox_listing_and_preview_read_the_file_on_disk_sandbox_text() ->
     # The shipped Large is valid, so a problem here means the listing read the package.
     assert listed["large"].problem == "not valid JSON"
     assert read_text(large) == "not json"
+
+
+def test_a_dry_run_counts_a_dangling_symlink_at_a_shipped_name_as_present(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    link = folder / "large.json"
+    link.unlink()
+    link.symlink_to(set_up_home / "gone.json")
+
+    # A real run replaces the link, so the dry run must not refuse the name.
+    assert "large" in names_in(folder, dry_run=True)
+
+
+def test_a_dry_run_reads_the_disk_when_the_folder_is_read_only(
+    home: Path, locked_folder: None
+) -> None:
+    folder = sandboxes_dir(home)
+    large = folder / "large.json"
+    large.write_text("not json", encoding="utf-8")
+
+    # A real run could not replace the file here, so it would use the text on disk.
+    with chmodded(folder, 0o555):
+        text = read_text(large, dry_run=True)
+        pending = pending_changes(home)
+
+    assert text == "not json"
+    assert all(change.path != large for change in pending)
+
+
+def test_sync_shipped_writes_its_temporary_file_beside_the_target(
+    set_up_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    (folder / "large.json").write_bytes(EDITED)
+    real_replace = os.replace
+    sources: list[Path] = []
+
+    def watch_replace(source: str, target: Path) -> None:
+        sources.append(Path(source))
+        real_replace(source, target)
+
+    monkeypatch.setattr("alr.sandboxes.os.replace", watch_replace)
+
+    sync_shipped(set_up_home)
+
+    # A rename across folders is not atomic, so the staged file must be beside the target.
+    assert [source.parent for source in sources] == [folder]
+
+
+def test_sync_shipped_goes_on_to_the_next_file_after_a_warning(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    # The sync goes in name order, so the warning must come first for a stop to show.
+    (folder / "large.json").unlink()
+    (folder / "large.json").mkdir()
+    (folder / "tight.json").write_bytes(EDITED)
+
+    report = sync_shipped(set_up_home)
+
+    assert len(report.warnings) == 1
+    assert (folder / "tight.json").read_bytes() == package_copy("tight.json")
+
+
+def test_sync_shipped_replaces_a_read_only_file_in_a_writable_folder(
+    set_up_home: Path,
+) -> None:
+    folder = sandboxes_dir(set_up_home)
+    sync_shipped(set_up_home)
+    large = folder / "large.json"
+    large.write_bytes(EDITED)
+    large.chmod(0o444)
+
+    report = sync_shipped(set_up_home)
+
+    assert report.warnings == []
+    assert report.changes == [SandboxChange(large, "Updated", "")]
+    assert large.read_bytes() == package_copy("large.json")
+
+
+def test_is_shipped_sandbox_resolves_the_path_it_is_given(home: Path) -> None:
+    folder = sandboxes_dir(home)
+    shipped_by_a_dotted_path = folder / ".." / "sandboxes" / "large.json"
+    link = home / "alr_link"
+    link.symlink_to(folder)
+
+    assert is_shipped_sandbox(shipped_by_a_dotted_path)
+    assert is_shipped_sandbox(link / "large.json")
