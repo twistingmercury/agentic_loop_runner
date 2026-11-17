@@ -26,8 +26,10 @@ scope every task to what a single session can finish and verify.
 alr owns `state` and writes it back to `tasks.yaml`. The session never edits
 the file. To remove a task without running it, delete it from the file; there is
 no `abandoned` state. alr decides the outcome from the JSON result line the
-shared prompt asks for at the end of the session's output. A missing or invalid
-result line, or a non-zero exit, marks the task `failed`. alr refuses to run
+shared prompt asks for at the end of the session's output. A session that
+exits 0 without a valid result line is resumed once and asked only for that
+line; if it still has none, or the session exited non-zero, the task is
+`failed`. alr refuses to run
 while any task is `failed`; a person fixes the cause (often by editing the
 task's `prompt`) and resets its `state` to `pending` by hand, or runs with
 `--reset-failed`, which sets every failed task back to `pending` at startup.

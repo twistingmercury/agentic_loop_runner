@@ -59,7 +59,9 @@ and each build plan is in [docs/plans/](docs/plans/).
 ## Key Considerations
 
 - Supported platforms are Linux and macOS only.
-- No automatic retries: at most one attempt per task per run.
+- No automatic retries: at most one attempt per task per run. The one exception
+  is a session that exits 0 without a result line: alr resumes it once and asks
+  for only that line.
 - The first run on a machine needs a one-time setup: `alr` asks before creating
   `~/.local/alr` (its `config.yaml` and prompt files) and then stops. Without a
   terminal, or with `--dry-run`, it refuses with `config-setup-missing` and creates

@@ -275,6 +275,8 @@ def without_session_id(argv: list[str]) -> list[str]:
     """The argv without its trailing --session-id and id, after checking both."""
     assert argv[-2] == "--session-id", argv
     assert uuid.UUID(argv[-1]).version == 4, argv
+    # UUID() also accepts the hyphenless form; claude is given the canonical one.
+    assert str(uuid.UUID(argv[-1])) == argv[-1], argv
     return argv[:-2]
 
 

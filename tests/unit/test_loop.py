@@ -546,8 +546,35 @@ async def test_run_loop_recovers_a_dropped_result_line(
     session_id = calls[0]["argv"][-1]
     assert calls[1]["argv"][-2:] == ["--resume", session_id]
     assert "--session-id" not in calls[1]["argv"]
-    assert calls[1]["stdin"].strip() == RESULT_REQUEST
+    assert calls[1]["stdin"] == f"{RESULT_REQUEST}\n"
     assert [task.state for task in saved_tasks(tasks_file).tasks] == [COMPLETED]
+
+
+class _FlaggedFrontEnd(PlainFrontEnd):
+    """A plain front end that, like the view, adds a flag of its own to every session."""
+
+    session_flags = ("--verbose",)
+
+
+async def test_run_loop_the_follow_up_carries_the_sessions_flags_and_args(
+    record: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_args = ["--permission-mode", "acceptEdits", "--settings", "sandbox.json"]
+    monkeypatch.setenv("FAKECLAUDE_OUTPUT", "")
+    monkeypatch.setenv("FAKECLAUDE_RESUME_OUTPUT", COMPLETED_LINE)
+
+    await run_loop(
+        _one_task_list(),
+        tmp_path / "tasks.yaml",
+        session_args=session_args,
+        front_end=_FlaggedFrontEnd(),
+    )
+
+    calls = fake_claude_records(record)
+    assert len(calls) == 2
+    want = ["--print", "--verbose", *session_args]
+    assert without_session_id(calls[0]["argv"]) == want
+    assert calls[1]["argv"][:-2] == want
 
 
 async def test_run_loop_recovers_a_fenced_result_line(
