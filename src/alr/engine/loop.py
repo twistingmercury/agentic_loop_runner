@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -252,6 +253,24 @@ async def _run_and_save(
     raise RunError(failure)
 
 
+def new_session_id() -> str:
+    """A fresh id for one Claude session, so a later call can resume it."""
+    return str(uuid.uuid4())
+
+
+def _session_argv(
+    front_end: FrontEnd, options: RunOptions, id_flag: str, session_id: str
+) -> list[str]:
+    return [
+        "claude",
+        "--print",
+        *front_end.session_flags,
+        *options.session_args,
+        id_flag,
+        session_id,
+    ]
+
+
 async def _run_task(
     task: Task,
     task_list: TaskList,
@@ -263,7 +282,8 @@ async def _run_task(
     Returns the state and error to save.
     """
     stdin_text = f"{task_list.shared.prompt}\n\n{task.text()}\n"
-    argv = ["claude", "--print", *front_end.session_flags, *options.session_args]
+    session_id = new_session_id()
+    argv = _session_argv(front_end, options, "--session-id", session_id)
     started = time.monotonic()
     try:
         result = await front_end.run_session(replace(task), argv, stdin_text)

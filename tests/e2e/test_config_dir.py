@@ -15,6 +15,7 @@ from e2e_helpers import (
     run_alr,
     run_alr_in_terminal,
     task_states,
+    without_session_id,
     write_tasks_yaml,
 )
 
@@ -177,7 +178,7 @@ def test_a_yolo_default_runs_without_a_flag(
 
     assert res.code == 0, res
     records = fake_claude_records(record_file)
-    assert [record["argv"] for record in records] == [
+    assert [without_session_id(record["argv"]) for record in records] == [
         ["--print", "--dangerously-skip-permissions"]
     ]
 

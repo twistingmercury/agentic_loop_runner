@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -87,6 +88,13 @@ def refuse_removal(*_: object, **__: object) -> None:
 
 def saved_tasks(path: Path) -> TaskList:
     return tasks.parse_tasks(path.read_text(encoding="utf-8"))
+
+
+def without_session_id(argv: list[str]) -> list[str]:
+    """The argv without its trailing --session-id and id, after checking both."""
+    assert argv[-2] == "--session-id", argv
+    assert uuid.UUID(argv[-1]).version == 4, argv
+    return argv[:-2]
 
 
 def fake_claude_records(path: Path) -> list[dict[str, Any]]:

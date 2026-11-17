@@ -13,11 +13,13 @@ from helpers import (
     fake_claude_records,
     run_loop,
     saved_tasks,
+    without_session_id,
     write_file,
 )
 
 from alr import tasks
 from alr.engine import loop
+from alr.engine.sandbox import bypass_args
 from alr.engine.stop import Stop
 from alr.errors import (
     AfterRunFailedError,
@@ -379,6 +381,27 @@ async def test_run_loop_skips_completed_tasks(
     ]
 
 
+async def test_run_loop_gives_each_session_its_own_session_id(
+    record: Path, tmp_path: Path
+) -> None:
+    task_list = TaskList(
+        shared=SHARED,
+        tasks=[
+            Task(id=1, name="First", prompt="Do the first thing."),
+            Task(id=2, name="Second", prompt="Do the second thing."),
+        ],
+    )
+
+    await run_loop(task_list, tmp_path / "tasks.yaml")
+
+    calls = fake_claude_records(record)
+    assert len(calls) == 2
+    for call in calls:
+        assert without_session_id(call["argv"]) == ["--print", *bypass_args()]
+
+    assert calls[0]["argv"][-1] != calls[1]["argv"][-1]
+
+
 async def test_run_task_plain_argv_is_print_then_session_args(
     record: Path, tmp_path: Path
 ) -> None:
@@ -394,9 +417,9 @@ async def test_run_task_plain_argv_is_print_then_session_args(
 
     await run_loop(task_list, tmp_path / "tasks.yaml", session_args=session_args)
 
-    assert [call["argv"] for call in fake_claude_records(record)] == [
-        ["--print", *session_args]
-    ]
+    assert [
+        without_session_id(call["argv"]) for call in fake_claude_records(record)
+    ] == [["--print", *session_args]]
 
 
 @pytest.mark.parametrize(

@@ -12,6 +12,7 @@ from helpers import (
     kill_holder_and_let_pipes_close,
     run_loop,
     wait_for_text,
+    without_session_id,
     write_file,
 )
 
@@ -93,7 +94,7 @@ async def test_session_argv_and_stdin(record: Path, tmp_path: Path) -> None:
     await _run(_task_list(), tmp_path / "tasks.yaml")
 
     [call] = fake_claude_records(record)
-    assert call["argv"] == [
+    assert without_session_id(call["argv"]) == [
         "--print",
         "--output-format",
         "stream-json",
@@ -109,7 +110,7 @@ async def test_session_argv_with_sandbox_args(record: Path, tmp_path: Path) -> N
     await _run(_task_list(), tmp_path / "tasks.yaml", session_args=session_args)
 
     [call] = fake_claude_records(record)
-    assert call["argv"] == [
+    assert without_session_id(call["argv"]) == [
         "--print",
         "--output-format",
         "stream-json",

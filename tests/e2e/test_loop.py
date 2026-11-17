@@ -17,6 +17,7 @@ from e2e_helpers import (
     run_args,
     shared_block,
     task_states,
+    without_session_id,
     write_tasks_yaml,
 )
 
@@ -59,7 +60,10 @@ def test_loop_runs_every_task_in_order(tmp_path: Path, fake_claude: Path) -> Non
         (10, "Third task", "Do the third thing."),
     ]
     for record, (id, name, prompt) in zip(records, want_tasks):
-        assert record["argv"] == ["--print", "--dangerously-skip-permissions"]
+        assert without_session_id(record["argv"]) == [
+            "--print",
+            "--dangerously-skip-permissions",
+        ]
         assert record["stdin"] == expected_stdin(prompt_body.strip(), id, name, prompt)
 
     after = read_tasks_yaml(tasks_path)

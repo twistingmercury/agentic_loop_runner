@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -268,6 +269,13 @@ def run_dry_run(tmp_path: Path, tasks_yaml: str, *flags: str) -> tuple[Result, P
     assert tasks_path.read_text(encoding="utf-8") == tasks_yaml
     assert_no_tmp_file(tasks_path)
     return res, tasks_path
+
+
+def without_session_id(argv: list[str]) -> list[str]:
+    """The argv without its trailing --session-id and id, after checking both."""
+    assert argv[-2] == "--session-id", argv
+    assert uuid.UUID(argv[-1]).version == 4, argv
+    return argv[:-2]
 
 
 def fake_claude_records(path: Path) -> list[dict[str, Any]]:
