@@ -787,3 +787,15 @@ def test_pending_changes_leaves_out_what_it_cannot_read(set_up_home: Path) -> No
     pending = pending_changes(set_up_home)
 
     assert pending == [SandboxChange(folder / "tight.json", "Added", "")]
+
+
+def test_the_sandbox_listing_and_preview_read_the_file_on_disk_sandbox_text() -> None:
+    # No home argument: the autouse home fixture's folder is the one a dry run treats as shipped.
+    large = sandboxes_dir() / "large.json"
+    large.write_text("not json", encoding="utf-8")
+
+    listed = {sandbox.name: sandbox for sandbox in list_sandboxes()}
+
+    # The shipped Large is valid, so a problem here means the listing read the package.
+    assert listed["large"].problem == "not valid JSON"
+    assert read_text(large) == "not json"

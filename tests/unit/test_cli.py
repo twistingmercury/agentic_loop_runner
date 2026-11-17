@@ -2917,3 +2917,67 @@ def test_a_second_signal_during_the_stop_is_ignored(
     assert code == 130
     assert cleaned_up == [True]
     assert capsys.readouterr().err == "error: interrupted\n"
+
+
+def test_session_args_in_a_dry_run_read_the_shipped_text_for_an_edited_sandbox_sandbox_text(
+    home: Path,
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    large.write_text("not json", encoding="utf-8")
+    answer = cli.Answer(str(large), False, "large")
+
+    flags = cli.session_args(answer, dry_run=True)
+
+    # The edit is not JSON, so a refusal here would mean the dry run read it.
+    assert flags == sandbox_args(str(_package_sandbox("large.json")), "large")
+    assert large.read_text(encoding="utf-8") == "not json"
+
+
+def test_session_args_in_a_dry_run_read_a_sandbox_under_another_name_from_the_folder_sandbox_text(
+    home: Path,
+) -> None:
+    mine = _write_sandbox(home, "my_large", '{"mine": true}')
+    answer = cli.Answer(str(mine), False, "my_large")
+
+    flags = cli.session_args(answer, dry_run=True)
+
+    assert '"mine":true' in flags[-1]
+
+
+def test_session_args_in_a_dry_run_read_a_same_named_file_elsewhere_as_given_sandbox_text(
+    tmp_path: Path,
+) -> None:
+    elsewhere = tmp_path / "large.json"
+    elsewhere.write_text('{"mine": true}', encoding="utf-8")
+
+    flags = cli.session_args(cli.Answer(str(elsewhere), False, ""), dry_run=True)
+
+    assert '"mine":true' in flags[-1]
+
+
+def test_a_real_run_still_reads_the_file_on_disk_sandbox_text(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    locked_folder: None,
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    large.write_text('{"mine": true}', encoding="utf-8")
+
+    # A read-only folder makes the sync warn instead of replace, so the edit stays on disk.
+    with chmodded(_sandboxes(home), 0o500):
+        code = cli.main(["-d", str(folder), "--sandbox", "large"])
+
+    assert code == 0
+    assert (
+        f"warning: sandbox large: {large}: Permission denied" in capsys.readouterr().err
+    )
+    (session,) = sessions
+    assert '"mine":true' in session[-1]
+    assert "excludedCommands" not in session[-1]
+
+
+def _package_sandbox(file_name: str) -> Path:
+    """The shipped copy of a sandbox file, as the package holds it."""
+    return Path(cli.__file__).parent / "defaults" / "sandboxes" / file_name

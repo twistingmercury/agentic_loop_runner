@@ -96,7 +96,7 @@ def _excluded_commands(sandbox_file: str) -> list[str] | None:
     if not sandbox_file:
         return None
 
-    settings = parse_settings(read_text(Path(sandbox_file)))
+    settings = parse_settings(read_text(Path(sandbox_file), dry_run=True))
     entries = settings.get("sandbox", {}).get("excludedCommands", [])
     if not isinstance(entries, list):
         return []

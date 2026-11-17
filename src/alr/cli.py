@@ -35,6 +35,7 @@ from alr.review import review
 from alr.sandboxes import (
     check_can_add_missing,
     find,
+    is_shipped_sandbox,
     names_text,
     pending_changes,
     read_text,
@@ -576,11 +577,15 @@ def session_args(answer: Answer, dry_run: bool) -> list[str]:
 
 
 def _sandbox_flags(answer: Answer, dry_run: bool) -> list[str]:
-    """Return the flags for a sandboxed session, reading the settings from the file or, for a dry run, the package."""
-    if _added_on_real_run(answer, dry_run):
-        # The file is not in the folder yet; check the copy a real run would add.
+    """Return the flags for a sandboxed session, reading the settings from the file or, for a dry run, the package.
+
+    A dry run reads a shipped sandbox in the folder as the shipped text, whether
+    the file is missing or edited, because a real run would sync it first.
+    """
+    path = Path(answer.sandbox_file)
+    if dry_run and is_shipped_sandbox(path):
         return settings_args(
-            read_text(Path(answer.sandbox_file)),
+            read_text(path, dry_run=True),
             answer.sandbox_file,
             answer.sandbox_name,
         )

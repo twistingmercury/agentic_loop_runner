@@ -203,11 +203,29 @@ def find(name: str, home: Path | None = None, dry_run: bool = False) -> Path:
     return path
 
 
-def read_text(path: Path) -> str:
+def is_shipped_sandbox(path: Path) -> bool:
+    """Say whether path is a file alr owns: a shipped name inside the sandboxes folder.
+
+    The rule for which file a real run would have synced to the shipped text
+    before reading it. A file of the same name anywhere else is the user's own.
+    """
+    if path.name not in _shipped_names():
+        return False
+
+    return path.parent.resolve() == sandboxes_dir().resolve()
+
+
+def read_text(path: Path, dry_run: bool = False) -> str:
     """Return the text of a sandbox file, or of the package copy when it is a missing shipped file.
 
+    A dry run writes nothing, but a real run would sync a shipped sandbox in the
+    folder to the shipped text first, so with dry_run set that file reads as the
+    package copy even when the file on disk differs. Everything else reads as given.
     Undecodable bytes are replaced, as sandbox_args does when a run reads the file.
     """
+    if dry_run and is_shipped_sandbox(path):
+        return _shipped_text(path.name)
+
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
