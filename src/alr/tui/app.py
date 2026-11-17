@@ -438,7 +438,11 @@ class AlrApp(App[None]):
         self._stop_signals = []
 
     def _on_stop_signal(self, signum: int) -> None:
-        self._stop.signum = signum
+        # The first stop decides the exit code, as in plain mode; a later signal
+        # only presses Stop again.
+        if not self._stopping:
+            self._stop.signum = signum
+
         # A finished run keeps its own code; with no run going the signal is the whole outcome.
         if self.state in (AppState.SETUP, AppState.READY):
             self.exit_code = self._stop.exit_code()

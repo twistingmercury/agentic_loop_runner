@@ -12,7 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A SIGHUP, from a closed terminal or a dropped ssh session, now stops a run
   the way SIGTERM does and exits 129, so no session outlives alr (issue #63,
   ADR-040). A SIGHUP that was ignored at start, as `nohup` leaves it, is left
-  ignored.
+  ignored. That now applies to `--validate` too, which used to stop on a SIGHUP
+  even when it was ignored.
+- The full-screen view quits itself after a SIGTERM or SIGHUP stops a run, as a
+  second Stop press does, instead of leaving the summary open; Stop and Ctrl-C
+  still leave it open. A second signal of another kind no longer changes the
+  view's exit code: the first stop decides.
 
 ## [0.5.4] - 2026-11-17
 

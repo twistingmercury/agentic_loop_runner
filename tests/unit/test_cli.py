@@ -409,7 +409,8 @@ def test_a_sighup_stops_a_run_like_a_sigterm() -> None:
 def test_an_ignored_sighup_is_left_ignored() -> None:
     async def hung_up_and_went_on() -> None:
         os.kill(os.getpid(), signal.SIGHUP)
-        await asyncio.sleep(0)
+        # Long enough for a handler, if one were installed, to cancel the run.
+        await asyncio.sleep(0.1)
 
     before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
     try:
@@ -417,6 +418,53 @@ def test_an_ignored_sighup_is_left_ignored() -> None:
         assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
     finally:
         signal.signal(signal.SIGHUP, before)
+
+
+@pytest.mark.parametrize(
+    ("sighup", "handled"),
+    [
+        (signal.SIG_DFL, (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)),
+        (signal.SIG_IGN, (signal.SIGINT, signal.SIGTERM)),
+    ],
+    ids=["hangup-default", "hangup-ignored"],
+)
+def test_only_an_ignored_sighup_is_left_out_of_the_handled_signals(
+    sighup: signal.Handlers, handled: tuple[signal.Signals, ...]
+) -> None:
+    before = signal.signal(signal.SIGHUP, sighup)
+    try:
+        assert cli._handled_signals(cli._RUN_SIGNALS) == handled
+    finally:
+        signal.signal(signal.SIGHUP, before)
+
+
+@pytest.mark.parametrize(
+    ("ignored", "sent", "code"),
+    [
+        (signal.SIGHUP, signal.SIGTERM, 143),
+        (signal.SIGHUP, signal.SIGINT, 130),
+        (signal.SIGINT, signal.SIGINT, 130),
+        (signal.SIGTERM, signal.SIGTERM, 143),
+    ],
+    ids=[
+        "sigterm-after-ignored-hangup",
+        "sigint-after-ignored-hangup",
+        "ignored-sigint",
+        "ignored-sigterm",
+    ],
+)
+def test_sigint_and_sigterm_stop_a_run_even_when_they_were_ignored_at_start(
+    ignored: signal.Signals, sent: signal.Signals, code: int
+) -> None:
+    async def stopped() -> None:
+        os.kill(os.getpid(), sent)
+        await asyncio.sleep(60)
+
+    before = signal.signal(ignored, signal.SIG_IGN)
+    try:
+        assert cli._run(stopped(), Stop()) == code
+    finally:
+        signal.signal(ignored, before)
 
 
 def test_only_the_first_signal_sets_the_exit_code() -> None:

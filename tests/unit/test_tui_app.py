@@ -248,6 +248,61 @@ async def test_an_ignored_sighup_does_not_stop_the_view(
         signal.signal(signal.SIGHUP, before)
 
 
+@pytest.mark.parametrize(
+    ("ignored", "sent", "code"),
+    [
+        (signal.SIGHUP, signal.SIGTERM, 143),
+        (signal.SIGTERM, signal.SIGTERM, 143),
+    ],
+    ids=["sigterm-after-ignored-hangup", "ignored-sigterm"],
+)
+@pytest.mark.usefixtures("fake_claude")
+async def test_sigterm_stops_the_view_even_when_it_or_sighup_was_ignored_at_start(
+    work_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ignored: signal.Signals,
+    sent: signal.Signals,
+    code: int,
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    before = signal.signal(ignored, signal.SIG_IGN)
+    try:
+        app = AlrApp(_settings(work_dir))
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            await until(lambda: app.state is AppState.RUNNING)
+
+            os.kill(os.getpid(), sent)
+            await until(lambda: not app.is_running)
+
+        assert app.exit_code == code
+    finally:
+        signal.signal(ignored, before)
+
+
+@pytest.mark.parametrize(
+    ("sent", "code"),
+    [(signal.SIGTERM, 143), (signal.SIGHUP, 129)],
+    ids=["SIGTERM", "SIGHUP"],
+)
+@pytest.mark.usefixtures("fake_claude")
+async def test_a_signal_during_a_run_quits_the_view_once_it_stopped(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch, sent: signal.Signals, code: int
+) -> None:
+    monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(lambda: app.state is AppState.RUNNING)
+
+        os.kill(os.getpid(), sent)
+        # Nobody is at the keyboard to dismiss the summary, so the view quits itself.
+        await until(lambda: not app.is_running)
+
+    assert app.outcome == "stopped"
+    assert app.exit_code == code
+
+
 @pytest.mark.parametrize("sighup_before", [signal.SIG_DFL, signal.SIG_IGN])
 async def test_mount_and_unmount_leave_the_signal_handlers_as_they_were(
     work_dir: Path, sighup_before: signal.Handlers
@@ -661,6 +716,36 @@ async def test_a_second_sighup_while_stopping_quits_with_exit_code_129(
         await until(lambda: not app.is_running)
 
     assert app.exit_code == 129
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "code"),
+    [
+        (signal.SIGHUP, signal.SIGTERM, 129),
+        (signal.SIGTERM, signal.SIGHUP, 143),
+    ],
+    ids=["hangup-then-term", "term-then-hangup"],
+)
+async def test_a_second_different_signal_keeps_the_first_ones_exit_code(
+    work_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    first: signal.Signals,
+    second: signal.Signals,
+    code: int,
+) -> None:
+    entered = asyncio.Event()
+    _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await until(entered.is_set)
+
+        os.kill(os.getpid(), first)
+        await until(lambda: app._stopping)
+        os.kill(os.getpid(), second)
+        await until(lambda: not app.is_running)
+
+    assert app.exit_code == code
 
 
 async def test_a_second_stop_button_press_while_stopping_does_nothing(
