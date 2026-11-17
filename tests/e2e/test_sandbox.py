@@ -437,21 +437,27 @@ def test_sandbox_with_another_permission_flag_exits_2_before_the_name_is_checked
     assert run.records == [], "claude must not run"
 
 
-def test_a_later_run_adds_a_deleted_sandbox_and_leaves_an_edited_one(
+def test_a_later_run_adds_a_deleted_sandbox_and_updates_an_edited_one(
     tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:
     folder = sandboxes_folder(home)
     (folder / "tight.json").unlink()
-    edited = '{"sandbox": {"note": "my large"}}\n'
-    (folder / "large.json").write_text(edited, encoding="utf-8")
+    (folder / "large.json").write_text(
+        '{"sandbox": {"note": "my large"}}\n', encoding="utf-8"
+    )
+    mine = folder / "my_large.json"
+    mine.write_text('{"sandbox": {"note": "my own"}}\n', encoding="utf-8")
+    mine_before = mine.read_bytes()
 
     first = run_with_flags(tmp_path, "--yolo")
 
     assert first.res.code == 0, first.res
     assert f"Added {folder / 'tight.json'}\n" in first.res.out
-    assert "large.json" not in first.res.out
+    assert f"Updated {folder / 'large.json'}\n" in first.res.out
+    assert "my_large" not in first.res.out
     assert json.loads((folder / "tight.json").read_text(encoding="utf-8")) == TIGHT_DOC
-    assert (folder / "large.json").read_text(encoding="utf-8") == edited
+    assert json.loads((folder / "large.json").read_text(encoding="utf-8")) == LARGE_DOC
+    assert mine.read_bytes() == mine_before
 
     again = tmp_path / "again"
     again.mkdir()
@@ -459,7 +465,9 @@ def test_a_later_run_adds_a_deleted_sandbox_and_leaves_an_edited_one(
 
     assert second.res.code == 0, second.res
     assert "Added" not in second.res.out
-    assert (folder / "large.json").read_text(encoding="utf-8") == edited
+    assert "Updated" not in second.res.out
+    assert json.loads((folder / "large.json").read_text(encoding="utf-8")) == LARGE_DOC
+    assert mine.read_bytes() == mine_before
 
 
 def test_a_real_run_with_the_sandboxes_folder_gone_adds_both_files(

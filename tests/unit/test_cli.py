@@ -1961,14 +1961,147 @@ def test_a_real_run_adds_a_deleted_shipped_sandbox_and_says_so_once(
     assert capsys.readouterr().out == ""
 
 
-def test_a_real_run_leaves_an_edited_shipped_sandbox_alone(
-    home: Path, folder: Path, sessions: list[list[str]]
+def test_a_real_run_prints_updated_for_an_edited_shipped_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    shipped = large.read_bytes()
+    large.write_text("my edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"Updated {large}\n"
+    assert captured.err == ""
+    assert large.read_bytes() == shipped
+
+
+def test_a_second_real_run_says_nothing_about_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (_sandboxes(home) / "large.json").write_text("my edit\n", encoding="utf-8")
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_a_symlinked_shipped_sandbox_warns_on_stderr_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    shipped = large.read_bytes()
+    linked_target = tmp_path / "versioned-large.json"
+    linked_target.write_text("mine\n", encoding="utf-8")
+    large.unlink()
+    large.symlink_to(linked_target)
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+
+    captured = capsys.readouterr()
+    warning = f"warning: {large} was a symlink; replaced it with the shipped sandbox"
+    assert captured.err == f"{warning}\n"
+    assert captured.out == f"Updated {large}\n"
+    assert not large.is_symlink()
+    assert large.read_bytes() == shipped
+    assert linked_target.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_dry_run_reports_an_edited_sandbox_and_writes_nothing_sandbox_sync(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     large = _sandboxes(home) / "large.json"
     large.write_text("my edit\n", encoding="utf-8")
 
-    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"sandbox: {large} (updated on a real run)\n" in out
+    assert "tight.json" not in out
     assert large.read_text(encoding="utf-8") == "my edit\n"
+
+
+def test_a_dry_run_reports_a_symlinked_sandbox_as_updated_sandbox_sync(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    linked_target = tmp_path / "versioned-large.json"
+    linked_target.write_text("mine\n", encoding="utf-8")
+    large.unlink()
+    large.symlink_to(linked_target)
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    captured = capsys.readouterr()
+    assert f"sandbox: {large} (updated on a real run)\n" in captured.out
+    assert captured.err == ""
+    assert large.is_symlink()
+    assert linked_target.read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_dry_run_reports_a_missing_sandbox_sandbox_sync(
+    home: Path, folder: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tight = _sandboxes(home) / "tight.json"
+    tight.unlink()
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"sandbox: {tight} (added on a real run)\n" in out
+    assert "large.json" not in out
+    assert not tight.exists()
+
+
+def test_validate_syncs_the_sandbox_files_like_a_real_run_sandbox_sync(
+    home: Path,
+    clean_folder: Path,
+    record: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    large = _sandboxes(home) / "large.json"
+    shipped = large.read_bytes()
+    large.write_text("my edit\n", encoding="utf-8")
+
+    assert cli.main(["-d", str(clean_folder), "--validate"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"Updated {large}\n   ID  STATE      NAME\n")
+    # A plain dry run only reports; --validate really wrote the file.
+    assert "sandbox:" not in out
+    assert large.read_bytes() == shipped
+
+
+def test_a_sandbox_under_another_name_is_left_alone_sandbox_sync(
+    home: Path,
+    folder: Path,
+    sessions: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mine = _write_sandbox(home, "my_large", "my own sandbox\n")
+
+    assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
+    assert "my_large" not in capsys.readouterr().out
+
+    assert cli.main(["-d", str(folder), "--yolo"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert mine.read_text(encoding="utf-8") == "my own sandbox\n"
 
 
 def test_a_dry_run_adds_no_sandbox(
@@ -1977,21 +2110,21 @@ def test_a_dry_run_adds_no_sandbox(
     tight = _sandboxes(home) / "tight.json"
     tight.unlink()
 
-    def add_missing() -> list[Path]:
-        pytest.fail("a dry run added a sandbox")
+    def sync_shipped() -> Any:
+        pytest.fail("a dry run synced a sandbox")
 
-    monkeypatch.setattr(cli, "add_missing", add_missing)
+    monkeypatch.setattr(cli, "sync_shipped", sync_shipped)
 
     assert cli.main(["-d", str(folder), "--dry-run", "--yolo"]) == 0
     assert not tight.exists()
 
 
-def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read(
+def test_sandboxes_are_synced_between_the_config_folder_check_and_the_config_read(
     folder: Path, sessions: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
     real_check = cli.config_folder_exists
-    real_add = cli.add_missing
+    real_sync = cli.sync_shipped
     real_dir = cli.resolve_dir
     real_load = cli.load
 
@@ -1999,9 +2132,9 @@ def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read
         calls.append("check")
         return real_check()
 
-    def add() -> list[Path]:
-        calls.append("add")
-        return real_add()
+    def sync() -> Any:
+        calls.append("sync")
+        return real_sync()
 
     def resolve(dir: str) -> str:
         calls.append("dir")
@@ -2012,12 +2145,12 @@ def test_sandboxes_are_added_between_the_config_folder_check_and_the_config_read
         return real_load(**kwargs)
 
     monkeypatch.setattr(cli, "config_folder_exists", check)
-    monkeypatch.setattr(cli, "add_missing", add)
+    monkeypatch.setattr(cli, "sync_shipped", sync)
     monkeypatch.setattr(cli, "resolve_dir", resolve)
     monkeypatch.setattr(cli, "load", load)
 
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
-    assert calls == ["check", "add", "dir", "load"]
+    assert calls == ["check", "sync", "dir", "load"]
 
 
 def test_the_run_folder_notice_comes_after_the_sandboxes_are_added_and_before_the_config_is_read(
@@ -2045,17 +2178,17 @@ def test_the_run_folder_notice_comes_after_the_sandboxes_are_added_and_before_th
     assert capsys.readouterr().out == ""
 
 
-def test_a_machine_that_is_not_set_up_gets_no_sandbox_added_and_no_name_check(
+def test_a_machine_that_is_not_set_up_gets_no_sandbox_synced_and_no_name_check(
     folder: Path,
     fresh_home: Path,
     no_terminal: None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def add_missing() -> list[Path]:
-        pytest.fail("added a sandbox before the config folder exists")
+    def sync_shipped() -> Any:
+        pytest.fail("synced a sandbox before the config folder exists")
 
-    monkeypatch.setattr(cli, "add_missing", add_missing)
+    monkeypatch.setattr(cli, "sync_shipped", sync_shipped)
 
     assert cli.main(["-d", str(folder), "--sandbox", "typo"]) == 3
     assert capsys.readouterr().err.startswith(REFUSED_SETUP)

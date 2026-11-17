@@ -33,11 +33,12 @@ from alr.plain.dryrun import dry_run
 from alr.plain.start import start
 from alr.review import review
 from alr.sandboxes import (
-    add_missing,
     check_can_add_missing,
     find,
     names_text,
+    pending_changes,
     read_text,
+    sync_shipped,
 )
 from alr.skillinstall import SkillChange, pending, sync
 from alr.tasks import parse_timeout
@@ -111,14 +112,16 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             return _handle_missing_config_folder(args.dry_run)
 
         # A plain dry run writes nothing (requirement 9): it refuses what the real
-        # run's add would refuse, and reads a missing shipped file from the package
-        # instead. --validate adds and syncs as a real run does, so the review
-        # reads a sandbox file that exists and uses the skill that came with this alr.
+        # run's add would refuse, reports what the real run would change, and reads
+        # a missing shipped file from the package instead. --validate syncs as a
+        # real run does, so the review reads a sandbox file that is up to date and
+        # uses the skill that came with this alr.
         if args.dry_run and not args.validate:
             check_can_add_missing()
+            _report_pending_sandboxes()
             _report_pending_skills()
         else:
-            _add_missing_sandboxes()
+            _sync_sandboxes()
             _sync_skills()
 
         tasks_file = resolve_dir(args.dir)
@@ -210,10 +213,29 @@ async def _validate(
     await review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
 
 
-def _add_missing_sandboxes() -> None:
-    """Add the shipped sandboxes the folder lacks, saying so for each, so a file that comes back is not a surprise."""
-    for path in add_missing():
-        print(f"Added {path}")
+def _sync_sandboxes() -> None:
+    """Make the shipped sandbox files match the installed alr, saying what changed.
+
+    A file that cannot be added is a refusal, raised by sync_shipped, because a
+    run cannot pick a sandbox that is not there. A file that cannot be updated is
+    only a warning, since the run can still use the file that is there. Warnings
+    go to stderr and the Added and Updated lines to stdout; the two streams are
+    not ordered against each other, as ADR-037 words it.
+    """
+    report = sync_shipped()
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    for change in report.changes:
+        print(f"{change.verb} {change.path}")
+
+
+def _report_pending_sandboxes() -> None:
+    """Say which shipped sandbox files a real run would change; a dry run writes nothing (requirement 9)."""
+    for change in pending_changes():
+        # A symlink at the name is reported as updated, like a differing file.
+        reason = f"{change.verb.lower()} on a real run"
+        print(f"sandbox: {change.path} ({reason})")
 
 
 def _sync_skills() -> None:
