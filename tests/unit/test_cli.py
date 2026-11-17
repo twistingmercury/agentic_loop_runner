@@ -395,6 +395,30 @@ def test_a_signal_sets_the_exit_code(sig: signal.Signals, code: int) -> None:
     assert cli._run(stopped_by(), Stop()) == code
 
 
+def test_a_sighup_stops_a_run_like_a_sigterm() -> None:
+    async def hung_up() -> None:
+        os.kill(os.getpid(), signal.SIGHUP)
+        await asyncio.sleep(60)
+
+    stop = Stop()
+
+    assert cli._run(hung_up(), stop) == 129
+    assert stop.signum == signal.SIGHUP
+
+
+def test_an_ignored_sighup_is_left_ignored() -> None:
+    async def hung_up_and_went_on() -> None:
+        os.kill(os.getpid(), signal.SIGHUP)
+        await asyncio.sleep(0)
+
+    before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        assert cli._run(hung_up_and_went_on(), Stop()) == 0
+        assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGHUP, before)
+
+
 def test_only_the_first_signal_sets_the_exit_code() -> None:
     async def stopped_twice() -> None:
         os.kill(os.getpid(), signal.SIGTERM)
@@ -2894,6 +2918,23 @@ def test_validate_puts_the_signal_handlers_back(
     monkeypatch.setattr("alr.cli.review", stopped)
 
     assert cli.main(["-d", str(clean_folder), "--validate"]) == 143
+    assert _stop_signal_handlers() == before
+
+
+def test_a_plain_run_puts_the_signal_handlers_back() -> None:
+    before = _stop_signal_handlers()
+
+    async def finished() -> None:
+        return None
+
+    async def stopped() -> None:
+        signal.raise_signal(signal.SIGHUP)
+        await asyncio.sleep(60)
+
+    assert cli._run(finished(), Stop()) == 0
+    assert _stop_signal_handlers() == before
+
+    assert cli._run(stopped(), Stop()) == 129
     assert _stop_signal_handlers() == before
 
 

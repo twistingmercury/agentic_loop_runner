@@ -50,10 +50,11 @@ _INTERRUPTED = "error: interrupted"
 # The config's sandbox default that is not a sandbox name (see alr.config).
 _YOLO = "yolo"
 _YES_ANSWERS = ("y", "yes")
-_RUN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
-# A closed terminal or a dropped ssh session sends SIGHUP. A real run leaves it
-# to #63; --validate handles it so the review's session does not outlive alr.
-_VALIDATE_SIGNALS = (*_RUN_SIGNALS, signal.SIGHUP)
+# A closed terminal or a dropped ssh session sends SIGHUP. A task session has its
+# own process group, so the hangup never reaches it; alr must stop it, or it
+# outlives alr. A SIGHUP that is already ignored at start (as nohup leaves it) is
+# the owner's way to keep a run alive after the terminal closes, so it stays ignored.
+_RUN_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 _REVIEW_SKIPPED = "review skipped: the dry run found problems; fix them and run again"
 
 
@@ -167,7 +168,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             validating = _validate(
                 checks, tasks_file, answer.sandbox_file, action_timeout, stop
             )
-            return _run(validating, stop, signals=_VALIDATE_SIGNALS)
+            return _run(validating, stop)
 
         return _run(checks, stop)
 
@@ -617,17 +618,13 @@ def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None
     parser.print_usage(sys.stderr)
 
 
-def _run(
-    coro: Coroutine[Any, Any, object],
-    stop: Stop,
-    signals: tuple[signal.Signals, ...] = _RUN_SIGNALS,
-) -> int:
-    """Run coro to the end; any of signals cancels it, which stops the run.
+def _run(coro: Coroutine[Any, Any, object], stop: Stop) -> int:
+    """Run coro to the end; a stop signal cancels it, which stops the run.
 
     A stop exits with the code of the first signal, which _with_signals records in stop.
     """
     try:
-        asyncio.run(_with_signals(coro, stop, signals))
+        asyncio.run(_with_signals(coro, stop))
     except asyncio.CancelledError:
         # The stop landed while no task was running, so there is no task to name.
         _print_to_stderr(_INTERRUPTED)
@@ -659,21 +656,31 @@ def _print_to_stderr(line: str) -> None:
         return
 
 
-async def _with_signals(
-    coro: Coroutine[Any, Any, object],
-    stop: Stop,
-    signals: tuple[signal.Signals, ...],
-) -> None:
+async def _with_signals(coro: Coroutine[Any, Any, object], stop: Stop) -> None:
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     if task is None:
         raise RuntimeError("no running task")
 
     handler = _stop_once(task, stop)
-    for sig in signals:
+    for sig in _handled_signals(_RUN_SIGNALS):
         loop.add_signal_handler(sig, handler, sig)
 
     await coro
+
+
+def _handled_signals(
+    signals: tuple[signal.Signals, ...],
+) -> tuple[signal.Signals, ...]:
+    """Return signals without a SIGHUP that is ignored now, so it stays ignored.
+
+    Only SIGHUP gets this rule; SIGINT and SIGTERM are always handled.
+    """
+    hangup_ignored = signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
+    if not hangup_ignored:
+        return signals
+
+    return tuple(sig for sig in signals if sig != signal.SIGHUP)
 
 
 def _stop_once(task: asyncio.Task[None], stop: Stop) -> Callable[[int], None]:
