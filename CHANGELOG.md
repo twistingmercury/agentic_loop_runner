@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cargo, .NET, Maven, and Gradle, and reach `api.nuget.org` and
   `repo.maven.apache.org` (issue #49, ADR-037). Existing users get it through
   the sync above.
+- On Claude Code 2.1.326 a sandboxed session was held for approval on every
+  command that is not read-only, such as `uv run pytest` or `make test`, and a
+  run cannot answer a prompt, so tasks failed (issue #68, ADR-038). alr now
+  forces `sandbox.autoAllowBashIfSandboxed` on, a fourth forced key beside
+  `enabled`, `allowUnsandboxedCommands`, and `failIfUnavailable`; a sandbox
+  file that sets it to `false` is overridden.
 
 ## [0.5.2] - 2026-11-12
 
