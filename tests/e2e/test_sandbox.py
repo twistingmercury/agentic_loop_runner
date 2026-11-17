@@ -150,7 +150,7 @@ def run_with_flags(
 
 def with_auto_allow(doc: dict[str, Any]) -> dict[str, Any]:
     """The shipped file as claude gets it: alr adds the fourth forced key, which the files do not carry."""
-    return {"sandbox": {**doc["sandbox"], "autoAllowBashIfSandboxed": True}}
+    return {**doc, "sandbox": {**doc["sandbox"], "autoAllowBashIfSandboxed": True}}
 
 
 def assert_sandboxed(argv: list[str]) -> None:
