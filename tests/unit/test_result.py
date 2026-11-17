@@ -1,6 +1,6 @@
 import pytest
 
-from alr.engine.result import last_result_line, outcome, parse_result
+from alr.engine.result import RESULT_REQUEST, last_result_line, outcome, parse_result
 from alr.tasks import COMPLETED, FAILED
 
 EXIT_ERROR = "exit status 1"
@@ -123,7 +123,7 @@ def test_last_result_line(output: str, want: str) -> None:
             None,
             "",
             FAILED,
-            "no valid result line in session output",
+            "session exited 0 but wrote no result line, even after one follow-up",
             id="zero exit, missing result line",
         ),
         pytest.param(
@@ -160,3 +160,15 @@ def test_outcome(
     run_error: str | None, last_line: str, want_state: str, want_error: str
 ) -> None:
     assert outcome(run_error, last_line) == (want_state, want_error)
+
+
+def test_result_request_is_the_fixed_prompt() -> None:
+    want = (
+        "Your last message did not end with the result line. "
+        "Do not run any tools and do not change anything. "
+        'Reply with only the result line: {"state": "completed", "error": ""} '
+        'if the task is done, or {"state": "failed", "error": "<why>"} '
+        "if it is not."
+    )
+
+    assert RESULT_REQUEST == want

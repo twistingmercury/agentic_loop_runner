@@ -26,7 +26,7 @@ ONE_TASK_YAML = (
     prompt: Do the first thing.
 """
 )
-NO_RESULT_LINE = "no valid result line in session output"
+NO_RESULT_LINE = "session exited 0 but wrote no result line, even after one follow-up"
 
 
 def run_one_task(tmp_path: Path, env: dict[str, str]) -> tuple[Result, Path]:
