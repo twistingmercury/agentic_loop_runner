@@ -12,6 +12,7 @@ from alr.record.events import (
     Event,
     ActionFinished,
     ActionStarted,
+    ResultRetried,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -55,6 +56,9 @@ class StreamFrontEnd:
 
     def session_finished(self, task: Task, seconds: float) -> None:
         self._report(SessionFinished(task, seconds))
+
+    def result_retried(self, task: Task, session_id: str, recovered: bool) -> None:
+        self._report(ResultRetried(task, session_id, recovered))
 
     async def run_action(
         self, task: Task, action: Action, env: Mapping[str, str]

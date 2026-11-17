@@ -23,6 +23,13 @@ class SessionFinished:
 
 
 @dataclass(frozen=True)
+class ResultRetried:
+    task: Task
+    session_id: str
+    recovered: bool  # the follow-up gave a valid result line, whatever its state
+
+
+@dataclass(frozen=True)
 class ActionStarted:
     task: Task
     action: Action
@@ -57,6 +64,7 @@ Event = (
     TaskStarted
     | Activity
     | SessionFinished
+    | ResultRetried
     | ActionStarted
     | ActionFinished
     | TaskFinished

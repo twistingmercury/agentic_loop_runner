@@ -19,6 +19,7 @@ from alr.record.events import (
     Activity,
     Event,
     ActionFinished,
+    ResultRetried,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -241,6 +242,8 @@ class RunLog:
                 self._activity(event)
             case SessionFinished():
                 self._step_finished("session_finished", event.task, event.seconds)
+            case ResultRetried():
+                self._result_retried(event)
             case ActionFinished():
                 self._action_finished(event)
             case TaskFinished():
@@ -323,6 +326,16 @@ class RunLog:
             _write(file, detail_path, text)
         finally:
             _close(file, detail_path)
+
+    def _result_retried(self, event: ResultRetried) -> None:
+        self._write_ledger(
+            "result_retry",
+            {
+                "task": event.task.id,
+                "session_id": event.session_id,
+                "recovered": event.recovered,
+            },
+        )
 
     def _step_finished(self, event: str, task: Task, seconds: float) -> None:
         fields: dict[str, Any] = {"task": task.id, "state": task.state}

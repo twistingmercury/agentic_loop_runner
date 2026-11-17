@@ -26,6 +26,7 @@ from alr.record.events import (
     Event,
     ActionFinished,
     ActionStarted,
+    ResultRetried,
     RunDone,
     SessionFinished,
     TaskFinished,
@@ -266,6 +267,15 @@ async def test_session_finished_carries_a_failed_outcome(
     [session] = _of(events, SessionFinished)
     assert session.task.state == FAILED
     assert session.task.error == "boom"
+
+
+def test_stream_front_end_reports_a_result_retry() -> None:
+    events: list[Event] = []
+    task = Task(id=1, name="First", prompt="p1")
+
+    StreamFrontEnd(events.append).result_retried(task, "abc", True)
+
+    assert events == [ResultRetried(task, "abc", True)]
 
 
 async def test_action_output_arrives_as_activity(tmp_path: Path) -> None:

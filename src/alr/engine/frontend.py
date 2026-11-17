@@ -42,6 +42,10 @@ class FrontEnd(Protocol):
         """Note the session outcome and duration."""
         ...
 
+    def result_retried(self, task: Task, session_id: str, recovered: bool) -> None:
+        """Note that a session dropped its result line and was asked once for it."""
+        ...
+
     async def run_action(
         self, task: Task, action: Action, env: Mapping[str, str]
     ) -> str | None:
