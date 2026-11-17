@@ -68,6 +68,20 @@ LARGE_DOC = {
     "sandbox": {
         **TIGHT_DOC["sandbox"],
         "excludedCommands": ["docker *", "./build/build.sh", "./build/build.sh *"],
+        "filesystem": {
+            **TIGHT_DOC["sandbox"]["filesystem"],
+            "allowWrite": [
+                "~/.cache/uv",
+                "~/.cache/pip",
+                "~/.npm",
+                "~/go/pkg",
+                "~/.cache/go-build",
+                "~/.cargo/registry",
+                "~/.nuget/packages",
+                "~/.m2/repository",
+                "~/.gradle",
+            ],
+        },
         "network": {
             "allowedDomains": [
                 "github.com",
@@ -80,6 +94,8 @@ LARGE_DOC = {
                 "proxy.golang.org",
                 "sum.golang.org",
                 "storage.googleapis.com",
+                "api.nuget.org",
+                "repo.maven.apache.org",
             ]
         },
     },
