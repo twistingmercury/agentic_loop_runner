@@ -287,41 +287,12 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
     fields = _fields(f"tasks[{i}]", el)
     task_id = _task_id(i, fields)
     where = _where(i, task_id)
-    name = _text(where, fields, "name", required=True)
-
-    # The name becomes a one-line log field; splitlines
-    # knows every Unicode line break, and drops a trailing one, hence the compare.
-    if name.splitlines() != [name]:
-        raise TaskFileError(f"{where}: name: must be a single line")
-
-    if _CONTROL.search(name):
-        raise TaskFileError(f"{where}: name: must not contain control characters")
-
+    name = _task_name(where, fields)
     prompt = _text(where, fields, "prompt", required=True)
-    state = _text(where, fields, "state")
-    if state != "" and state not in _STATES:
-        raise TaskFileError(
-            f"{where}: state: must be pending, completed, or failed, got {quote(state)}"
-        )
-
+    state = _task_state(where, fields)
     error = _text(where, fields, "error")
-
-    # Checked before the unknown-key refusal so an old file is told where the
-    # key moved, not just that it is unknown.
-    if "gates" in fields:
-        raise TaskFileError(
-            f"{where}: gates: gates are set once for the whole file, "
-            "as shared.after_task; see the README (Migrating from commit modes and gates)"
-        )
-
-    # The same plausible mistake, so the same early check and its own message.
-    for key in ("after_task", "after_run"):
-        if key in fields:
-            raise TaskFileError(
-                f"{where}: {key}: not a task key; a task's own actions go under "
-                f"actions, and {key} goes under shared"
-            )
-
+    _refuse_task_gates(where, fields)
+    _refuse_shared_action_keys(where, fields)
     actions = _task_actions(where, fields)
     _check_task_keys(where, fields)
     return Task(
@@ -332,6 +303,59 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
         error=error,
         actions=actions,
     )
+
+
+def _task_name(where: str, fields: dict[str, yaml.Node]) -> str:
+    """Read the name; it must be one line with no control characters."""
+    name = _text(where, fields, "name", required=True)
+
+    # The name becomes a one-line log field; splitlines
+    # knows every Unicode line break, and drops a trailing one, hence the compare.
+    if name.splitlines() != [name]:
+        raise TaskFileError(f"{where}: name: must be a single line")
+
+    if _CONTROL.search(name):
+        raise TaskFileError(f"{where}: name: must not contain control characters")
+
+    return name
+
+
+def _task_state(where: str, fields: dict[str, yaml.Node]) -> str:
+    """Read the state; empty (absent) or one of the known states."""
+    state = _text(where, fields, "state")
+    if state != "" and state not in _STATES:
+        raise TaskFileError(
+            f"{where}: state: must be pending, completed, or failed, got {quote(state)}"
+        )
+
+    return state
+
+
+def _refuse_task_gates(where: str, fields: dict[str, yaml.Node]) -> None:
+    """Refuse a per-task `gates` key, telling the author where it moved.
+
+    Checked before the unknown-key refusal so an old file is told where the
+    key moved, not just that it is unknown.
+    """
+    if "gates" in fields:
+        raise TaskFileError(
+            f"{where}: gates: gates are set once for the whole file, "
+            "as shared.after_task; see the README (Migrating from commit modes and gates)"
+        )
+
+
+def _refuse_shared_action_keys(where: str, fields: dict[str, yaml.Node]) -> None:
+    """Refuse `after_task` and `after_run` on a task; they belong under shared.
+
+    The same plausible mistake as `gates`, so the same early check and its own
+    message.
+    """
+    for key in ("after_task", "after_run"):
+        if key in fields:
+            raise TaskFileError(
+                f"{where}: {key}: not a task key; a task's own actions go under "
+                f"actions, and {key} goes under shared"
+            )
 
 
 def _task_actions(where: str, fields: dict[str, yaml.Node]) -> list[Action]:
