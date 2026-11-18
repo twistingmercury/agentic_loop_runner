@@ -135,9 +135,11 @@ def _present(path: Path) -> bool:
 
 
 def _refused_unwritable(path: Path, code: int) -> RefusedError:
-    return RefusedError(
-        LOG_UNWRITABLE, str(_create_error(path, OSError(code, os.strerror(code))))
-    )
+    os_error = OSError(code, os.strerror(code))
+    create_error = _create_error(path, os_error)
+    message = str(create_error)
+
+    return RefusedError(LOG_UNWRITABLE, message)
 
 
 def _create_error(path: Path, exc: OSError) -> RunLogError:
