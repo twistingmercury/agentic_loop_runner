@@ -114,7 +114,7 @@ class AlrApp(App[None]):
         self._stopping = False
         self._quitting = False
         self._stop = Stop()
-        """The one signal object: the SIGTERM handler fills it, the engine and the exit code read it."""
+        """The one signal object: the SIGTERM and SIGHUP handler fills it, the engine and the exit code read it."""
         self._worker: Worker[None] | None = None
         self._started = 0.0
         self._task_list: TaskList | None = None
@@ -122,6 +122,8 @@ class AlrApp(App[None]):
         self._clock = clock
         self._progress: Progress | None = None
         self._ticker: Timer | None = None
+        self._stop_signals: list[signal.Signals] = []
+        """The signals on_mount registered, so on_unmount removes exactly those."""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -157,8 +159,7 @@ class AlrApp(App[None]):
         # After the first refresh, so the table has its columns before it gets rows.
         self.call_after_refresh(self._show_tasks)
         self._refresh()
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
+        self._register_stop_signals()
         self.run_worker(self.launch_sequence(), exit_on_error=False)
 
     def _read_tasks(self) -> None:
@@ -315,7 +316,7 @@ class AlrApp(App[None]):
     def on_unmount(self) -> None:
         # The status line goes with the screen, so no tick may come after it.
         self._stop_ticking()
-        asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
+        self._remove_stop_signals()
 
     def _lock_dropdowns(self) -> None:
         """A run copies the settings at Start, so later changes would only mislead."""
@@ -418,13 +419,37 @@ class AlrApp(App[None]):
         self._refresh()
         self._worker = self.run_worker(self._run(), name="run", exit_on_error=False)
 
-    def _on_sigterm(self) -> None:
-        self._stop.signum = signal.SIGTERM
-        # A finished run keeps its own code; with no run going SIGTERM is the whole outcome.
+    def _register_stop_signals(self) -> None:
+        loop = asyncio.get_running_loop()
+        # SIGHUP stops the view even when it was ignored at start. A view cannot go on
+        # without its terminal, and nohup never reaches it: it redirects the input and
+        # output, so alr opens no view.
+        self._stop_signals = [signal.SIGTERM, signal.SIGHUP]
+        for stop_signal in self._stop_signals:
+            loop.add_signal_handler(stop_signal, self._on_stop_signal, stop_signal)
+
+    def _remove_stop_signals(self) -> None:
+        loop = asyncio.get_running_loop()
+        for stop_signal in self._stop_signals:
+            loop.remove_signal_handler(stop_signal)
+
+        self._stop_signals = []
+
+    def _on_stop_signal(self, signum: int) -> None:
+        # The first stop decides the exit code, as in plain mode; a later signal
+        # only presses Stop again.
+        if not self._stopping:
+            self._stop.signum = signum
+
+        # A finished run keeps its own code; with no run going the signal is the whole outcome.
         if self.state in (AppState.SETUP, AppState.READY):
             self.exit_code = self._stop.exit_code()
 
         self.action_stop()
+        # Nobody is at the keyboard to dismiss the summary a stop ends on (a closed
+        # terminal sends SIGHUP), so quit once the stop is done, as a second Stop does.
+        if self.state is AppState.RUNNING:
+            self._quit_after_stop()
 
     def action_stop(self) -> None:
         # A second Stop quits whatever the run is doing, so nobody is ever trapped.

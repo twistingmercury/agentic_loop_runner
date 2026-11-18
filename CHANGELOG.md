@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A SIGHUP, from a closed terminal or a dropped ssh session, now stops a run
+  the way SIGTERM does and exits 129, so the hangup no longer leaves a task
+  session running (issue #63, ADR-040). This covers a plain run, a dry run,
+  `--validate`, and the full-screen view.
+- A plain run that ignores SIGHUP, as a script that traps it does, no longer
+  ends with a traceback and exit 120 when its terminal closes: it goes on.
+- In the full-screen view a second signal of another kind no longer changes the
+  exit code: the first stop decides.
+
+### Changed
+
+- The full-screen view quits itself after a SIGTERM or SIGHUP stops a run, as a
+  second Stop press does, instead of leaving the summary open; Stop and Ctrl-C
+  still leave it open.
+- A SIGHUP that was ignored at start (as `nohup` leaves it) is left ignored in
+  plain mode, the dry run, and `--validate`, which used to stop on it anyway.
+  The view stops on SIGHUP either way.
+
 ## [0.5.4] - 2026-11-17
 
 ### Added
