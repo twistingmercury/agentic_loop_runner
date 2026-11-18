@@ -149,50 +149,6 @@ async def run(task_list: TaskList, options: RunOptions, front_end: FrontEnd) -> 
         )
 
 
-def _close_record(
-    front_end: FrontEnd,
-    ended: BaseException | None,
-    error: str | None,
-    seconds: float,
-    result: RunResult,
-    exit_code: int,
-) -> None:
-    """Write the run's end; a log that cannot take it must not hide the error that ended the run."""
-    try:
-        front_end.run_done(error, seconds, result, exit_code)
-    except RunLogError as exc:
-        if ended is None:
-            raise
-
-        ended.add_note(f"the run log could not record the end of the run: {exc}")
-
-
-def _ending(exc: BaseException, stop: Stop) -> tuple[RunResult, int]:
-    """Name how the run ended and the code alr will exit with."""
-    if isinstance(exc, RunCancelledError | asyncio.CancelledError | KeyboardInterrupt):
-        return RunResult.STOPPED, stop.exit_code()
-
-    if isinstance(exc, AfterRunFailedError):
-        return RunResult.RUN_FAILED, exc.exit_code
-
-    if isinstance(exc, AlrError):
-        return RunResult.FAILED, exc.exit_code
-
-    return RunResult.FAILED, 1
-
-
-def _error_text(exc: BaseException) -> str:
-    if isinstance(exc, RunError):
-        return str(exc)
-
-    # A stop is not a crash, so it must not read like one in the record.
-    if isinstance(exc, asyncio.CancelledError | KeyboardInterrupt):
-        return _STOPPED
-
-    name = type(exc).__name__
-    return f"{name}: {exc}" if str(exc) else name
-
-
 async def _run_loop(
     task_list: TaskList, options: RunOptions, front_end: FrontEnd
 ) -> None:
@@ -204,29 +160,6 @@ async def _run_loop(
         await _run_and_save(task, task_list, options, front_end)
 
     await _run_after_run(task_list, options, front_end)
-
-
-async def _run_after_run(
-    task_list: TaskList, options: RunOptions, front_end: FrontEnd
-) -> None:
-    """Run the file's after_run actions once; a failure ends the run with its own exit code.
-
-    The tasks are already saved completed, so nothing here changes them. It
-    runs even when every task was already completed, so a rerun after a
-    failure here tries again.
-    """
-    actions = task_list.after_run_list()
-    if not actions:
-        return
-
-    env = action_env(None, options.tasks_file, options.log_dir)
-    state, error = await run_actions(
-        RUN_SCOPE, actions, options.action_timeout, front_end, env
-    )
-    if state == COMPLETED:
-        return
-
-    raise AfterRunFailedError(error)
 
 
 async def _run_and_save(
@@ -251,54 +184,6 @@ async def _run_and_save(
         return
 
     raise RunError(failure)
-
-
-def new_session_id() -> str:
-    """A fresh id for one Claude session, so a later call can resume it."""
-    return str(uuid.uuid4())
-
-
-def _session_argv(
-    front_end: FrontEnd, options: RunOptions, id_flag: str, session_id: str
-) -> list[str]:
-    return [
-        "claude",
-        "--print",
-        *front_end.session_flags,
-        *options.session_args,
-        id_flag,
-        session_id,
-    ]
-
-
-async def _session_result(
-    task: Task, stdin_text: str, options: RunOptions, front_end: FrontEnd
-) -> SessionResult:
-    """Run the task's session; when it dropped its result line, ask once for only that line."""
-    session_id = new_session_id()
-    argv = _session_argv(front_end, options, "--session-id", session_id)
-    result = await front_end.run_session(replace(task), argv, stdin_text)
-    if result.error is not None:
-        return result
-
-    if parse_result(last_result_line(result.text)) is not None:
-        return result
-
-    # The same id and flags resume the same conversation under the same sandbox.
-    resume_argv = _session_argv(front_end, options, "--resume", session_id)
-    follow_up = await front_end.run_session(
-        replace(task), resume_argv, f"{RESULT_REQUEST}\n"
-    )
-    recovered = (
-        follow_up.error is None
-        and parse_result(last_result_line(follow_up.text)) is not None
-    )
-    front_end.result_retried(replace(task), session_id, recovered)
-    # A follow-up with an error or no valid line is no better than the session's own.
-    if not recovered:
-        return result
-
-    return follow_up
 
 
 async def _run_task(
@@ -337,6 +222,54 @@ async def _run_task(
     return _Outcome(state, error)
 
 
+async def _session_result(
+    task: Task, stdin_text: str, options: RunOptions, front_end: FrontEnd
+) -> SessionResult:
+    """Run the task's session; when it dropped its result line, ask once for only that line."""
+    session_id = new_session_id()
+    argv = _session_argv(front_end, options, "--session-id", session_id)
+    result = await front_end.run_session(replace(task), argv, stdin_text)
+    if result.error is not None:
+        return result
+
+    if parse_result(last_result_line(result.text)) is not None:
+        return result
+
+    # The same id and flags resume the same conversation under the same sandbox.
+    resume_argv = _session_argv(front_end, options, "--resume", session_id)
+    follow_up = await front_end.run_session(
+        replace(task), resume_argv, f"{RESULT_REQUEST}\n"
+    )
+    recovered = (
+        follow_up.error is None
+        and parse_result(last_result_line(follow_up.text)) is not None
+    )
+    front_end.result_retried(replace(task), session_id, recovered)
+    # A follow-up with an error or no valid line is no better than the session's own.
+    if not recovered:
+        return result
+
+    return follow_up
+
+
+def _session_argv(
+    front_end: FrontEnd, options: RunOptions, id_flag: str, session_id: str
+) -> list[str]:
+    return [
+        "claude",
+        "--print",
+        *front_end.session_flags,
+        *options.session_args,
+        id_flag,
+        session_id,
+    ]
+
+
+def new_session_id() -> str:
+    """A fresh id for one Claude session, so a later call can resume it."""
+    return str(uuid.uuid4())
+
+
 def _save(
     task: Task,
     task_list: TaskList,
@@ -354,3 +287,70 @@ def _save(
         # Both, each on its own line: the failure alone would hide that the
         # file still says pending, the save error alone why the run stopped.
         raise RunError(f"{failure}\n{exc}") from exc
+
+
+async def _run_after_run(
+    task_list: TaskList, options: RunOptions, front_end: FrontEnd
+) -> None:
+    """Run the file's after_run actions once; a failure ends the run with its own exit code.
+
+    The tasks are already saved completed, so nothing here changes them. It
+    runs even when every task was already completed, so a rerun after a
+    failure here tries again.
+    """
+    actions = task_list.after_run_list()
+    if not actions:
+        return
+
+    env = action_env(None, options.tasks_file, options.log_dir)
+    state, error = await run_actions(
+        RUN_SCOPE, actions, options.action_timeout, front_end, env
+    )
+    if state == COMPLETED:
+        return
+
+    raise AfterRunFailedError(error)
+
+
+def _error_text(exc: BaseException) -> str:
+    if isinstance(exc, RunError):
+        return str(exc)
+
+    # A stop is not a crash, so it must not read like one in the record.
+    if isinstance(exc, asyncio.CancelledError | KeyboardInterrupt):
+        return _STOPPED
+
+    name = type(exc).__name__
+    return f"{name}: {exc}" if str(exc) else name
+
+
+def _ending(exc: BaseException, stop: Stop) -> tuple[RunResult, int]:
+    """Name how the run ended and the code alr will exit with."""
+    if isinstance(exc, RunCancelledError | asyncio.CancelledError | KeyboardInterrupt):
+        return RunResult.STOPPED, stop.exit_code()
+
+    if isinstance(exc, AfterRunFailedError):
+        return RunResult.RUN_FAILED, exc.exit_code
+
+    if isinstance(exc, AlrError):
+        return RunResult.FAILED, exc.exit_code
+
+    return RunResult.FAILED, 1
+
+
+def _close_record(
+    front_end: FrontEnd,
+    ended: BaseException | None,
+    error: str | None,
+    seconds: float,
+    result: RunResult,
+    exit_code: int,
+) -> None:
+    """Write the run's end; a log that cannot take it must not hide the error that ended the run."""
+    try:
+        front_end.run_done(error, seconds, result, exit_code)
+    except RunLogError as exc:
+        if ended is None:
+            raise
+
+        ended.add_note(f"the run log could not record the end of the run: {exc}")
