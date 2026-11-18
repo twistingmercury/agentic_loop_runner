@@ -437,6 +437,72 @@ def test_parse_tasks_errors(name: str, text: str, want: str) -> None:
         assert "(id" not in str(exc.value)
 
 
+# Each task has two mistakes, written with the later one first in the file: the
+# error reported is the one checked earlier, whatever the key order.
+FIRST_ERROR_CASES = [
+    (
+        "name before prompt",
+        "{prompt: '', name: ''}",
+        "name: must not be empty or whitespace",
+    ),
+    (
+        "name line break before state",
+        '{state: done, name: "a\\nb", prompt: p}',
+        "name: must be a single line",
+    ),
+    (
+        "name control character before state",
+        '{state: done, name: "a\\x01b", prompt: p}',
+        "name: must not contain control characters",
+    ),
+    (
+        "prompt before state",
+        "{state: done, name: a, prompt: ''}",
+        "prompt: must not be empty or whitespace",
+    ),
+    (
+        "state before error",
+        "{error: [x], state: done, name: a, prompt: p}",
+        "state: must be pending, completed, or failed",
+    ),
+    (
+        "error before gates",
+        "{gates: [], error: [x], name: a, prompt: p}",
+        "error: must be a string",
+    ),
+    (
+        "gates before after_task",
+        "{after_task: [], gates: [], name: a, prompt: p}",
+        "gates: gates are set once for the whole file",
+    ),
+    (
+        "after_task before actions",
+        "{actions: [{action: ''}], after_task: [], name: a, prompt: p}",
+        "after_task: not a task key",
+    ),
+    (
+        "actions before unknown key",
+        "{tone: dry, actions: [{action: ''}], name: a, prompt: p}",
+        "actions[0]: action",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("task", "want"),
+    [pytest.param(task, want, id=name) for name, task, want in FIRST_ERROR_CASES],
+)
+def test_parse_tasks_reports_the_first_check_that_fails(task: str, want: str) -> None:
+    text = f"shared:\n  prompt: shared\ntasks:\n  - {task}\n".replace(
+        "{", "{id: 1, ", 1
+    )
+
+    with pytest.raises(TaskFileError) as exc:
+        tasks.parse_tasks(text)
+
+    assert want in str(exc.value)
+
+
 def test_parse_tasks_accepts_explicit_core_tags() -> None:
     got = tasks.parse_tasks(
         "shared:\n  prompt: shared\ntasks:\n  - {id: !!int 1, name: !!str 42, prompt: p}\n"

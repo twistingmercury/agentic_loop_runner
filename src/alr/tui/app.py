@@ -193,6 +193,7 @@ class AlrApp(App[None]):
         # The launch worker may not have read the file yet; whichever runs first reads it.
         if self._task_list is None:
             self._read_tasks()
+
         # The file may hold failed tasks, which hold Start back.
         self._refresh()
 

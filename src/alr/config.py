@@ -118,12 +118,17 @@ def _subfolders(names: list[str]) -> list[PurePosixPath]:
     """List the folders the shipped files sit in, outermost first, each once."""
     subfolders: dict[PurePosixPath, None] = {}
     for name in names:
-        for parent in reversed(PurePosixPath(name).parents):
-            # The last parent is "." (the config folder itself), which has no parts.
-            if parent.parts:
-                subfolders[parent] = None
+        for parent in _parent_folders(name):
+            subfolders[parent] = None
 
     return list(subfolders)
+
+
+def _parent_folders(name: str) -> list[PurePosixPath]:
+    """List the folders above one shipped file name, outermost first."""
+    # The last parent is "." (the config folder itself), which has no parts.
+    parents = reversed(PurePosixPath(name).parents)
+    return [parent for parent in parents if parent.parts]
 
 
 def load(home: Path | None = None, dry_run: bool = False) -> Config:
@@ -293,8 +298,15 @@ def _rename_unless_taken(staging: Path, folder: Path) -> None:
     try:
         staging.rename(folder)
     except OSError as error:
-        if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
-            raise
+        _raise_unless_taken(error)
+
+
+def _raise_unless_taken(error: OSError) -> None:
+    """Raise the error unless it says the target folder is already there."""
+    if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+        return
+
+    raise error
 
 
 def _refuse(path: Path, problem: str) -> RefusedError:
@@ -408,19 +420,13 @@ def _refuse_removed_keys(
     A custom sandbox file now lives in the sandboxes folder and is picked by
     name, so a config written for the old way says to move the file.
     """
-    removed = []
+    advice = f"no longer supported; move the file into {folder / _SANDBOXES} and use its name as default"
+
     if _SANDBOX_FILE in permissiveness:
-        removed.append(_SANDBOX_FILE)
+        raise _refuse(path, f"{_SANDBOX_FILE}: {advice}")
 
     if permissiveness.get("default") == _CUSTOM:
-        removed.append(_CUSTOM)
-
-    for key in removed:
-        raise _refuse(
-            path,
-            f"{key}: no longer supported; move the file into "
-            f"{folder / _SANDBOXES} and use its name as default",
-        )
+        raise _refuse(path, f"{_CUSTOM}: {advice}")
 
 
 def _refuse_unknown_sandbox(name: Any, folder: Path, path: Path, dry_run: bool) -> None:

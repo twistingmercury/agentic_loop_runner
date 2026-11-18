@@ -166,6 +166,41 @@ async def _finish_drain(
         _close_transport(process)
 
 
+async def _stop_group(process: asyncio.subprocess.Process) -> None:
+    signal_group(process.pid, signal.SIGKILL)
+    # Not process.wait(): on 3.12 it also waits for the pipes to close, and a
+    # descendant that left the group still holds them.
+    await _wait_for_exit(process, None)
+    _close_transport(process)
+
+
+class _HasTransport(Protocol):
+    _transport: asyncio.BaseTransport
+
+
+def _close_transport(process: asyncio.subprocess.Process) -> None:
+    """Close our ends of the process's pipes, which will not close by themselves.
+
+    Whatever still holds a pipe left the group or outlived the process. Closing
+    them here keeps asyncio from doing it at garbage collection, after the loop
+    is gone, and printing a traceback.
+    """
+    # asyncio publishes no way to reach the pipes' transport, so the private
+    # attribute is read through a type that says so.
+    cast(_HasTransport, process)._transport.close()
+
+
+def signal_group(pgid: int, sig: int) -> bool:
+    """Send sig to the group; False when the group is already gone."""
+    try:
+        os.killpg(pgid, sig)
+    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
+    except (ProcessLookupError, PermissionError):
+        return False
+
+    return True
+
+
 def stop_deadline() -> float:
     """Return how long to wait for a stop of the group: it is killed at once.
 
@@ -217,21 +252,27 @@ async def read_lines(
     pieces: list[bytes] = []
     try:
         while chunk := await stream.read(_READ_SIZE):
-            *ends, rest = chunk.split(b"\n")
-            for end in ends:
-                line = b"".join([*pieces, end, b"\n"])
-                # Cleared before the call, so a callback that raises does not
-                # leave the finally below to hand the same bytes over again.
-                pieces.clear()
-                on_line(line)
-
-            if rest:
-                pieces.append(rest)
+            _take_chunk(chunk, pieces, on_line)
     finally:
         if pieces:
             tail = b"".join(pieces)
             pieces.clear()
             on_line(tail)
+
+
+def _take_chunk(
+    chunk: bytes, pieces: list[bytes], on_line: Callable[[bytes], None]
+) -> None:
+    *ends, rest = chunk.split(b"\n")
+    for end in ends:
+        line = b"".join([*pieces, end, b"\n"])
+        # Cleared before the call, so a callback that raises does not
+        # leave the finally in read_lines to hand the same bytes over again.
+        pieces.clear()
+        on_line(line)
+
+    if rest:
+        pieces.append(rest)
 
 
 async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:
@@ -244,38 +285,3 @@ async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:
         pass
     finally:
         writer.close()
-
-
-async def _stop_group(process: asyncio.subprocess.Process) -> None:
-    signal_group(process.pid, signal.SIGKILL)
-    # Not process.wait(): on 3.12 it also waits for the pipes to close, and a
-    # descendant that left the group still holds them.
-    await _wait_for_exit(process, None)
-    _close_transport(process)
-
-
-class _HasTransport(Protocol):
-    _transport: asyncio.BaseTransport
-
-
-def _close_transport(process: asyncio.subprocess.Process) -> None:
-    """Close our ends of the process's pipes, which will not close by themselves.
-
-    Whatever still holds a pipe left the group or outlived the process. Closing
-    them here keeps asyncio from doing it at garbage collection, after the loop
-    is gone, and printing a traceback.
-    """
-    # asyncio publishes no way to reach the pipes' transport, so the private
-    # attribute is read through a type that says so.
-    cast(_HasTransport, process)._transport.close()
-
-
-def signal_group(pgid: int, sig: int) -> bool:
-    """Send sig to the group; False when the group is already gone."""
-    try:
-        os.killpg(pgid, sig)
-    # macOS reports EPERM, not ESRCH, for a group that holds only a zombie.
-    except (ProcessLookupError, PermissionError):
-        return False
-
-    return True

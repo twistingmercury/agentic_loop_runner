@@ -146,14 +146,16 @@ async def _drain(
     if process.stdout is None or process.stderr is None:
         raise RuntimeError("the process was started without output pipes")
 
+    if stdin is not None and process.stdin is None:
+        raise RuntimeError("the session was started without a stdin pipe")
+
     readers = [
         proc.read_lines(process.stdout, on_stdout),
         proc.read_lines(process.stderr, on_stderr),
     ]
-    if stdin is not None:
-        if process.stdin is None:
-            raise RuntimeError("the session was started without a stdin pipe")
-
+    # The guard above already refused a missing stdin pipe; this repeats it only
+    # so mypy can see process.stdin is not None.
+    if stdin is not None and process.stdin is not None:
         readers.append(proc.feed_stdin(process.stdin, stdin))
 
     await asyncio.gather(*readers)

@@ -86,6 +86,18 @@ def _log_folder(settings: RunSettings) -> Path | None:
     return run_dir(settings.log_folder(), datetime.now().astimezone())
 
 
+def _open_log(settings: RunSettings, path: Path) -> RunLog:
+    skip = settings.permissions is Permissions.SKIP
+    info = Info(
+        version=metadata.version("alr"),
+        tasks_file=settings.tasks_file,
+        permissions="skip" if skip else "sandbox",
+        sandbox_settings="" if skip else settings.sandbox_file,
+        action_timeout=settings.action_timeout,
+    )
+    return RunLog.open(path, info)
+
+
 def _save_tasks(settings: RunSettings, task_list: TaskList, reset_count: int) -> None:
     """Save the edited actions and the reset together, once; nothing to save leaves the file alone."""
     if settings.after_task is not None:
@@ -99,15 +111,3 @@ def _save_tasks(settings: RunSettings, task_list: TaskList, reset_count: int) ->
         return
 
     save_for_start(settings.tasks_file, task_list)
-
-
-def _open_log(settings: RunSettings, path: Path) -> RunLog:
-    skip = settings.permissions is Permissions.SKIP
-    info = Info(
-        version=metadata.version("alr"),
-        tasks_file=settings.tasks_file,
-        permissions="skip" if skip else "sandbox",
-        sandbox_settings="" if skip else settings.sandbox_file,
-        action_timeout=settings.action_timeout,
-    )
-    return RunLog.open(path, info)

@@ -286,17 +286,29 @@ def _create_log(logs: Path, stamp: str, text: str) -> Path | None:
     """Write text to the first free log name in logs and return its path, or None after a warning."""
     number = 0
     while True:
-        path = logs / _log_name(stamp, number)
-        try:
-            _write_new_file(path, text)
-        except FileExistsError:
-            # Another review started in the same second: its log is left alone.
-            number += 1
-        except OSError as exc:
-            _warn_log_not_written(path, exc)
-            return None
-        else:
+        name_taken, path = _try_create_log(logs / _log_name(stamp, number), text)
+        if not name_taken:
             return path
+
+        number += 1
+
+
+def _try_create_log(path: Path, text: str) -> tuple[bool, Path | None]:
+    """Try to write one log name; return whether it was taken and the path written.
+
+    A taken name gives (True, None), a written log (False, path), and any other
+    OSError (False, None) after its one warning.
+    """
+    try:
+        _write_new_file(path, text)
+    except FileExistsError:
+        # Another review started in the same second: its log is left alone.
+        return True, None
+    except OSError as exc:
+        _warn_log_not_written(path, exc)
+        return False, None
+
+    return False, path
 
 
 def _log_name(stamp: str, number: int) -> str:

@@ -70,27 +70,6 @@ def sync(home: Path | None = None) -> SyncReport:
     return SyncReport(changes=changes, warnings=warnings)
 
 
-def pending(home: Path | None = None) -> list[SkillChange]:
-    """What `sync` would change, in the same order, without writing anything.
-
-    A skill that cannot be read is left out: a real run reports it as a
-    warning, and a dry run has no business failing over it.
-    """
-    try:
-        folder = skills_folder(home)
-    except RuntimeError:
-        return []
-
-    changes: list[SkillChange] = []
-    with as_file(files("alr") / "skills") as bundled:
-        for name in _bundled_names(bundled):
-            change = _try_classify(bundled / name, folder / name)
-            if change is not None:
-                changes.append(change)
-
-    return changes
-
-
 def _sync_one(source: Path, target: Path) -> SyncReport:
     """Classify one skill, apply the change, and report both."""
     try:
@@ -110,6 +89,46 @@ def _sync_one(source: Path, target: Path) -> SyncReport:
 
     warning = f"{target} was a {change.replaced}; replaced it with the bundled skill"
     return SyncReport(changes=[change], warnings=[warning])
+
+
+def pending(home: Path | None = None) -> list[SkillChange]:
+    """What `sync` would change, in the same order, without writing anything.
+
+    A skill that cannot be read is left out: a real run reports it as a
+    warning, and a dry run has no business failing over it.
+    """
+    try:
+        folder = skills_folder(home)
+    except RuntimeError:
+        return []
+
+    with as_file(files("alr") / "skills") as bundled:
+        return _pending_changes(bundled, folder)
+
+
+def _pending_changes(bundled: Path, folder: Path) -> list[SkillChange]:
+    """Collect the change each bundled skill needs, leaving out identical and unreadable ones."""
+    changes: list[SkillChange] = []
+    for name in _bundled_names(bundled):
+        _add_pending(changes, bundled / name, folder / name)
+
+    return changes
+
+
+def _add_pending(changes: list[SkillChange], source: Path, target: Path) -> None:
+    change = _try_classify(source, target)
+    if change is None:
+        return
+
+    changes.append(change)
+
+
+def _try_classify(source: Path, target: Path) -> SkillChange | None:
+    """Classify one skill for a dry run; None when it is identical or unreadable."""
+    try:
+        return _classify(source, target)
+    except OSError:
+        return None
 
 
 def _classify(source: Path, target: Path) -> SkillChange | None:
@@ -210,13 +229,16 @@ def _make_owner_writable(root: Path) -> None:
     root.chmod(root.stat().st_mode | 0o700)
     for folder, folder_names, file_names in os.walk(root, followlinks=False):
         for name in folder_names + file_names:
-            path = Path(folder) / name
-            if path.is_symlink():
-                continue
+            _make_path_writable(Path(folder) / name)
 
-            # A folder also needs read and search access, or the walk cannot enter it.
-            extra = 0o700 if path.is_dir() else 0o200
-            path.chmod(path.stat().st_mode | extra)
+
+def _make_path_writable(path: Path) -> None:
+    if path.is_symlink():
+        return
+
+    # A folder also needs read and search access, or the walk cannot enter it.
+    extra = 0o700 if path.is_dir() else 0o200
+    path.chmod(path.stat().st_mode | extra)
 
 
 def _swap(staged: Path, target: Path, aside: Path) -> None:
@@ -255,11 +277,3 @@ def _discard_staging(staging: Path, aside: Path, target: Path) -> None:
 def _present(path: Path) -> bool:
     """True when anything stands at path, a dangling symlink included."""
     return path.is_symlink() or path.exists()
-
-
-def _try_classify(source: Path, target: Path) -> SkillChange | None:
-    """Classify one skill for a dry run; None when it is identical or unreadable."""
-    try:
-        return _classify(source, target)
-    except OSError:
-        return None
