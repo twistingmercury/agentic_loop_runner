@@ -118,12 +118,17 @@ def _subfolders(names: list[str]) -> list[PurePosixPath]:
     """List the folders the shipped files sit in, outermost first, each once."""
     subfolders: dict[PurePosixPath, None] = {}
     for name in names:
-        for parent in reversed(PurePosixPath(name).parents):
-            # The last parent is "." (the config folder itself), which has no parts.
-            if parent.parts:
-                subfolders[parent] = None
+        for parent in _parent_folders(name):
+            subfolders[parent] = None
 
     return list(subfolders)
+
+
+def _parent_folders(name: str) -> list[PurePosixPath]:
+    """List the folders above one shipped file name, outermost first."""
+    # The last parent is "." (the config folder itself), which has no parts.
+    parents = reversed(PurePosixPath(name).parents)
+    return [parent for parent in parents if parent.parts]
 
 
 def load(home: Path | None = None, dry_run: bool = False) -> Config:
@@ -293,8 +298,15 @@ def _rename_unless_taken(staging: Path, folder: Path) -> None:
     try:
         staging.rename(folder)
     except OSError as error:
-        if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
-            raise
+        _raise_unless_taken(error)
+
+
+def _raise_unless_taken(error: OSError) -> None:
+    """Raise the error unless it says the target folder is already there."""
+    if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+        return
+
+    raise error
 
 
 def _refuse(path: Path, problem: str) -> RefusedError:
