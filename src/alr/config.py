@@ -420,19 +420,13 @@ def _refuse_removed_keys(
     A custom sandbox file now lives in the sandboxes folder and is picked by
     name, so a config written for the old way says to move the file.
     """
-    removed = []
+    advice = f"no longer supported; move the file into {folder / _SANDBOXES} and use its name as default"
+
     if _SANDBOX_FILE in permissiveness:
-        removed.append(_SANDBOX_FILE)
+        raise _refuse(path, f"{_SANDBOX_FILE}: {advice}")
 
     if permissiveness.get("default") == _CUSTOM:
-        removed.append(_CUSTOM)
-
-    for key in removed:
-        raise _refuse(
-            path,
-            f"{key}: no longer supported; move the file into "
-            f"{folder / _SANDBOXES} and use its name as default",
-        )
+        raise _refuse(path, f"{_CUSTOM}: {advice}")
 
 
 def _refuse_unknown_sandbox(name: Any, folder: Path, path: Path, dry_run: bool) -> None:
