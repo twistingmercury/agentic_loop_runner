@@ -217,21 +217,27 @@ async def read_lines(
     pieces: list[bytes] = []
     try:
         while chunk := await stream.read(_READ_SIZE):
-            *ends, rest = chunk.split(b"\n")
-            for end in ends:
-                line = b"".join([*pieces, end, b"\n"])
-                # Cleared before the call, so a callback that raises does not
-                # leave the finally below to hand the same bytes over again.
-                pieces.clear()
-                on_line(line)
-
-            if rest:
-                pieces.append(rest)
+            _take_chunk(chunk, pieces, on_line)
     finally:
         if pieces:
             tail = b"".join(pieces)
             pieces.clear()
             on_line(tail)
+
+
+def _take_chunk(
+    chunk: bytes, pieces: list[bytes], on_line: Callable[[bytes], None]
+) -> None:
+    *ends, rest = chunk.split(b"\n")
+    for end in ends:
+        line = b"".join([*pieces, end, b"\n"])
+        # Cleared before the call, so a callback that raises does not
+        # leave the finally in read_lines to hand the same bytes over again.
+        pieces.clear()
+        on_line(line)
+
+    if rest:
+        pieces.append(rest)
 
 
 async def feed_stdin(writer: asyncio.StreamWriter, data: bytes) -> None:
