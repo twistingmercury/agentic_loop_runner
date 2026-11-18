@@ -104,6 +104,26 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(_version_line())
         return 0
 
+    started = _startup_checks(parser, args)
+    if isinstance(started, int):
+        return started
+
+    return _route(args, started)
+
+
+@dataclass(frozen=True)
+class _Startup:
+    """What the startup checks resolved for a run that goes on: the tasks file, the permission answer, and the session's flags."""
+
+    tasks_file: str
+    answer: Answer
+    session: list[str]
+
+
+def _startup_checks(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> _Startup | int:
+    """Run the checks before any run; return an exit code to stop with, or what the run needs."""
     # --validate is a dry run that also syncs the skills and reviews, so every
     # check below that decides on a dry run decides the same for it.
     if args.validate:
@@ -114,18 +134,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if not config_folder_exists():
             return _handle_missing_config_folder(args.dry_run)
 
-        # A plain dry run writes nothing (requirement 9): it refuses what the real
-        # run's add would refuse, reports what the real run would change, and reads
-        # a missing shipped file from the package instead. --validate syncs as a
-        # real run does, so the review reads a sandbox file that is up to date and
-        # uses the skill that came with this alr.
-        if args.dry_run and not args.validate:
-            check_can_add_missing()
-            _report_pending_sandboxes()
-            _report_pending_skills()
-        else:
-            _sync_sandboxes()
-            _sync_skills()
+        _sync_or_report_pending(args)
 
         tasks_file = resolve_dir(args.dir)
         _note_ignored_folder_sandbox(args.dir)
@@ -152,6 +161,30 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return exc.exit_code
 
+    return _Startup(tasks_file, answer, session)
+
+
+def _sync_or_report_pending(args: argparse.Namespace) -> None:
+    """Sync the shipped sandboxes and skills, or only report what a real run would change."""
+    # A plain dry run writes nothing (requirement 9): it refuses what the real
+    # run's add would refuse, reports what the real run would change, and reads
+    # a missing shipped file from the package instead. --validate syncs as a
+    # real run does, so the review reads a sandbox file that is up to date and
+    # uses the skill that came with this alr.
+    if args.dry_run and not args.validate:
+        check_can_add_missing()
+        _report_pending_sandboxes()
+        _report_pending_skills()
+        return
+
+    _sync_sandboxes()
+    _sync_skills()
+
+
+def _route(args: argparse.Namespace, started: _Startup) -> int:
+    """Start the dry run, the validate run, or the real run."""
+    tasks_file = started.tasks_file
+    answer = started.answer
     action_timeout = args.action_timeout or ""
     stop = Stop()
     if args.dry_run:
@@ -176,7 +209,7 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         start(
             tasks_file,
             action_timeout,
-            session,
+            started.session,
             args.reset_failed,
             sandbox_settings=answer.sandbox_file,
             stop=stop,
