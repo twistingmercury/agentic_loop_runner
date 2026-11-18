@@ -1,6 +1,6 @@
 """Every exit code alr can return, with the result its run log records.
 
-0 completed, 1 failed, 2 usage, 3 refused, 4 after_run failed, 130 and 143 stopped.
+0 completed, 1 failed, 2 usage, 3 refused, 4 after_run failed, 129, 130 and 143 stopped.
 """
 
 import signal
@@ -141,12 +141,14 @@ def test_after_run_failure_exits_4_and_leaves_the_tasks_completed(
 
 
 @pytest.mark.parametrize(
-    "sig", [signal.SIGINT, signal.SIGTERM], ids=["SIGINT", "SIGTERM"]
+    "sig",
+    [signal.SIGINT, signal.SIGTERM, signal.SIGHUP],
+    ids=["SIGINT", "SIGTERM", "SIGHUP"],
 )
 def test_a_signal_exits_128_plus_its_number(
     tmp_path: Path, fake_claude: Path, sig: signal.Signals
 ) -> None:
-    """130 for SIGINT and 143 for SIGTERM, with the stop on the run log."""
+    """130 for SIGINT, 143 for SIGTERM, and 129 for SIGHUP, with the stop on the run log."""
     tasks_path = write_tasks_yaml(tmp_path, BLOCKED_TASK_YAML)
     ready_file = tmp_path / "ready"
     env = {"FAKECLAUDE_BLOCK": "1", "FAKECLAUDE_READY_FILE": str(ready_file)}

@@ -4,16 +4,20 @@ import contextlib
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
+import pexpect
 import pytest
 from e2e_helpers import (
     assert_no_tmp_file,
     find_alr,
+    read_tasks_yaml,
     run_args,
     shared_block,
     start_alr,
+    task_states,
     wait_for_file,
     wait_process_gone,
     write_tasks_yaml,
@@ -100,6 +104,53 @@ def test_an_ignored_sighup_does_not_stop_the_run(
 
         assert process.returncode == 143, (out, err)
         assert "error: loop error: task 1: First task: stopped\n" in err
+
+
+def test_a_plain_run_that_ignored_sighup_goes_on_after_its_terminal_closes(
+    tmp_path: Path,
+) -> None:
+    """The run outlives its terminal and its later output goes nowhere without ending it."""
+    tasks_path = write_tasks_yaml(
+        tmp_path,
+        shared_block()
+        + "tasks:\n  - id: 1\n    name: First task\n    prompt: Do the thing.\n",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # It prints only after the terminal is gone, so the run's write to it is the test.
+    claude = bin_dir / "claude"
+    claude.write_text(
+        "#!/bin/sh\n"
+        "sleep 3\n"
+        "echo working\n"
+        'echo \'{"state": "completed", "error": ""}\'\n',
+        encoding="utf-8",
+    )
+    claude.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    child = pexpect.spawn(
+        find_alr(),
+        [*run_args(tasks_path), "--plain"],
+        env=env,
+        encoding="utf-8",
+        timeout=30,
+        preexec_fn=ignore_sighup,
+    )
+    try:
+        child.expect("Follow the runbook.")
+        os.close(child.child_fd)
+        deadline = time.monotonic() + 20
+        while child.isalive() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        assert not child.isalive(), "alr did not finish"
+    finally:
+        if child.isalive():
+            os.kill(child.pid, signal.SIGKILL)
+
+    assert child.exitstatus == 0
+    assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
+    assert_no_tmp_file(tasks_path)
 
 
 def start_alr_ignoring_sighup(*args: str, env: dict[str, str]) -> subprocess.Popen[str]:

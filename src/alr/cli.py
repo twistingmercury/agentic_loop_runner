@@ -31,6 +31,7 @@ from alr.errors import (
 )
 from alr.plain.dryrun import dry_run
 from alr.plain.start import start
+from alr.plain.terminal import outliving_its_terminal
 from alr.review import review
 from alr.sandboxes import (
     check_can_add_missing,
@@ -621,10 +622,11 @@ def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None
 def _run(coro: Coroutine[Any, Any, object], stop: Stop) -> int:
     """Run coro to the end; a stop signal cancels it, which stops the run.
 
-    A stop exits with the code of the first signal, which _with_signals records in stop.
+    A stop exits with the code of the first signal, which _stop_once records in stop.
     """
     try:
-        asyncio.run(_with_signals(coro, stop))
+        with outliving_its_terminal():
+            asyncio.run(_with_signals(coro, stop))
     except asyncio.CancelledError:
         # The stop landed while no task was running, so there is no task to name.
         _print_to_stderr(_INTERRUPTED)

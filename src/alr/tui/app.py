@@ -38,7 +38,6 @@ from alr.tui.prepare import Prepared, prepare
 from alr.tui.progress import Progress
 from alr.tasks import FAILED, PENDING, Action, Task, TaskList
 from alr.tui.settings import Permissions, RunSettings
-from alr.tui.terminal import use_hangup_safe_writer
 
 
 _STOPPED = "stopped"
@@ -422,12 +421,10 @@ class AlrApp(App[None]):
 
     def _register_stop_signals(self) -> None:
         loop = asyncio.get_running_loop()
-        self._stop_signals = [signal.SIGTERM]
-        # nohup starts a program with SIGHUP ignored to keep a run alive after the
-        # terminal closes; registering a handler would undo that.
-        if signal.getsignal(signal.SIGHUP) is not signal.SIG_IGN:
-            self._stop_signals.append(signal.SIGHUP)
-
+        # SIGHUP stops the view even when it was ignored at start. A view cannot go on
+        # without its terminal, and nohup never reaches it: it redirects the input and
+        # output, so alr opens no view.
+        self._stop_signals = [signal.SIGTERM, signal.SIGHUP]
         for stop_signal in self._stop_signals:
             loop.add_signal_handler(stop_signal, self._on_stop_signal, stop_signal)
 
@@ -674,7 +671,6 @@ def _outcome(event: RunDone, stopping: bool) -> str:
 
 def run_app(settings: RunSettings) -> int:
     """Run the view to the end; it exits with the final run's code, from the table plain mode uses."""
-    use_hangup_safe_writer()
     app = AlrApp(settings)
     # A keyboard-driven view: no mouse reporting, so the terminal keeps its own.
     app.run(mouse=False)

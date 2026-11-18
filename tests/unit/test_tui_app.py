@@ -193,7 +193,7 @@ async def test_ctrl_p_opens_nothing(work_dir: Path) -> None:
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_sigterm_stops_a_run_like_ctrl_c(
+async def test_sigterm_stops_a_run(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
@@ -209,7 +209,7 @@ async def test_sigterm_stops_a_run_like_ctrl_c(
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_sighup_stops_a_run_like_ctrl_c(
+async def test_sighup_stops_a_run(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
@@ -226,7 +226,7 @@ async def test_sighup_stops_a_run_like_ctrl_c(
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_an_ignored_sighup_does_not_stop_the_view(
+async def test_sighup_stops_the_view_even_when_it_was_ignored_at_start(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
@@ -238,46 +238,32 @@ async def test_an_ignored_sighup_does_not_stop_the_view(
             await until(lambda: app.state is AppState.RUNNING)
 
             os.kill(os.getpid(), signal.SIGHUP)
-            await pilot.pause(0.5)
+            await until(lambda: not app.is_running)
 
-            assert app.state is AppState.RUNNING
-
-            await pilot.press("ctrl+c")
-            await _finished(app)
+        assert app.outcome == "stopped"
+        assert app.exit_code == 129
     finally:
         signal.signal(signal.SIGHUP, before)
 
 
-@pytest.mark.parametrize(
-    ("ignored", "sent", "code"),
-    [
-        (signal.SIGHUP, signal.SIGTERM, 143),
-        (signal.SIGTERM, signal.SIGTERM, 143),
-    ],
-    ids=["sigterm-after-ignored-hangup", "ignored-sigterm"],
-)
 @pytest.mark.usefixtures("fake_claude")
-async def test_sigterm_stops_the_view_even_when_it_or_sighup_was_ignored_at_start(
-    work_dir: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    ignored: signal.Signals,
-    sent: signal.Signals,
-    code: int,
+async def test_sigterm_stops_the_view_even_when_it_was_ignored_at_start(
+    work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    before = signal.signal(ignored, signal.SIG_IGN)
+    before = signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
         app = AlrApp(_settings(work_dir))
         async with app.run_test() as pilot:
             await pilot.press("s")
             await until(lambda: app.state is AppState.RUNNING)
 
-            os.kill(os.getpid(), sent)
+            os.kill(os.getpid(), signal.SIGTERM)
             await until(lambda: not app.is_running)
 
-        assert app.exit_code == code
+        assert app.exit_code == 143
     finally:
-        signal.signal(ignored, before)
+        signal.signal(signal.SIGTERM, before)
 
 
 @pytest.mark.parametrize(
@@ -303,21 +289,18 @@ async def test_a_signal_during_a_run_quits_the_view_once_it_stopped(
     assert app.exit_code == code
 
 
-@pytest.mark.parametrize("sighup_before", [signal.SIG_DFL, signal.SIG_IGN])
-async def test_mount_and_unmount_leave_the_signal_handlers_as_they_were(
-    work_dir: Path, sighup_before: signal.Handlers
+async def test_unmount_puts_the_stop_signals_back_to_their_default_action(
+    work_dir: Path,
 ) -> None:
-    original_sighup = signal.signal(signal.SIGHUP, sighup_before)
-    try:
-        sigterm_before = signal.getsignal(signal.SIGTERM)
-        app = AlrApp(_settings(work_dir))
-        async with app.run_test() as pilot:
-            await pilot.pause()
+    app = AlrApp(_settings(work_dir))
+    async with app.run_test() as pilot:
+        await pilot.pause()
 
-        assert signal.getsignal(signal.SIGTERM) == sigterm_before
-        assert signal.getsignal(signal.SIGHUP) == sighup_before
-    finally:
-        signal.signal(signal.SIGHUP, original_sighup)
+        assert signal.getsignal(signal.SIGTERM) != signal.SIG_DFL
+        assert signal.getsignal(signal.SIGHUP) != signal.SIG_DFL
+
+    assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL
+    assert signal.getsignal(signal.SIGHUP) == signal.SIG_DFL
 
 
 async def test_ctrl_c_when_nothing_runs_quits(work_dir: Path) -> None:

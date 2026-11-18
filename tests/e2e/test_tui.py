@@ -13,7 +13,6 @@ from e2e_helpers import (
     shared_block,
     task_states,
     wait_for_file,
-    process_is_running,
     wait_process_gone,
     write_tasks_yaml,
 )
@@ -135,14 +134,14 @@ def test_sighup_stops_the_view_and_its_session(
 
 
 def _ignore_hangup() -> None:
-    """Start the child as nohup does: with SIGHUP ignored."""
+    """Start the child with SIGHUP ignored, as a script that traps it would."""
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
 
-def test_a_view_that_ignored_sighup_still_stops_on_sigterm_after_its_terminal_closed(
+def test_a_view_that_ignored_sighup_still_stops_when_its_terminal_closes(
     tmp_path: Path, fake_claude: Path
 ) -> None:
-    """The run outlives the terminal, then a SIGTERM stops it: the dead terminal must not freeze alr."""
+    """A view cannot go on without its terminal, so it stops like any other hangup."""
     folder = tmp_path / "run"
     folder.mkdir()
     tasks_path = write_tasks_yaml(folder, TASKS)
@@ -172,26 +171,19 @@ def test_a_view_that_ignored_sighup_still_stops_on_sigterm_after_its_terminal_cl
         descendant_pid = int(wait_for_file(descendant_pid_file, 5))
         child.expect("▶")
 
-        # Closing the master end hangs the terminal up for real: with SIGHUP
-        # ignored the run goes on, and every write to the terminal now fails.
+        # Closing the master end hangs the terminal up for real: the kernel sends
+        # SIGHUP, which alr catches although it was ignored at start.
         os.close(child.child_fd)
-        # Long enough for the view's redraws to fill the output queue of a writer
-        # that gave up at the first failed write.
-        time.sleep(6)
-        assert process_is_running(child.pid)
-        assert process_is_running(claude_pid)
-
-        os.kill(child.pid, signal.SIGTERM)
         deadline = time.monotonic() + 15
         while child.isalive() and time.monotonic() < deadline:
             time.sleep(0.05)
 
-        assert not child.isalive(), "alr did not exit after SIGTERM"
+        assert not child.isalive(), "alr did not stop on the hangup"
     finally:
         if child.isalive():
             os.kill(child.pid, signal.SIGKILL)
 
-    assert child.exitstatus == 143
+    assert child.exitstatus == 129
     wait_process_gone(claude_pid, 10)
     wait_process_gone(descendant_pid, 10)
     assert tasks_path.read_text(encoding="utf-8") == before
