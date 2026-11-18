@@ -107,10 +107,7 @@ def code_spans(text: str) -> list[str]:
     """The code spans of a text: each non-blank line of a fenced block, then each inline span."""
     spans: list[str] = []
     for block in _FENCED_BLOCK.finditer(text):
-        for raw_line in block.group(1).split("\n"):
-            line = raw_line.strip()
-            if line:
-                spans.append(line)
+        spans.extend(_block_lines(block.group(1)))
 
     # Fenced blocks come out first, so their backticks are not read again as inline spans.
     prose = _FENCED_BLOCK.sub("\n", text)
@@ -120,6 +117,17 @@ def code_spans(text: str) -> list[str]:
             spans.append(span)
 
     return spans
+
+
+def _block_lines(block_body: str) -> list[str]:
+    """The non-blank lines of one fenced block, each stripped."""
+    lines: list[str] = []
+    for raw_line in block_body.split("\n"):
+        line = raw_line.strip()
+        if line:
+            lines.append(line)
+
+    return lines
 
 
 def _first_line(text: str) -> str:
@@ -184,9 +192,17 @@ def _wraps_excluded_command(span: str, excluded_commands: list[str]) -> bool:
         return False
 
     for part in parts:
-        for entry in excluded_commands:
-            if fnmatchcase(part, entry):
-                return True
+        if _matches_excluded_entry(part, excluded_commands):
+            return True
+
+    return False
+
+
+def _matches_excluded_entry(part: str, excluded_commands: list[str]) -> bool:
+    """True when the part matches any excluded-command entry."""
+    for entry in excluded_commands:
+        if fnmatchcase(part, entry):
+            return True
 
     return False
 
