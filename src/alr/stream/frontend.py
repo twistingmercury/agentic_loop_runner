@@ -153,6 +153,8 @@ async def _drain(
         proc.read_lines(process.stdout, on_stdout),
         proc.read_lines(process.stderr, on_stderr),
     ]
+    # The guard above already refused a missing stdin pipe; this repeats it only
+    # so mypy can see process.stdin is not None.
     if stdin is not None and process.stdin is not None:
         readers.append(proc.feed_stdin(process.stdin, stdin))
 
