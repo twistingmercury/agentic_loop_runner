@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-11-17
+
 ### Fixed
 
 - A SIGHUP, from a closed terminal or a dropped ssh session, now stops a run
