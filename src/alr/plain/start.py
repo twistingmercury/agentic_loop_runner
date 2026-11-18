@@ -74,6 +74,16 @@ def _read_for_start(tasks_file: str) -> TaskList:
         ) from exc
 
 
+def _info(tasks_file: str, action_timeout: str, sandbox_settings: str) -> Info:
+    return Info(
+        version=metadata.version("alr"),
+        tasks_file=tasks_file,
+        permissions="sandbox" if sandbox_settings else "skip",
+        sandbox_settings=sandbox_settings,
+        action_timeout=action_timeout,
+    )
+
+
 def _prepare_disk(
     tasks_file: str, task_list: TaskList, log: RunLog, reset_count: int
 ) -> None:
@@ -89,16 +99,6 @@ def _save_reset(tasks_file: str, task_list: TaskList, reset_count: int) -> None:
     """Save the reset, when there is one."""
     if reset_count:
         save_for_start(tasks_file, task_list)
-
-
-def _info(tasks_file: str, action_timeout: str, sandbox_settings: str) -> Info:
-    return Info(
-        version=metadata.version("alr"),
-        tasks_file=tasks_file,
-        permissions="sandbox" if sandbox_settings else "skip",
-        sandbox_settings=sandbox_settings,
-        action_timeout=action_timeout,
-    )
 
 
 async def _run_logged(

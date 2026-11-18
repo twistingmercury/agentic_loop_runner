@@ -53,57 +53,6 @@ async def dry_run(
     return warning_count
 
 
-def _print_sandbox(
-    out: TextIO, sandbox_file: str, sandbox_name: str, added_on_real_run: bool
-) -> None:
-    """Name the sandbox settings file, and the sandbox it was picked as when it was picked by name.
-
-    With no file there is nothing to read the sandbox rules from, so say they were skipped.
-    """
-    if not sandbox_file:
-        out.write("sandbox rules skipped: no sandbox settings file\n")
-        return
-
-    if added_on_real_run:
-        out.write(
-            f"sandbox settings: {sandbox_file} ({sandbox_name}; added on a real run)\n"
-        )
-        return
-
-    if sandbox_name:
-        out.write(f"sandbox settings: {sandbox_file} ({sandbox_name})\n")
-        return
-
-    out.write(f"sandbox settings: {sandbox_file}\n")
-
-
-def _print_warnings(out: TextIO, task_list: TaskList, sandbox_file: str) -> int:
-    """Write one line per problem the rules find in the prompts and commands, and return how many."""
-    excluded_commands = _excluded_commands(sandbox_file)
-    findings = check_task_list(task_list, excluded_commands)
-    for finding in findings:
-        out.write(f"{finding.line()}\n")
-
-    return len(findings)
-
-
-def _excluded_commands(sandbox_file: str) -> list[str] | None:
-    """The sandbox file's excludedCommands strings, or None when there is no file.
-
-    The file was checked before the dry run started, so it parses. A missing or
-    mistyped excludedCommands means none: the rule has nothing to match.
-    """
-    if not sandbox_file:
-        return None
-
-    settings = parse_settings(read_text(Path(sandbox_file), dry_run=True))
-    entries = settings.get("sandbox", {}).get("excludedCommands", [])
-    if not isinstance(entries, list):
-        return []
-
-    return [entry for entry in entries if isinstance(entry, str)]
-
-
 def _read_for_dry_run(tasks_file: str) -> TaskList:
     """Read the task file, failed tasks and all, so a bad file is refused before anything else is looked at."""
     try:
@@ -135,3 +84,54 @@ def _print_list_limits(
     for action in actions:
         limit, source = action_limit(action, override)
         out.write(f"{key}: {first_line(action.command)}: {limit} ({source})\n")
+
+
+def _print_warnings(out: TextIO, task_list: TaskList, sandbox_file: str) -> int:
+    """Write one line per problem the rules find in the prompts and commands, and return how many."""
+    excluded_commands = _excluded_commands(sandbox_file)
+    findings = check_task_list(task_list, excluded_commands)
+    for finding in findings:
+        out.write(f"{finding.line()}\n")
+
+    return len(findings)
+
+
+def _excluded_commands(sandbox_file: str) -> list[str] | None:
+    """The sandbox file's excludedCommands strings, or None when there is no file.
+
+    The file was checked before the dry run started, so it parses. A missing or
+    mistyped excludedCommands means none: the rule has nothing to match.
+    """
+    if not sandbox_file:
+        return None
+
+    settings = parse_settings(read_text(Path(sandbox_file), dry_run=True))
+    entries = settings.get("sandbox", {}).get("excludedCommands", [])
+    if not isinstance(entries, list):
+        return []
+
+    return [entry for entry in entries if isinstance(entry, str)]
+
+
+def _print_sandbox(
+    out: TextIO, sandbox_file: str, sandbox_name: str, added_on_real_run: bool
+) -> None:
+    """Name the sandbox settings file, and the sandbox it was picked as when it was picked by name.
+
+    With no file there is nothing to read the sandbox rules from, so say they were skipped.
+    """
+    if not sandbox_file:
+        out.write("sandbox rules skipped: no sandbox settings file\n")
+        return
+
+    if added_on_real_run:
+        out.write(
+            f"sandbox settings: {sandbox_file} ({sandbox_name}; added on a real run)\n"
+        )
+        return
+
+    if sandbox_name:
+        out.write(f"sandbox settings: {sandbox_file} ({sandbox_name})\n")
+        return
+
+    out.write(f"sandbox settings: {sandbox_file}\n")

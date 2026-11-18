@@ -12,44 +12,6 @@ from typing import TextIO
 _GONE = (errno.EIO, errno.EPIPE)
 
 
-class _VanishingTerminal(io.FileIO):
-    """A standard stream's file that stops writing once its terminal has gone.
-
-    A write that fails because the terminal is gone is reported as done, and every
-    later write is dropped. Any other failure is raised as before. The file
-    descriptor belongs to the process, so closing this does not close it.
-    """
-
-    def __init__(self, descriptor: int) -> None:
-        super().__init__(descriptor, "w", closefd=False)
-        self._gone = False
-
-    def write(self, data: Buffer) -> int:
-        size = len(memoryview(data))
-        if self._gone:
-            return size
-
-        try:
-            return super().write(data)
-        except OSError as exc:
-            if exc.errno not in _GONE:
-                raise
-
-        self._gone = True
-        return size
-
-
-def _guarded(stream: TextIO) -> TextIO:
-    stream.flush()
-    raw = _VanishingTerminal(stream.fileno())
-    return io.TextIOWrapper(
-        io.BufferedWriter(raw),
-        encoding=stream.encoding,
-        errors=stream.errors,
-        line_buffering=bool(stream.line_buffering),
-    )
-
-
 @contextmanager
 def outliving_its_terminal() -> Iterator[None]:
     """Guard stdout and stderr for the length of the block when SIGHUP is ignored.
@@ -76,3 +38,41 @@ def outliving_its_terminal() -> Iterator[None]:
         sys.stdout.flush()
         sys.stderr.flush()
         sys.stdout, sys.stderr = stdout, stderr
+
+
+def _guarded(stream: TextIO) -> TextIO:
+    stream.flush()
+    raw = _VanishingTerminal(stream.fileno())
+    return io.TextIOWrapper(
+        io.BufferedWriter(raw),
+        encoding=stream.encoding,
+        errors=stream.errors,
+        line_buffering=bool(stream.line_buffering),
+    )
+
+
+class _VanishingTerminal(io.FileIO):
+    """A standard stream's file that stops writing once its terminal has gone.
+
+    A write that fails because the terminal is gone is reported as done, and every
+    later write is dropped. Any other failure is raised as before. The file
+    descriptor belongs to the process, so closing this does not close it.
+    """
+
+    def __init__(self, descriptor: int) -> None:
+        super().__init__(descriptor, "w", closefd=False)
+        self._gone = False
+
+    def write(self, data: Buffer) -> int:
+        size = len(memoryview(data))
+        if self._gone:
+            return size
+
+        try:
+            return super().write(data)
+        except OSError as exc:
+            if exc.errno not in _GONE:
+                raise
+
+        self._gone = True
+        return size
