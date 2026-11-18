@@ -57,6 +57,8 @@ _YES_ANSWERS = ("y", "yes")
 # the owner's way to keep a run alive after the terminal closes, so it stays ignored.
 _RUN_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 _REVIEW_SKIPPED = "review skipped: the dry run found problems; fix them and run again"
+_GATE_TIMEOUT_RENAMED = "--gate-timeout: renamed to --action-timeout"
+_COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in shared.after_task, see the README (Migrating from commit modes and gates)"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,357 +71,6 @@ def main(argv: list[str] | None = None) -> int:
         # Ctrl-C during the startup checks, before the run handles signals itself.
         print(_INTERRUPTED, file=sys.stderr)
         return Stop().exit_code()
-
-
-def _version_line() -> str:
-    """Return the --version line: the version, then the OS and architecture."""
-    system = platform.system().lower()
-    return f"alr version: {metadata.version('alr')} {system}/{platform.machine()}"
-
-
-_GATE_TIMEOUT_RENAMED = "--gate-timeout: renamed to --action-timeout"
-_COMMIT_REMOVED = "--commit: removed; a commit is an action now: put it in shared.after_task, see the README (Migrating from commit modes and gates)"
-
-
-@dataclass(frozen=True)
-class Answer:
-    """What the permission flags settle: a settings file, with the sandbox's name when it was picked by name, or the skip choice."""
-
-    sandbox_file: str
-    skip: bool
-    sandbox_name: str
-
-
-def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
-    """Apply the startup checks in gralph's order, then start the dry run or the real run."""
-    if args.gate_timeout is not None:
-        print(f"error: {_GATE_TIMEOUT_RENAMED}", file=sys.stderr)
-        return UsageError.exit_code
-
-    if args.commit is not None:
-        print(f"error: {_COMMIT_REMOVED}", file=sys.stderr)
-        return UsageError.exit_code
-
-    if args.version:
-        print(_version_line())
-        return 0
-
-    started = _startup_checks(parser, args)
-    if isinstance(started, int):
-        return started
-
-    return _route(args, started)
-
-
-@dataclass(frozen=True)
-class _Startup:
-    """What the startup checks resolved for a run that goes on: the tasks file, the permission answer, and the session's flags."""
-
-    tasks_file: str
-    answer: Answer
-    session: list[str]
-
-
-def _startup_checks(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> _Startup | int:
-    """Run the checks before any run; return an exit code to stop with, or what the run needs."""
-    # --validate is a dry run that also syncs the skills and reviews, so every
-    # check below that decides on a dry run decides the same for it.
-    if args.validate:
-        args.dry_run = True
-
-    try:
-        # Before anything else a real run does, so no later refusal hides the question.
-        if not config_folder_exists():
-            return _handle_missing_config_folder(args.dry_run)
-
-        _sync_or_report_pending(args)
-
-        tasks_file = resolve_dir(args.dir)
-        _note_ignored_folder_sandbox(args.dir)
-        config = load(dry_run=args.dry_run)
-        apply_sandbox_default(args, config.sandbox)
-        answer = resolve_permissions(
-            args.sandbox_settings, args.yolo, args.sandbox, args.dry_run
-        )
-        # An explicitly empty value counts as passed, and is bad.
-        if args.action_timeout is not None:
-            check_action_timeout(args.action_timeout)
-
-        check_reset_flag(args.reset_failed, args.dry_run, args.validate)
-        check_strict_flag(args.strict, args.dry_run)
-        if wants_tui(args):
-            return _open_view(args, tasks_file, answer)
-
-        if not tasks_file:
-            _report_missing_dir(parser)
-            return UsageError.exit_code
-
-        session = session_args(answer, args.dry_run)
-    except AlrError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return exc.exit_code
-
-    return _Startup(tasks_file, answer, session)
-
-
-def _sync_or_report_pending(args: argparse.Namespace) -> None:
-    """Sync the shipped sandboxes and skills, or only report what a real run would change."""
-    # A plain dry run writes nothing (requirement 9): it refuses what the real
-    # run's add would refuse, reports what the real run would change, and reads
-    # a missing shipped file from the package instead. --validate syncs as a
-    # real run does, so the review reads a sandbox file that is up to date and
-    # uses the skill that came with this alr.
-    if args.dry_run and not args.validate:
-        check_can_add_missing()
-        _report_pending_sandboxes()
-        _report_pending_skills()
-        return
-
-    _sync_sandboxes()
-    _sync_skills()
-
-
-def _route(args: argparse.Namespace, started: _Startup) -> int:
-    """Start the dry run, the validate run, or the real run."""
-    tasks_file = started.tasks_file
-    answer = started.answer
-    action_timeout = args.action_timeout or ""
-    stop = Stop()
-    if args.dry_run:
-        checks = dry_run(
-            sys.stdout,
-            tasks_file,
-            action_timeout,
-            answer.sandbox_file,
-            answer.sandbox_name,
-            _added_on_real_run(answer, args.dry_run),
-            args.strict,
-        )
-        if args.validate:
-            validating = _validate(
-                checks, tasks_file, answer.sandbox_file, action_timeout, stop
-            )
-            return _run(validating, stop)
-
-        return _run(checks, stop)
-
-    return _run(
-        start(
-            tasks_file,
-            action_timeout,
-            started.session,
-            args.reset_failed,
-            sandbox_settings=answer.sandbox_file,
-            stop=stop,
-        ),
-        stop,
-    )
-
-
-async def _validate(
-    checks: Coroutine[Any, Any, int],
-    tasks_file: str,
-    sandbox_file: str,
-    action_timeout: str,
-    stop: Stop,
-) -> None:
-    """Await the dry run, then the review when the dry run was clean.
-
-    Both run in this one coroutine, so a stop at any point is the same
-    cancellation: _run turns it into the signal's exit code.
-
-    Under --strict a warning is a refusal, which carries no count, so the
-    refusal's reason is what says there was one.
-    """
-    try:
-        warnings = await checks
-    except RefusedError as exc:
-        if exc.reason == TASK_FILE_WARNINGS:
-            print(_REVIEW_SKIPPED)
-
-        raise
-
-    if warnings:
-        print(_REVIEW_SKIPPED)
-        return
-
-    await review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
-
-
-def _sync_sandboxes() -> None:
-    """Make the shipped sandbox files match the installed alr, saying what changed.
-
-    A file that cannot be added is a refusal, raised by sync_shipped, because a
-    run cannot pick a sandbox that is not there. A file that cannot be updated is
-    only a warning, since the run can still use the file that is there. Warnings
-    go to stderr and the Added and Updated lines to stdout; the two streams are
-    not ordered against each other, as ADR-037 words it.
-    """
-    report = sync_shipped()
-    for warning in report.warnings:
-        print(f"warning: {warning}", file=sys.stderr)
-
-    for change in report.changes:
-        print(f"{change.verb} {change.path}")
-
-
-def _report_pending_sandboxes() -> None:
-    """Say which shipped sandbox files a real run would change; a dry run writes nothing (requirement 9)."""
-    for change in pending_changes():
-        # A symlink at the name is reported as updated, like a differing file.
-        reason = f"{change.verb.lower()} on a real run"
-        print(f"sandbox: {change.path} ({reason})")
-
-
-def _sync_skills() -> None:
-    """Make the bundled skills match the installed alr, saying what changed.
-
-    A skill that cannot be synced is a warning, never an error: an unwritable
-    skills folder must not stop a run. Warnings go to stderr and the Added and
-    Updated lines to stdout; the two streams are not ordered against each
-    other, as ADR-035 words it.
-    """
-    report = sync()
-    for warning in report.warnings:
-        print(f"warning: {warning}", file=sys.stderr)
-
-    for change in report.changes:
-        print(f"{change.verb} {change.path}")
-
-
-def _report_pending_skills() -> None:
-    """Say which skills a real run would change; a dry run writes nothing (requirement 9)."""
-    for change in pending():
-        print(f"skill: {change.path} ({_pending_reason(change)})")
-
-
-def _pending_reason(change: SkillChange) -> str:
-    """The words a dry run uses for one skill: added, updated, or what it would replace."""
-    if change.replaced:
-        return f"replaces a {change.replaced} on a real run"
-
-    return f"{change.verb.lower()} on a real run"
-
-
-def _note_ignored_folder_sandbox(dir: str) -> None:
-    """Tell a user upgrading that the run folder's sandbox.json no longer answers the permission question.
-
-    The file is left alone and the run goes on as if it were absent.
-    """
-    if not dir:
-        return
-
-    path = Path(dir) / "sandbox.json"
-    if path.is_file():
-        print(f"{path} is no longer read; pick a sandbox with --sandbox <name>")
-
-
-def _handle_missing_config_folder(dry_run: bool) -> int:
-    """Offer the setup on a real run at a terminal, and refuse everywhere else.
-
-    A dry run never asks and never writes (requirement 9), and without a
-    terminal nobody can answer, so both refuse instead of offering the setup.
-    """
-    if dry_run or not _terminal_attached():
-        raise _setup_missing("run alr in a terminal once to create it")
-
-    return _set_up_config()
-
-
-def _set_up_config() -> int:
-    """Ask before creating the config folder, then stop so the user starts the run themselves.
-
-    Nothing is created without a typed yes. The questions and answers go to
-    stdout, so a refusal stays the first thing on stderr.
-    """
-    print(_setup_notice())
-    answer = _read_answer("Create them? [y/N] ")
-    if answer.strip().lower() not in _YES_ANSWERS:
-        print("Nothing was created.")
-        raise _setup_missing("run alr again and answer y to create it")
-
-    create_folder()
-    print(
-        f"The configuration is set up in {config_dir()}. "
-        "Run alr again to start your run."
-    )
-    return 0
-
-
-def _setup_missing(advice: str) -> RefusedError:
-    """Build the refusal for a config folder that is not set up, ending in what to do about it."""
-    return RefusedError(
-        CONFIG_SETUP_MISSING,
-        f"the config setup is missing ({config_dir()}); {advice}",
-    )
-
-
-def _setup_notice() -> str:
-    """Say every folder and file setting up the configuration creates, and where."""
-    listing = "\n".join(f"  {path}" for path in paths_to_create())
-    return f"alr needs to set up its configuration before it can run. It will create:\n{listing}"
-
-
-def _read_answer(prompt: str) -> str:
-    """Ask on the terminal and return the reply; the end of input counts as an empty reply.
-
-    The prompt is printed here and input() gets none: without the readline
-    module, input() writes its prompt to stderr, and a refusal must be the
-    first thing on stderr.
-    """
-    print(prompt, end="", flush=True)
-    try:
-        return input()
-    except EOFError:
-        # End the question's line, so the next message does not follow the prompt on it.
-        print()
-        return ""
-
-
-def _terminal_attached() -> bool:
-    """Report whether a person can answer: stdin and stdout are both terminals."""
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def wants_tui(args: argparse.Namespace) -> bool:
-    """Report whether this run opens the full-screen view: a terminal, no --plain, no dry run."""
-    if args.plain or args.dry_run:
-        return False
-
-    return _terminal_attached()
-
-
-def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int:
-    """Open the full-screen view with what the flags already answer."""
-    # Validates a given settings file; no run starts here.
-    session_args(answer, dry_run=True)
-    sandbox_file = answer.sandbox_file
-    settings = RunSettings(
-        tasks_file=tasks_file,
-        sandbox_file=sandbox_file,
-        sandbox_name=answer.sandbox_name,
-        permissions=_permissions(sandbox_file, args.yolo),
-        action_timeout=args.action_timeout or "",
-        reset_failed=args.reset_failed,
-    )
-    return run_app(settings)
-
-
-def _permissions(sandbox_file: str, skip: bool) -> Permissions:
-    """Name the answer the flags give: skip, a sandbox from a file, or none yet."""
-    if skip:
-        return Permissions.SKIP
-
-    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
-
-
-class _BareMetavarFormatter(argparse.HelpFormatter):
-    """Drop the stray space argparse leaves after a flag whose metavar is empty."""
-
-    def _format_action_invocation(self, action: argparse.Action) -> str:
-        return super()._format_action_invocation(action).replace(" ,", ",").rstrip()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -498,6 +149,241 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+class _BareMetavarFormatter(argparse.HelpFormatter):
+    """Drop the stray space argparse leaves after a flag whose metavar is empty."""
+
+    def _format_action_invocation(self, action: argparse.Action) -> str:
+        return super()._format_action_invocation(action).replace(" ,", ",").rstrip()
+
+
+def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Apply the startup checks in gralph's order, then start the dry run or the real run."""
+    if args.gate_timeout is not None:
+        print(f"error: {_GATE_TIMEOUT_RENAMED}", file=sys.stderr)
+        return UsageError.exit_code
+
+    if args.commit is not None:
+        print(f"error: {_COMMIT_REMOVED}", file=sys.stderr)
+        return UsageError.exit_code
+
+    if args.version:
+        print(_version_line())
+        return 0
+
+    started = _startup_checks(parser, args)
+    if isinstance(started, int):
+        return started
+
+    return _route(args, started)
+
+
+def _version_line() -> str:
+    """Return the --version line: the version, then the OS and architecture."""
+    system = platform.system().lower()
+    return f"alr version: {metadata.version('alr')} {system}/{platform.machine()}"
+
+
+@dataclass(frozen=True)
+class Answer:
+    """What the permission flags settle: a settings file, with the sandbox's name when it was picked by name, or the skip choice."""
+
+    sandbox_file: str
+    skip: bool
+    sandbox_name: str
+
+
+@dataclass(frozen=True)
+class _Startup:
+    """What the startup checks resolved for a run that goes on: the tasks file, the permission answer, and the session's flags."""
+
+    tasks_file: str
+    answer: Answer
+    session: list[str]
+
+
+def _startup_checks(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> _Startup | int:
+    """Run the checks before any run; return an exit code to stop with, or what the run needs."""
+    # --validate is a dry run that also syncs the skills and reviews, so every
+    # check below that decides on a dry run decides the same for it.
+    if args.validate:
+        args.dry_run = True
+
+    try:
+        # Before anything else a real run does, so no later refusal hides the question.
+        if not config_folder_exists():
+            return _handle_missing_config_folder(args.dry_run)
+
+        _sync_or_report_pending(args)
+
+        tasks_file = resolve_dir(args.dir)
+        _note_ignored_folder_sandbox(args.dir)
+        config = load(dry_run=args.dry_run)
+        apply_sandbox_default(args, config.sandbox)
+        answer = resolve_permissions(
+            args.sandbox_settings, args.yolo, args.sandbox, args.dry_run
+        )
+        # An explicitly empty value counts as passed, and is bad.
+        if args.action_timeout is not None:
+            check_action_timeout(args.action_timeout)
+
+        check_reset_flag(args.reset_failed, args.dry_run, args.validate)
+        check_strict_flag(args.strict, args.dry_run)
+        if wants_tui(args):
+            return _open_view(args, tasks_file, answer)
+
+        if not tasks_file:
+            _report_missing_dir(parser)
+            return UsageError.exit_code
+
+        session = session_args(answer, args.dry_run)
+    except AlrError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+    return _Startup(tasks_file, answer, session)
+
+
+def _handle_missing_config_folder(dry_run: bool) -> int:
+    """Offer the setup on a real run at a terminal, and refuse everywhere else.
+
+    A dry run never asks and never writes (requirement 9), and without a
+    terminal nobody can answer, so both refuse instead of offering the setup.
+    """
+    if dry_run or not _terminal_attached():
+        raise _setup_missing("run alr in a terminal once to create it")
+
+    return _set_up_config()
+
+
+def _terminal_attached() -> bool:
+    """Report whether a person can answer: stdin and stdout are both terminals."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _setup_missing(advice: str) -> RefusedError:
+    """Build the refusal for a config folder that is not set up, ending in what to do about it."""
+    return RefusedError(
+        CONFIG_SETUP_MISSING,
+        f"the config setup is missing ({config_dir()}); {advice}",
+    )
+
+
+def _set_up_config() -> int:
+    """Ask before creating the config folder, then stop so the user starts the run themselves.
+
+    Nothing is created without a typed yes. The questions and answers go to
+    stdout, so a refusal stays the first thing on stderr.
+    """
+    print(_setup_notice())
+    answer = _read_answer("Create them? [y/N] ")
+    if answer.strip().lower() not in _YES_ANSWERS:
+        print("Nothing was created.")
+        raise _setup_missing("run alr again and answer y to create it")
+
+    create_folder()
+    print(
+        f"The configuration is set up in {config_dir()}. "
+        "Run alr again to start your run."
+    )
+    return 0
+
+
+def _setup_notice() -> str:
+    """Say every folder and file setting up the configuration creates, and where."""
+    listing = "\n".join(f"  {path}" for path in paths_to_create())
+    return f"alr needs to set up its configuration before it can run. It will create:\n{listing}"
+
+
+def _read_answer(prompt: str) -> str:
+    """Ask on the terminal and return the reply; the end of input counts as an empty reply.
+
+    The prompt is printed here and input() gets none: without the readline
+    module, input() writes its prompt to stderr, and a refusal must be the
+    first thing on stderr.
+    """
+    print(prompt, end="", flush=True)
+    try:
+        return input()
+    except EOFError:
+        # End the question's line, so the next message does not follow the prompt on it.
+        print()
+        return ""
+
+
+def _sync_or_report_pending(args: argparse.Namespace) -> None:
+    """Sync the shipped sandboxes and skills, or only report what a real run would change."""
+    # A plain dry run writes nothing (requirement 9): it refuses what the real
+    # run's add would refuse, reports what the real run would change, and reads
+    # a missing shipped file from the package instead. --validate syncs as a
+    # real run does, so the review reads a sandbox file that is up to date and
+    # uses the skill that came with this alr.
+    if args.dry_run and not args.validate:
+        check_can_add_missing()
+        _report_pending_sandboxes()
+        _report_pending_skills()
+        return
+
+    _sync_sandboxes()
+    _sync_skills()
+
+
+def _report_pending_sandboxes() -> None:
+    """Say which shipped sandbox files a real run would change; a dry run writes nothing (requirement 9)."""
+    for change in pending_changes():
+        # A symlink at the name is reported as updated, like a differing file.
+        reason = f"{change.verb.lower()} on a real run"
+        print(f"sandbox: {change.path} ({reason})")
+
+
+def _report_pending_skills() -> None:
+    """Say which skills a real run would change; a dry run writes nothing (requirement 9)."""
+    for change in pending():
+        print(f"skill: {change.path} ({_pending_reason(change)})")
+
+
+def _pending_reason(change: SkillChange) -> str:
+    """The words a dry run uses for one skill: added, updated, or what it would replace."""
+    if change.replaced:
+        return f"replaces a {change.replaced} on a real run"
+
+    return f"{change.verb.lower()} on a real run"
+
+
+def _sync_sandboxes() -> None:
+    """Make the shipped sandbox files match the installed alr, saying what changed.
+
+    A file that cannot be added is a refusal, raised by sync_shipped, because a
+    run cannot pick a sandbox that is not there. A file that cannot be updated is
+    only a warning, since the run can still use the file that is there. Warnings
+    go to stderr and the Added and Updated lines to stdout; the two streams are
+    not ordered against each other, as ADR-037 words it.
+    """
+    report = sync_shipped()
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    for change in report.changes:
+        print(f"{change.verb} {change.path}")
+
+
+def _sync_skills() -> None:
+    """Make the bundled skills match the installed alr, saying what changed.
+
+    A skill that cannot be synced is a warning, never an error: an unwritable
+    skills folder must not stop a run. Warnings go to stderr and the Added and
+    Updated lines to stdout; the two streams are not ordered against each
+    other, as ADR-035 words it.
+    """
+    report = sync()
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+
+    for change in report.changes:
+        print(f"{change.verb} {change.path}")
+
+
 def resolve_dir(dir: str) -> str:
     """Turn a run folder into the task file path; no folder gives no path.
 
@@ -513,21 +399,17 @@ def resolve_dir(dir: str) -> str:
     return str(path)
 
 
-def resolve_permissions(
-    sandbox_settings: str, skip: bool, name: str | None, dry_run: bool
-) -> Answer:
-    """Return the permissions the flags choose; --sandbox turns a name into the file it names.
+def _note_ignored_folder_sandbox(dir: str) -> None:
+    """Tell a user upgrading that the run folder's sandbox.json no longer answers the permission question.
 
-    The conflicts are refused before the name is looked up, so a typo beside
-    --yolo is reported as the conflict it is.
+    The file is left alone and the run goes on as if it were absent.
     """
-    if name is None:
-        return Answer(sandbox_settings, skip, "")
+    if not dir:
+        return
 
-    if sandbox_settings or skip:
-        raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
-
-    return Answer(str(find(name, dry_run=dry_run)), False, name)
+    path = Path(dir) / "sandbox.json"
+    if path.is_file():
+        print(f"{path} is no longer read; pick a sandbox with --sandbox <name>")
 
 
 def apply_sandbox_default(
@@ -553,6 +435,23 @@ def apply_sandbox_default(
         return
 
     args.sandbox = default.name
+
+
+def resolve_permissions(
+    sandbox_settings: str, skip: bool, name: str | None, dry_run: bool
+) -> Answer:
+    """Return the permissions the flags choose; --sandbox turns a name into the file it names.
+
+    The conflicts are refused before the name is looked up, so a typo beside
+    --yolo is reported as the conflict it is.
+    """
+    if name is None:
+        return Answer(sandbox_settings, skip, "")
+
+    if sandbox_settings or skip:
+        raise UsageError("--sandbox cannot be used with --sandbox-settings or --yolo")
+
+    return Answer(str(find(name, dry_run=dry_run)), False, name)
 
 
 def check_action_timeout(value: str) -> None:
@@ -583,6 +482,30 @@ def check_strict_flag(strict: bool, dry_run: bool) -> None:
     """Refuse --strict without --dry-run: a real run runs no warning rule."""
     if strict and not dry_run:
         raise UsageError("--strict can only be used with --dry-run")
+
+
+def wants_tui(args: argparse.Namespace) -> bool:
+    """Report whether this run opens the full-screen view: a terminal, no --plain, no dry run."""
+    if args.plain or args.dry_run:
+        return False
+
+    return _terminal_attached()
+
+
+def _open_view(args: argparse.Namespace, tasks_file: str, answer: Answer) -> int:
+    """Open the full-screen view with what the flags already answer."""
+    # Validates a given settings file; no run starts here.
+    session_args(answer, dry_run=True)
+    sandbox_file = answer.sandbox_file
+    settings = RunSettings(
+        tasks_file=tasks_file,
+        sandbox_file=sandbox_file,
+        sandbox_name=answer.sandbox_name,
+        permissions=_permissions(sandbox_file, args.yolo),
+        action_timeout=args.action_timeout or "",
+        reset_failed=args.reset_failed,
+    )
+    return run_app(settings)
 
 
 def session_args(answer: Answer, dry_run: bool) -> list[str]:
@@ -627,6 +550,57 @@ def _sandbox_flags(answer: Answer, dry_run: bool) -> list[str]:
     return sandbox_args(answer.sandbox_file, answer.sandbox_name)
 
 
+def _permissions(sandbox_file: str, skip: bool) -> Permissions:
+    """Name the answer the flags give: skip, a sandbox from a file, or none yet."""
+    if skip:
+        return Permissions.SKIP
+
+    return Permissions.SANDBOX if sandbox_file else Permissions.UNSET
+
+
+def _report_missing_dir(parser: argparse.ArgumentParser) -> None:
+    print("error: required flag --dir not set", file=sys.stderr)
+    print(file=sys.stderr)
+    parser.print_usage(sys.stderr)
+
+
+def _route(args: argparse.Namespace, started: _Startup) -> int:
+    """Start the dry run, the validate run, or the real run."""
+    tasks_file = started.tasks_file
+    answer = started.answer
+    action_timeout = args.action_timeout or ""
+    stop = Stop()
+    if args.dry_run:
+        checks = dry_run(
+            sys.stdout,
+            tasks_file,
+            action_timeout,
+            answer.sandbox_file,
+            answer.sandbox_name,
+            _added_on_real_run(answer, args.dry_run),
+            args.strict,
+        )
+        if args.validate:
+            validating = _validate(
+                checks, tasks_file, answer.sandbox_file, action_timeout, stop
+            )
+            return _run(validating, stop)
+
+        return _run(checks, stop)
+
+    return _run(
+        start(
+            tasks_file,
+            action_timeout,
+            started.session,
+            args.reset_failed,
+            sandbox_settings=answer.sandbox_file,
+            stop=stop,
+        ),
+        stop,
+    )
+
+
 def _added_on_real_run(answer: Answer, dry_run: bool) -> bool:
     """Report whether a dry run names a shipped sandbox whose file a real run would add first.
 
@@ -639,10 +613,34 @@ def _added_on_real_run(answer: Answer, dry_run: bool) -> bool:
     return not Path(answer.sandbox_file).exists()
 
 
-def _report_missing_dir(parser: argparse.ArgumentParser) -> None:
-    print("error: required flag --dir not set", file=sys.stderr)
-    print(file=sys.stderr)
-    parser.print_usage(sys.stderr)
+async def _validate(
+    checks: Coroutine[Any, Any, int],
+    tasks_file: str,
+    sandbox_file: str,
+    action_timeout: str,
+    stop: Stop,
+) -> None:
+    """Await the dry run, then the review when the dry run was clean.
+
+    Both run in this one coroutine, so a stop at any point is the same
+    cancellation: _run turns it into the signal's exit code.
+
+    Under --strict a warning is a refusal, which carries no count, so the
+    refusal's reason is what says there was one.
+    """
+    try:
+        warnings = await checks
+    except RefusedError as exc:
+        if exc.reason == TASK_FILE_WARNINGS:
+            print(_REVIEW_SKIPPED)
+
+        raise
+
+    if warnings:
+        print(_REVIEW_SKIPPED)
+        return
+
+    await review(sys.stdout, tasks_file, sandbox_file, action_timeout, stop)
 
 
 def _run(coro: Coroutine[Any, Any, object], stop: Stop) -> int:
@@ -667,23 +665,6 @@ def _run(coro: Coroutine[Any, Any, object], stop: Stop) -> int:
     return 0
 
 
-def _print_to_stderr(line: str) -> None:
-    """Print one line on stderr, after flushing stdout so output captured on one pipe keeps its order.
-
-    stdout is buffered when it is not a terminal and stderr is not, so without
-    the flush an error would come out ahead of the lines printed before it.
-
-    A dead terminal (a hangup that takes it along) fails the flush or the print
-    with OSError. The line has nowhere to go, and raising would replace the
-    exit code of the stop with a traceback.
-    """
-    try:
-        sys.stdout.flush()
-        print(line, file=sys.stderr)
-    except OSError:
-        return
-
-
 async def _with_signals(coro: Coroutine[Any, Any, object], stop: Stop) -> None:
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
@@ -695,20 +676,6 @@ async def _with_signals(coro: Coroutine[Any, Any, object], stop: Stop) -> None:
         loop.add_signal_handler(sig, handler, sig)
 
     await coro
-
-
-def _handled_signals(
-    signals: tuple[signal.Signals, ...],
-) -> tuple[signal.Signals, ...]:
-    """Return signals without a SIGHUP that is ignored now, so it stays ignored.
-
-    Only SIGHUP gets this rule; SIGINT and SIGTERM are always handled.
-    """
-    hangup_ignored = signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
-    if not hangup_ignored:
-        return signals
-
-    return tuple(sig for sig in signals if sig != signal.SIGHUP)
 
 
 def _stop_once(task: asyncio.Task[None], stop: Stop) -> Callable[[int], None]:
@@ -734,3 +701,34 @@ def _stop_once(task: asyncio.Task[None], stop: Stop) -> Callable[[int], None]:
         task.cancel()
 
     return handle
+
+
+def _handled_signals(
+    signals: tuple[signal.Signals, ...],
+) -> tuple[signal.Signals, ...]:
+    """Return signals without a SIGHUP that is ignored now, so it stays ignored.
+
+    Only SIGHUP gets this rule; SIGINT and SIGTERM are always handled.
+    """
+    hangup_ignored = signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
+    if not hangup_ignored:
+        return signals
+
+    return tuple(sig for sig in signals if sig != signal.SIGHUP)
+
+
+def _print_to_stderr(line: str) -> None:
+    """Print one line on stderr, after flushing stdout so output captured on one pipe keeps its order.
+
+    stdout is buffered when it is not a terminal and stderr is not, so without
+    the flush an error would come out ahead of the lines printed before it.
+
+    A dead terminal (a hangup that takes it along) fails the flush or the print
+    with OSError. The line has nowhere to go, and raising would replace the
+    exit code of the stop with a traceback.
+    """
+    try:
+        sys.stdout.flush()
+        print(line, file=sys.stderr)
+    except OSError:
+        return

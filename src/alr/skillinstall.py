@@ -70,6 +70,27 @@ def sync(home: Path | None = None) -> SyncReport:
     return SyncReport(changes=changes, warnings=warnings)
 
 
+def _sync_one(source: Path, target: Path) -> SyncReport:
+    """Classify one skill, apply the change, and report both."""
+    try:
+        change = _classify(source, target)
+        if change is None:
+            return SyncReport(changes=[], warnings=[])
+
+        _replace(source, change.path)
+    except OSError as exc:
+        reason = exc.strerror or exc
+        return SyncReport(
+            changes=[], warnings=[f"skill {target.name}: {target}: {reason}"]
+        )
+
+    if not change.replaced:
+        return SyncReport(changes=[change], warnings=[])
+
+    warning = f"{target} was a {change.replaced}; replaced it with the bundled skill"
+    return SyncReport(changes=[change], warnings=[warning])
+
+
 def pending(home: Path | None = None) -> list[SkillChange]:
     """What `sync` would change, in the same order, without writing anything.
 
@@ -102,25 +123,12 @@ def _add_pending(changes: list[SkillChange], source: Path, target: Path) -> None
     changes.append(change)
 
 
-def _sync_one(source: Path, target: Path) -> SyncReport:
-    """Classify one skill, apply the change, and report both."""
+def _try_classify(source: Path, target: Path) -> SkillChange | None:
+    """Classify one skill for a dry run; None when it is identical or unreadable."""
     try:
-        change = _classify(source, target)
-        if change is None:
-            return SyncReport(changes=[], warnings=[])
-
-        _replace(source, change.path)
-    except OSError as exc:
-        reason = exc.strerror or exc
-        return SyncReport(
-            changes=[], warnings=[f"skill {target.name}: {target}: {reason}"]
-        )
-
-    if not change.replaced:
-        return SyncReport(changes=[change], warnings=[])
-
-    warning = f"{target} was a {change.replaced}; replaced it with the bundled skill"
-    return SyncReport(changes=[change], warnings=[warning])
+        return _classify(source, target)
+    except OSError:
+        return None
 
 
 def _classify(source: Path, target: Path) -> SkillChange | None:
@@ -269,11 +277,3 @@ def _discard_staging(staging: Path, aside: Path, target: Path) -> None:
 def _present(path: Path) -> bool:
     """True when anything stands at path, a dangling symlink included."""
     return path.is_symlink() or path.exists()
-
-
-def _try_classify(source: Path, target: Path) -> SkillChange | None:
-    """Classify one skill for a dry run; None when it is identical or unreadable."""
-    try:
-        return _classify(source, target)
-    except OSError:
-        return None

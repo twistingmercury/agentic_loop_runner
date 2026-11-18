@@ -159,29 +159,55 @@ def parse_tasks(text: str) -> TaskList:
     return TaskList(shared=shared, tasks=tasks)
 
 
-def _where(i: int, task_id: int) -> str:
-    return f"tasks[{i}] (id {task_id})"
+def parse_timeout(text: str) -> float:
+    """Parse an action timeout into seconds.
 
-
-def _check_duplicate(
-    ids: dict[int, int], names: dict[str, int], i: int, task: Task
-) -> None:
-    """Reject a task whose id or name repeats an earlier one, recording both.
-
-    Names compare ignoring case and surrounding whitespace.
+    The task file and the --action-timeout flag both use this, so one set of
+    rules applies. The error text is the bare problem; callers prefix where
+    the value came from.
     """
-    where = _where(i, task.id)
-    if task.id in ids:
-        raise TaskFileError(f"{where}: id: duplicates tasks[{ids[task.id]}]")
+    try:
+        seconds = parse_duration(text)
+    except ValueError as exc:
+        raise ValueError(_DURATION_HINT) from exc
 
-    ids[task.id] = i
-    name = task.name.lower().strip()
-    if name in names:
+    if seconds <= 0:
+        raise ValueError("must be greater than zero")
+
+    return seconds
+
+
+def _check_tags(node: yaml.Node, seen: set[int]) -> None:
+    """Reject any node carrying a tag outside the allowed set."""
+    # An alias is the same node again, and an anchor can point back into itself.
+    if id(node) in seen:
+        return
+
+    seen.add(id(node))
+    if node.tag not in _ALLOWED_TAGS:
         raise TaskFileError(
-            f"{where}: name: duplicates the name of tasks[{names[name]}]"
+            f"line {node.start_mark.line + 1}: tag {_short_tag(node.tag)} is not allowed"
         )
 
-    names[name] = i
+    for child in _children(node):
+        _check_tags(child, seen)
+
+
+def _short_tag(tag: str) -> str:
+    if tag.startswith(_TAG):
+        return "!!" + tag.removeprefix(_TAG)
+
+    return tag
+
+
+def _children(node: yaml.Node) -> list[yaml.Node]:
+    if isinstance(node, yaml.SequenceNode):
+        return node.value
+
+    if isinstance(node, yaml.MappingNode):
+        return [child for pair in node.value for child in pair]
+
+    return []
 
 
 def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.Node, yaml.SequenceNode]:
@@ -216,6 +242,14 @@ def _root_nodes(doc: yaml.Node | None) -> tuple[yaml.Node, yaml.SequenceNode]:
     return shared, seq
 
 
+def _key_text(key_node: yaml.Node) -> str:
+    """A key's text; a sequence or mapping used as a key reads as empty."""
+    if not isinstance(key_node, yaml.ScalarNode):
+        return ""
+
+    return key_node.value
+
+
 def _check_root_key(key: str, seen: dict[str, yaml.Node]) -> None:
     if key == "gates":
         raise TaskFileError(
@@ -248,6 +282,19 @@ def _check_shared(node: yaml.Node) -> Shared:
     )
 
 
+def _fields(where: str, el: yaml.MappingNode) -> dict[str, yaml.Node]:
+    """Map each key of the mapping to its value node, rejecting a repeated key."""
+    fields: dict[str, yaml.Node] = {}
+    for key_node, value in el.value:
+        key = _key_text(key_node)
+        if key in fields:
+            raise TaskFileError(f"{where}: {key}: duplicate key")
+
+        fields[key] = value
+
+    return fields
+
+
 def _check_shared_keys(fields: dict[str, yaml.Node]) -> None:
     """Reject a key shared does not have, naming the replacement for `gates`.
 
@@ -266,6 +313,30 @@ def _check_shared_keys(fields: dict[str, yaml.Node]) -> None:
             )
 
 
+def _text_node(label: str, node: yaml.Node | None, *, required: bool = False) -> str:
+    """Read a string node, naming it by label in errors; "" when it is absent and not required."""
+    if node is None and required:
+        raise TaskFileError(f"{label}: is required")
+
+    if node is None:
+        return ""
+
+    if not _is_string(node):
+        raise TaskFileError(f"{label}: must be a string")
+
+    if required and node.value.strip() == "":
+        raise TaskFileError(f"{label}: must not be empty or whitespace")
+
+    if _LONE_SURROGATE.search(node.value):
+        raise TaskFileError(f"{label}: must not contain a lone surrogate")
+
+    return node.value
+
+
+def _is_string(node: yaml.Node) -> bool:
+    return isinstance(node, yaml.ScalarNode) and node.tag == _STR
+
+
 def _optional_actions(key: str, fields: dict[str, yaml.Node]) -> list[Action] | None:
     """The actions under shared.<key>, or None when the key is absent."""
     node = fields.get(key)
@@ -273,6 +344,79 @@ def _optional_actions(key: str, fields: dict[str, yaml.Node]) -> list[Action] | 
         return None
 
     return _check_actions(f"shared.{key}", node)
+
+
+def _check_actions(label: str, node: yaml.Node) -> list[Action]:
+    """Check an action sequence, named by label in errors, and build its actions.
+
+    One checker serves the shared lists and a task's own list, so every list
+    gets the same rules. A malformed action must reject the file: reading only
+    what is recognized would drop the rest, and the next save would then erase it.
+    """
+    if not isinstance(node, yaml.SequenceNode):
+        raise TaskFileError(f"{label}: must be a sequence")
+
+    return [_check_action(f"{label}[{j}]", el) for j, el in enumerate(node.value)]
+
+
+def _check_action(where: str, el: yaml.Node) -> Action:
+    """Check one action, allowing only the action and timeout keys.
+
+    A misspelled or invented option is an error instead of an action that
+    quietly does less than its author meant. The old `cmd` key is named, so an
+    old file is told what to change.
+    """
+    if not isinstance(el, yaml.MappingNode):
+        raise TaskFileError(f"{where}: must be a mapping")
+
+    fields = _fields(where, el)
+    for key in fields:
+        _check_action_key(where, key)
+
+    command = _text(where, fields, "action", required=True)
+    return Action(
+        command=command, timeout=_check_action_timeout(where, fields.get("timeout"))
+    )
+
+
+def _check_action_key(where: str, key: str) -> None:
+    if key == "cmd":
+        raise TaskFileError(
+            f"{where}: cmd: renamed to action; see the README (Migrating from commit modes and gates)"
+        )
+
+    if key not in ("action", "timeout"):
+        raise TaskFileError(
+            f"{where}: {key}: unknown key; an action has only action and timeout"
+        )
+
+
+def _text(
+    where: str, fields: dict[str, yaml.Node], name: str, *, required: bool = False
+) -> str:
+    """Read a string field; "" when the key is absent and not required."""
+    return _text_node(f"{where}: {name}", fields.get(name), required=required)
+
+
+def _check_action_timeout(where: str, node: yaml.Node | None) -> str:
+    """Check an action's timeout and return its text as written.
+
+    The tag is checked as well as the text because `timeout: 30` is a YAML
+    integer, and a bare number has no unit to read. The run parses the text
+    again when the action runs.
+    """
+    if node is None:
+        return ""
+
+    if not _is_string(node):
+        raise TaskFileError(f"{where}: timeout: {_DURATION_HINT}")
+
+    try:
+        parse_timeout(node.value)
+    except ValueError as exc:
+        raise TaskFileError(f"{where}: timeout: {exc}") from exc
+
+    return node.value
 
 
 def _parse_task(i: int, el: yaml.Node) -> Task:
@@ -303,6 +447,37 @@ def _parse_task(i: int, el: yaml.Node) -> Task:
         error=error,
         actions=actions,
     )
+
+
+def _task_id(i: int, fields: dict[str, yaml.Node]) -> int:
+    """Read the id; only a YAML integer from 1 to 32767 is accepted."""
+    node = fields.get("id")
+    if node is None:
+        raise TaskFileError(f"tasks[{i}]: id: is required")
+
+    task_id = _int_value(node)
+    if task_id is None or not 0 < task_id <= _MAX_ID:
+        raise TaskFileError(f"tasks[{i}]: {_ID_ERROR}")
+
+    return task_id
+
+
+def _int_value(node: yaml.Node) -> int | None:
+    """Convert an int-tagged scalar as PyYAML's safe constructor does.
+
+    None for any other node, and for text an explicit !!int tag cannot read.
+    """
+    if not isinstance(node, yaml.ScalarNode) or node.tag != _INT:
+        return None
+
+    try:
+        return yaml.SafeLoader("").construct_yaml_int(node)
+    except (ValueError, IndexError):
+        return None
+
+
+def _where(i: int, task_id: int) -> str:
+    return f"tasks[{i}] (id {task_id})"
 
 
 def _task_name(where: str, fields: dict[str, yaml.Node]) -> str:
@@ -381,200 +556,25 @@ def _check_task_keys(where: str, fields: dict[str, yaml.Node]) -> None:
             )
 
 
-def _fields(where: str, el: yaml.MappingNode) -> dict[str, yaml.Node]:
-    """Map each key of the mapping to its value node, rejecting a repeated key."""
-    fields: dict[str, yaml.Node] = {}
-    for key_node, value in el.value:
-        key = _key_text(key_node)
-        if key in fields:
-            raise TaskFileError(f"{where}: {key}: duplicate key")
+def _check_duplicate(
+    ids: dict[int, int], names: dict[str, int], i: int, task: Task
+) -> None:
+    """Reject a task whose id or name repeats an earlier one, recording both.
 
-        fields[key] = value
-
-    return fields
-
-
-def _key_text(key_node: yaml.Node) -> str:
-    """A key's text; a sequence or mapping used as a key reads as empty."""
-    if not isinstance(key_node, yaml.ScalarNode):
-        return ""
-
-    return key_node.value
-
-
-def _task_id(i: int, fields: dict[str, yaml.Node]) -> int:
-    """Read the id; only a YAML integer from 1 to 32767 is accepted."""
-    node = fields.get("id")
-    if node is None:
-        raise TaskFileError(f"tasks[{i}]: id: is required")
-
-    task_id = _int_value(node)
-    if task_id is None or not 0 < task_id <= _MAX_ID:
-        raise TaskFileError(f"tasks[{i}]: {_ID_ERROR}")
-
-    return task_id
-
-
-def _int_value(node: yaml.Node) -> int | None:
-    """Convert an int-tagged scalar as PyYAML's safe constructor does.
-
-    None for any other node, and for text an explicit !!int tag cannot read.
+    Names compare ignoring case and surrounding whitespace.
     """
-    if not isinstance(node, yaml.ScalarNode) or node.tag != _INT:
-        return None
+    where = _where(i, task.id)
+    if task.id in ids:
+        raise TaskFileError(f"{where}: id: duplicates tasks[{ids[task.id]}]")
 
-    try:
-        return yaml.SafeLoader("").construct_yaml_int(node)
-    except (ValueError, IndexError):
-        return None
-
-
-def _text(
-    where: str, fields: dict[str, yaml.Node], name: str, *, required: bool = False
-) -> str:
-    """Read a string field; "" when the key is absent and not required."""
-    return _text_node(f"{where}: {name}", fields.get(name), required=required)
-
-
-def _text_node(label: str, node: yaml.Node | None, *, required: bool = False) -> str:
-    """Read a string node, naming it by label in errors; "" when it is absent and not required."""
-    if node is None and required:
-        raise TaskFileError(f"{label}: is required")
-
-    if node is None:
-        return ""
-
-    if not _is_string(node):
-        raise TaskFileError(f"{label}: must be a string")
-
-    if required and node.value.strip() == "":
-        raise TaskFileError(f"{label}: must not be empty or whitespace")
-
-    if _LONE_SURROGATE.search(node.value):
-        raise TaskFileError(f"{label}: must not contain a lone surrogate")
-
-    return node.value
-
-
-def _is_string(node: yaml.Node) -> bool:
-    return isinstance(node, yaml.ScalarNode) and node.tag == _STR
-
-
-def _check_actions(label: str, node: yaml.Node) -> list[Action]:
-    """Check an action sequence, named by label in errors, and build its actions.
-
-    One checker serves the shared lists and a task's own list, so every list
-    gets the same rules. A malformed action must reject the file: reading only
-    what is recognized would drop the rest, and the next save would then erase it.
-    """
-    if not isinstance(node, yaml.SequenceNode):
-        raise TaskFileError(f"{label}: must be a sequence")
-
-    return [_check_action(f"{label}[{j}]", el) for j, el in enumerate(node.value)]
-
-
-def _check_action(where: str, el: yaml.Node) -> Action:
-    """Check one action, allowing only the action and timeout keys.
-
-    A misspelled or invented option is an error instead of an action that
-    quietly does less than its author meant. The old `cmd` key is named, so an
-    old file is told what to change.
-    """
-    if not isinstance(el, yaml.MappingNode):
-        raise TaskFileError(f"{where}: must be a mapping")
-
-    fields = _fields(where, el)
-    for key in fields:
-        _check_action_key(where, key)
-
-    command = _text(where, fields, "action", required=True)
-    return Action(
-        command=command, timeout=_check_action_timeout(where, fields.get("timeout"))
-    )
-
-
-def _check_action_key(where: str, key: str) -> None:
-    if key == "cmd":
+    ids[task.id] = i
+    name = task.name.lower().strip()
+    if name in names:
         raise TaskFileError(
-            f"{where}: cmd: renamed to action; see the README (Migrating from commit modes and gates)"
+            f"{where}: name: duplicates the name of tasks[{names[name]}]"
         )
 
-    if key not in ("action", "timeout"):
-        raise TaskFileError(
-            f"{where}: {key}: unknown key; an action has only action and timeout"
-        )
-
-
-def _check_action_timeout(where: str, node: yaml.Node | None) -> str:
-    """Check an action's timeout and return its text as written.
-
-    The tag is checked as well as the text because `timeout: 30` is a YAML
-    integer, and a bare number has no unit to read. The run parses the text
-    again when the action runs.
-    """
-    if node is None:
-        return ""
-
-    if not _is_string(node):
-        raise TaskFileError(f"{where}: timeout: {_DURATION_HINT}")
-
-    try:
-        parse_timeout(node.value)
-    except ValueError as exc:
-        raise TaskFileError(f"{where}: timeout: {exc}") from exc
-
-    return node.value
-
-
-def parse_timeout(text: str) -> float:
-    """Parse an action timeout into seconds.
-
-    The task file and the --action-timeout flag both use this, so one set of
-    rules applies. The error text is the bare problem; callers prefix where
-    the value came from.
-    """
-    try:
-        seconds = parse_duration(text)
-    except ValueError as exc:
-        raise ValueError(_DURATION_HINT) from exc
-
-    if seconds <= 0:
-        raise ValueError("must be greater than zero")
-
-    return seconds
-
-
-def _check_tags(node: yaml.Node, seen: set[int]) -> None:
-    """Reject any node carrying a tag outside the allowed set."""
-    # An alias is the same node again, and an anchor can point back into itself.
-    if id(node) in seen:
-        return
-
-    seen.add(id(node))
-    if node.tag not in _ALLOWED_TAGS:
-        raise TaskFileError(
-            f"line {node.start_mark.line + 1}: tag {_short_tag(node.tag)} is not allowed"
-        )
-
-    for child in _children(node):
-        _check_tags(child, seen)
-
-
-def _short_tag(tag: str) -> str:
-    if tag.startswith(_TAG):
-        return "!!" + tag.removeprefix(_TAG)
-
-    return tag
-
-
-def _children(node: yaml.Node) -> list[yaml.Node]:
-    if isinstance(node, yaml.SequenceNode):
-        return node.value
-
-    if isinstance(node, yaml.MappingNode):
-        return [child for pair in node.value for child in pair]
-
-    return []
+    names[name] = i
 
 
 def save_tasks(path: str, task_list: TaskList) -> None:
