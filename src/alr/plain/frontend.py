@@ -186,13 +186,22 @@ async def _tee(
         if chunks is not None:
             chunks.append(chunk)
 
-        *ends, rest = chunk.split(b"\n")
-        for end in ends:
-            on_line(b"".join([*pieces, end]))
-            pieces.clear()
-
-        if rest:
-            pieces.append(rest)
+        _report_lines(chunk, pieces, on_line)
 
     if pieces:
         on_line(b"".join(pieces))
+
+
+def _report_lines(
+    chunk: bytes,
+    pieces: list[bytes],
+    on_line: Callable[[bytes], None],
+) -> None:
+    """Send each line the chunk completes to on_line, and keep the partial tail in pieces."""
+    *ends, rest = chunk.split(b"\n")
+    for end in ends:
+        on_line(b"".join([*pieces, end]))
+        pieces.clear()
+
+    if rest:
+        pieces.append(rest)
