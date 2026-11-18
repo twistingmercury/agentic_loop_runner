@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-11-18
+
+### Changed
+
+- Internal cleanup of `src/alr` against the code-shape rules (issues #74 to
+  #91, PR #92): deeply nested functions are flattened, `_main` and
+  `_parse_task` are split into smaller steps, and definitions are ordered so
+  public names come first and helpers follow in call order. No flag, message,
+  exit code, run-log line, or `tasks.yaml` rule changes.
+
 ## [0.5.5] - 2026-11-17
 
 ### Fixed
