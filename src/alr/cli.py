@@ -143,9 +143,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if wants_tui(args):
             return _open_view(args, tasks_file, answer)
 
-        missing = _missing_flags(tasks_file)
-        if missing:
-            _report_missing(parser, missing)
+        if not tasks_file:
+            _report_missing_dir(parser)
             return UsageError.exit_code
 
         session = session_args(answer, args.dry_run)
@@ -607,14 +606,8 @@ def _added_on_real_run(answer: Answer, dry_run: bool) -> bool:
     return not Path(answer.sandbox_file).exists()
 
 
-def _missing_flags(tasks_file: str) -> list[str]:
-    return [] if tasks_file else ["--dir"]
-
-
-def _report_missing(parser: argparse.ArgumentParser, missing: list[str]) -> None:
-    for flag in missing:
-        print(f"error: required flag {flag} not set", file=sys.stderr)
-
+def _report_missing_dir(parser: argparse.ArgumentParser) -> None:
+    print("error: required flag --dir not set", file=sys.stderr)
     print(file=sys.stderr)
     parser.print_usage(sys.stderr)
 
