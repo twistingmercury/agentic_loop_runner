@@ -283,8 +283,8 @@ class RunLog:
             for parent in self._made_parents:
                 parent.rmdir()
 
-    def _write_ledger(self, event: str, fields: dict[str, Any]) -> None:
-        line = {"time": _rfc3339(self._now()), "event": event, **fields}
+    def _write_ledger(self, ledger_event: str, fields: dict[str, Any]) -> None:
+        line = {"time": _rfc3339(self._now()), "event": ledger_event, **fields}
         text = json.dumps(line, separators=(",", ":"), ensure_ascii=False) + "\n"
         _write(self._ledger, self._ledger_path, text)
 
@@ -339,13 +339,13 @@ class RunLog:
             },
         )
 
-    def _step_finished(self, event: str, task: Task, seconds: float) -> None:
+    def _step_finished(self, ledger_event: str, task: Task, seconds: float) -> None:
         fields: dict[str, Any] = {"task": task.id, "state": task.state}
         if task.error:
             fields["error"] = task.error
 
         fields["duration"] = format_duration(seconds)
-        self._write_ledger(event, fields)
+        self._write_ledger(ledger_event, fields)
 
     def _action_finished(self, event: ActionFinished) -> None:
         self._write_ledger(
