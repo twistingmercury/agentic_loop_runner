@@ -51,66 +51,6 @@ def run_dir(log_dir: Path, start: datetime) -> Path:
     return log_dir / start.strftime("%Y%m%dT%H%M%S")
 
 
-def _local_now() -> datetime:
-    return datetime.now().astimezone()
-
-
-def _open_append(path: Path) -> TextIO:
-    try:
-        fd = os.open(path, _APPEND, _FILE_MODE)
-    except OSError as exc:
-        raise _io_error(path, exc) from exc
-
-    # errors="replace" is the last resort for text that never passed through the
-    # stream path's scrub (task names, Info fields): a lone surrogate cannot be
-    # encoded as UTF-8, and it is written as "?" rather than failing the run.
-    return os.fdopen(fd, "a", encoding="utf-8", errors="replace", newline="\n")
-
-
-def _io_error(path: Path, exc: OSError) -> RunLogError:
-    return RunLogError(f"{path}: {exc.strerror}")
-
-
-def _missing_parents(path: Path) -> list[Path]:
-    """The folders above path that do not exist yet, nearest first."""
-    missing: list[Path] = []
-    for parent in path.parents:
-        if parent.exists():
-            break
-
-        missing.append(parent)
-
-    return missing
-
-
-def _create_run_dir(path: Path) -> tuple[Path, list[Path]]:
-    """Make the run's folder, taking the first free suffixed name when path
-    exists: an existing run folder holds another run's record.
-
-    Returns the folder and the parents this call had to create, nearest first,
-    so a discarded log can take them away again.
-    """
-    made = _missing_parents(path)
-    try:
-        path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
-    except OSError as exc:
-        raise _create_error(path, exc) from exc
-
-    candidate = path
-    attempt = 0
-    while True:
-        try:
-            candidate.mkdir(mode=_DIR_MODE)
-        except FileExistsError:
-            attempt += 1
-            candidate = path.with_name(f"{path.name}-{attempt}")
-            continue
-        except OSError as exc:
-            raise _create_error(candidate, exc) from exc
-
-        return candidate, made
-
-
 def check_writable(path: Path) -> None:
     """Refuse, as opening the log would, a path whose run folder cannot be made,
     creating nothing: the dry run must not write, yet must agree with a real run."""
@@ -129,51 +69,8 @@ def check_writable(path: Path) -> None:
         raise _refused_unwritable(path, errno.EACCES)
 
 
-def _present(path: Path) -> bool:
-    """Report whether anything is at path, a symlink that leads nowhere included."""
-    return path.is_symlink() or path.exists()
-
-
-def _refused_unwritable(path: Path, code: int) -> RefusedError:
-    os_error = OSError(code, os.strerror(code))
-    create_error = _create_error(path, os_error)
-    message = str(create_error)
-
-    return RefusedError(LOG_UNWRITABLE, message)
-
-
-def _create_error(path: Path, exc: OSError) -> RunLogError:
-    return RunLogError(f"cannot create the run log folder {path}: {exc.strerror}")
-
-
-def _not_open(path: Path) -> RunLogError:
-    return RunLogError(f"{path}: the run log is not open")
-
-
-def _close(file: TextIO | None, path: Path) -> None:
-    if file is None:
-        return
-
-    try:
-        file.close()
-    except OSError as exc:
-        raise _io_error(path, exc) from exc
-
-
-def _write(file: TextIO | None, path: Path, text: str) -> None:
-    if file is None:
-        raise _not_open(path)
-
-    try:
-        file.write(text)
-        file.flush()
-    except OSError as exc:
-        raise _io_error(path, exc) from exc
-
-
-def _rfc3339(stamp: datetime) -> str:
-    # Written like Go's RFC 3339: the clock's own offset, and Z for UTC.
-    return stamp.isoformat(timespec="seconds").replace("+00:00", "Z")
+def _local_now() -> datetime:
+    return datetime.now().astimezone()
 
 
 class RunLog:
@@ -373,6 +270,109 @@ class RunLog:
         fields["exit"] = event.exit_code
         fields["duration"] = format_duration(event.seconds)
         self._write_ledger("run_finished", fields)
+
+
+def _present(path: Path) -> bool:
+    """Report whether anything is at path, a symlink that leads nowhere included."""
+    return path.is_symlink() or path.exists()
+
+
+def _refused_unwritable(path: Path, code: int) -> RefusedError:
+    os_error = OSError(code, os.strerror(code))
+    create_error = _create_error(path, os_error)
+    message = str(create_error)
+
+    return RefusedError(LOG_UNWRITABLE, message)
+
+
+def _create_error(path: Path, exc: OSError) -> RunLogError:
+    return RunLogError(f"cannot create the run log folder {path}: {exc.strerror}")
+
+
+def _create_run_dir(path: Path) -> tuple[Path, list[Path]]:
+    """Make the run's folder, taking the first free suffixed name when path
+    exists: an existing run folder holds another run's record.
+
+    Returns the folder and the parents this call had to create, nearest first,
+    so a discarded log can take them away again.
+    """
+    made = _missing_parents(path)
+    try:
+        path.parent.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _create_error(path, exc) from exc
+
+    candidate = path
+    attempt = 0
+    while True:
+        try:
+            candidate.mkdir(mode=_DIR_MODE)
+        except FileExistsError:
+            attempt += 1
+            candidate = path.with_name(f"{path.name}-{attempt}")
+            continue
+        except OSError as exc:
+            raise _create_error(candidate, exc) from exc
+
+        return candidate, made
+
+
+def _missing_parents(path: Path) -> list[Path]:
+    """The folders above path that do not exist yet, nearest first."""
+    missing: list[Path] = []
+    for parent in path.parents:
+        if parent.exists():
+            break
+
+        missing.append(parent)
+
+    return missing
+
+
+def _open_append(path: Path) -> TextIO:
+    try:
+        fd = os.open(path, _APPEND, _FILE_MODE)
+    except OSError as exc:
+        raise _io_error(path, exc) from exc
+
+    # errors="replace" is the last resort for text that never passed through the
+    # stream path's scrub (task names, Info fields): a lone surrogate cannot be
+    # encoded as UTF-8, and it is written as "?" rather than failing the run.
+    return os.fdopen(fd, "a", encoding="utf-8", errors="replace", newline="\n")
+
+
+def _io_error(path: Path, exc: OSError) -> RunLogError:
+    return RunLogError(f"{path}: {exc.strerror}")
+
+
+def _rfc3339(stamp: datetime) -> str:
+    # Written like Go's RFC 3339: the clock's own offset, and Z for UTC.
+    return stamp.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _write(file: TextIO | None, path: Path, text: str) -> None:
+    if file is None:
+        raise _not_open(path)
+
+    try:
+        file.write(text)
+        file.flush()
+    except OSError as exc:
+        raise _io_error(path, exc) from exc
+
+
+def _not_open(path: Path) -> RunLogError:
+    return RunLogError(f"{path}: the run log is not open")
+
+
+def _close(file: TextIO | None, path: Path) -> None:
+    if file is None:
+        return
+
+    try:
+        file.close()
+    except OSError as exc:
+        raise _io_error(path, exc) from exc
 
 
 def _action_result(event: ActionFinished) -> str:
