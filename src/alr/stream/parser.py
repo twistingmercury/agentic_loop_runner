@@ -80,6 +80,8 @@ def _tool_activity(name: str, tool_input: Any) -> str:
     field = _TARGET_FIELDS.get(name)
     target = ""
     if field is not None and isinstance(tool_input, dict):
-        target = replace_lone_surrogates(first_line(_text(tool_input.get(field))))
+        raw_text = _text(tool_input.get(field))
+        first = first_line(raw_text)
+        target = replace_lone_surrogates(first)
 
     return f"→ {name} {target}" if target else f"→ {name}"
