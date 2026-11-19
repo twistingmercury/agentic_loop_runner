@@ -1,4 +1,4 @@
-"""AlrApp: the four states, Start, Stop, and the summary, over a real engine and the fake claude."""
+"""MilhouseApp: the four states, Start, Stop, and the summary, over a real engine and the fake claude."""
 
 import asyncio
 import os
@@ -33,28 +33,28 @@ from textual.widgets import (
     TextArea,
 )
 
-from alr import cli
-from alr.engine import proc
-from alr.engine.stop import Stop
-from alr.errors import RefusedError, RunLogError
-from alr.record.runlog import RunLog
-from alr.sandboxes import sandboxes_dir
-from alr.tasks import parse_tasks
-from alr.tui.app import AlrApp, AppState
-from alr.record.events import ActionStarted, Activity, TaskStarted
-from alr.tasks import Action, Task
-from alr.tui.adapter import RunEvent
-from alr.tui.panes import ActivityPane, TasksPane
-from alr.tui.prepare import Prepared
-from alr.tui import app as app_module
-from alr.tui.dialogs import (
+from milhouse import cli
+from milhouse.engine import proc
+from milhouse.engine.stop import Stop
+from milhouse.errors import RefusedError, RunLogError
+from milhouse.record.runlog import RunLog
+from milhouse.sandboxes import sandboxes_dir
+from milhouse.tasks import parse_tasks
+from milhouse.tui.app import MilhouseApp, AppState
+from milhouse.record.events import ActionStarted, Activity, TaskStarted
+from milhouse.tasks import Action, Task
+from milhouse.tui.adapter import RunEvent
+from milhouse.tui.panes import ActivityPane, TasksPane
+from milhouse.tui.prepare import Prepared
+from milhouse.tui import app as app_module
+from milhouse.tui.dialogs import (
     FileViewer,
     FolderDialog,
     ActionsDialog,
     PermissionsDialog,
     ResetDialog,
 )
-from alr.tui.settings import Permissions, RunSettings
+from milhouse.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
   prompt: do it
@@ -90,12 +90,12 @@ def _short_grace(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(proc, "_DRAIN_GRACE", 0.2)
 
 
-async def _finished(app: AlrApp) -> None:
+async def _finished(app: MilhouseApp) -> None:
     await until(lambda: app.state is AppState.FINISHED)
 
 
 async def test_setup_disables_start_and_names_the_reason() -> None:
-    app = AlrApp(RunSettings())
+    app = MilhouseApp(RunSettings())
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -105,7 +105,7 @@ async def test_setup_disables_start_and_names_the_reason() -> None:
 
 
 async def test_ready_enables_start(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -118,7 +118,7 @@ async def test_a_failed_task_finishes_failed(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"nope"}')
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -132,7 +132,7 @@ async def test_start_twice_starts_one_run(
 ) -> None:
     record = tmp_path / "record.log"
     monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(record))
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s", "s")
         await _finished(app)
@@ -145,7 +145,7 @@ async def test_stop_ends_a_blocked_run_as_stopped(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -161,7 +161,7 @@ async def test_the_start_button_becomes_a_working_stop_button(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         button = app.query_one("#start", Button)
         await until(lambda: not button.disabled)
@@ -182,7 +182,7 @@ async def test_the_start_button_becomes_a_working_stop_button(
 
 
 async def test_ctrl_p_opens_nothing(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("ctrl+p")
@@ -197,7 +197,7 @@ async def test_sigterm_stops_a_run(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -213,7 +213,7 @@ async def test_sighup_stops_a_run(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -232,7 +232,7 @@ async def test_sighup_stops_the_view_even_when_it_was_ignored_at_start(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
     try:
-        app = AlrApp(_settings(work_dir))
+        app = MilhouseApp(_settings(work_dir))
         async with app.run_test() as pilot:
             await pilot.press("s")
             await until(lambda: app.state is AppState.RUNNING)
@@ -253,7 +253,7 @@ async def test_sigterm_stops_the_view_even_when_it_was_ignored_at_start(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     before = signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
-        app = AlrApp(_settings(work_dir))
+        app = MilhouseApp(_settings(work_dir))
         async with app.run_test() as pilot:
             await pilot.press("s")
             await until(lambda: app.state is AppState.RUNNING)
@@ -276,7 +276,7 @@ async def test_a_signal_during_a_run_quits_the_view_once_it_stopped(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch, sent: signal.Signals, code: int
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -292,7 +292,7 @@ async def test_a_signal_during_a_run_quits_the_view_once_it_stopped(
 async def test_unmount_puts_the_stop_signals_back_to_their_default_action(
     work_dir: Path,
 ) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -304,7 +304,7 @@ async def test_unmount_puts_the_stop_signals_back_to_their_default_action(
 
 
 async def test_ctrl_c_when_nothing_runs_quits(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("ctrl+c")
         await pilot.pause()
@@ -315,7 +315,7 @@ async def test_ctrl_c_when_nothing_runs_quits(work_dir: Path) -> None:
 async def test_a_run_of_completed_tasks_finishes_done_at_once(work_dir: Path) -> None:
     done = TASKS.replace("prompt: p\n", "prompt: p\n    state: completed\n")
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", done)
-    app = AlrApp(
+    app = MilhouseApp(
         RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False)
     )
     async with app.run_test() as pilot:
@@ -329,7 +329,7 @@ async def test_permissions_label_shows_the_choice_and_applies_the_dialog(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(RunSettings(tasks_file=tasks_file))
+    app = MilhouseApp(RunSettings(tasks_file=tasks_file))
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, PermissionsDialog))
         label = app.query_one("#permissions")
@@ -356,7 +356,7 @@ async def test_needs_actions_only_for_an_absent_key(
 ) -> None:
     text = f"shared:\n  prompt: p\n{actions_block}tasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", text)
-    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    app = MilhouseApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -366,7 +366,7 @@ async def test_needs_actions_only_for_an_absent_key(
 @pytest.mark.usefixtures("fake_claude")
 async def test_start_saves_the_edited_actions(work_dir: Path) -> None:
     settings = _settings(work_dir, after_task=[Action(command="true")])
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -376,7 +376,7 @@ async def test_start_saves_the_edited_actions(work_dir: Path) -> None:
 
 
 async def test_launch_opens_the_folder_dialog_when_no_folder_is_known() -> None:
-    app = AlrApp(RunSettings())
+    app = MilhouseApp(RunSettings())
     async with app.run_test():
         await until(lambda: isinstance(app.screen, FolderDialog))
 
@@ -384,7 +384,7 @@ async def test_launch_opens_the_folder_dialog_when_no_folder_is_known() -> None:
 async def test_launch_skips_every_step_the_inputs_answer(work_dir: Path) -> None:
     text = "shared:\n  prompt: p\n  after_task: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", text)
-    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    app = MilhouseApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -397,7 +397,7 @@ async def test_launch_asks_for_permissions_then_actions_in_order(
 ) -> None:
     text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", text)
-    app = AlrApp(RunSettings(tasks_file=tasks_file))
+    app = MilhouseApp(RunSettings(tasks_file=tasks_file))
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, PermissionsDialog))
 
@@ -410,7 +410,7 @@ async def test_launch_asks_for_permissions_then_actions_in_order(
 
 
 async def test_the_menu_reopens_a_dialog_before_start(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -424,7 +424,7 @@ async def test_the_menu_reopens_a_dialog_before_start(work_dir: Path) -> None:
 
 async def test_the_menu_opens_the_task_file_read_only(work_dir: Path) -> None:
     settings = _settings(work_dir)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -437,7 +437,7 @@ async def test_the_menu_opens_the_task_file_read_only(work_dir: Path) -> None:
 
 
 async def test_the_viewer_says_when_there_is_no_sandbox_file(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -453,7 +453,7 @@ async def test_setup_dialogs_do_not_open_while_running(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch, item: str
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -470,7 +470,7 @@ async def test_setup_dialogs_do_not_open_while_running(
 async def test_a_logged_run_leaves_a_ledger(work_dir: Path) -> None:
     settings = _settings(work_dir)
     settings.logging = True
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -485,7 +485,7 @@ async def test_a_logged_run_leaves_a_ledger(work_dir: Path) -> None:
 async def test_logging_is_a_dropdown_with_on_and_off(work_dir: Path) -> None:
     settings = _settings(work_dir)
     settings.logging = True
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         dropdown = app.query_one("#logging", Select)
@@ -530,7 +530,7 @@ async def test_stop_during_prepare_finishes_stopped(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -556,7 +556,7 @@ async def test_pressing_the_stop_button_twice_leaves_the_app_open(
             raise
 
     monkeypatch.setattr(app_module, "prepare", slow_to_stop)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     exits: list[object] = []
     # exit() only queues the shutdown, so record the call instead of racing it.
     monkeypatch.setattr(app, "exit", lambda *args, **kwargs: exits.append(args))
@@ -586,7 +586,7 @@ async def test_a_second_stop_while_stopping_quits(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -601,7 +601,7 @@ async def test_a_second_stop_while_stopping_leaves_exit_code_130(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -618,7 +618,7 @@ async def test_sigterm_during_prepare_finishes_stopped_with_exit_code_143(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -635,7 +635,7 @@ async def test_sighup_during_prepare_finishes_stopped_with_exit_code_129(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -652,7 +652,7 @@ async def test_a_ctrl_c_after_sigterm_during_prepare_keeps_exit_code_143(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -670,7 +670,7 @@ async def test_a_second_sigterm_while_stopping_quits_with_exit_code_143(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -688,7 +688,7 @@ async def test_a_second_sighup_while_stopping_quits_with_exit_code_129(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -718,7 +718,7 @@ async def test_a_second_different_signal_keeps_the_first_ones_exit_code(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -736,7 +736,7 @@ async def test_a_second_stop_button_press_while_stopping_does_nothing(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=True)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -786,7 +786,7 @@ async def test_a_refused_start_during_a_stop_clears_the_stop_state(
 ) -> None:
     entered = asyncio.Event()
     _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -802,7 +802,7 @@ async def test_a_refused_start_during_a_sigterm_stop_forgets_the_signal(
 ) -> None:
     entered = asyncio.Event()
     _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -819,7 +819,7 @@ async def test_the_first_stop_after_a_refused_start_is_graceful(
 ) -> None:
     entered = asyncio.Event()
     _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -844,7 +844,7 @@ async def test_a_failure_after_a_refused_stop_is_not_called_stopped(
     entered = asyncio.Event()
     real_prepare = app_module.prepare
     _refuse_on_the_first_cancel_then_hold(monkeypatch, entered)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -876,7 +876,7 @@ async def test_an_unexpected_error_in_prepare_returns_to_ready_with_a_dialog(
         raise error
 
     monkeypatch.setattr(app_module, "prepare", failing)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.screen.query("#close"))
@@ -895,7 +895,7 @@ async def test_a_run_log_that_cannot_write_still_ends_the_run(
     monkeypatch.setattr(RunLog, "record", broken)
     settings = _settings(work_dir)
     settings.logging = True
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -908,7 +908,7 @@ async def test_launch_opens_the_actions_dialog_when_flags_answer_everything_else
 ) -> None:
     text = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", text)
-    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    app = MilhouseApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, ActionsDialog))
         # Let the table's queued first highlight land; leaving with it queued
@@ -916,7 +916,7 @@ async def test_launch_opens_the_actions_dialog_when_flags_answer_everything_else
         await pilot.pause()
 
 
-async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
+async def _pick_folder(app: MilhouseApp, pilot: Pilot, folder: Path) -> None:
     await pilot.click("#menu-folder")
     await until(lambda: isinstance(app.screen, FolderDialog))
     app.screen.query_one("#path", Input).value = str(folder)
@@ -927,7 +927,7 @@ async def _pick_folder(app: AlrApp, pilot: Pilot, folder: Path) -> None:
 async def test_a_picked_folders_sandbox_json_changes_nothing_under_a_yolo_config_default(
     work_dir: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = home / ".local" / "alr" / "config.yaml"
+    config = home / ".local" / "milhouse" / "config.yaml"
     config.write_text(
         "version: 1.0.0\n"
         "defaults:\n"
@@ -948,12 +948,12 @@ async def test_a_picked_folders_sandbox_json_changes_nothing_under_a_yolo_config
         seen.append(settings)
         return 0
 
-    monkeypatch.setattr("alr.cli.wants_tui", lambda args: True)
-    monkeypatch.setattr("alr.cli.run_app", run_app)
+    monkeypatch.setattr("milhouse.cli.wants_tui", lambda args: True)
+    monkeypatch.setattr("milhouse.cli.run_app", run_app)
     cli.main([])
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     write_file(work_dir / "run" / "sandbox.json", "{}")
-    app = AlrApp(seen[0])
+    app = MilhouseApp(seen[0])
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, FolderDialog))
         app.screen.query_one("#path", Input).value = str(Path(tasks_file).parent)
@@ -971,7 +971,7 @@ async def test_start_saves_both_edited_lists(work_dir: Path) -> None:
         after_task=[Action(command="true")],
         after_run=[Action(command="make build")],
     )
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -985,7 +985,7 @@ async def test_after_run_alone_does_not_open_the_dialog_at_launch(
     work_dir: Path,
 ) -> None:
     settings = _settings(work_dir, after_run=[Action(command="make build")])
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -999,7 +999,7 @@ async def test_the_actions_dialog_opens_prefilled_with_the_files_after_run(
         "after_task: []", "after_task: []\n  after_run:\n    - action: make build"
     )
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", text)
-    app = AlrApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
+    app = MilhouseApp(RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1011,7 +1011,7 @@ async def test_the_actions_dialog_opens_prefilled_with_the_files_after_run(
 
 async def test_done_in_the_actions_dialog_stores_both_lists(work_dir: Path) -> None:
     settings = _settings(work_dir)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("a")
@@ -1038,7 +1038,7 @@ async def test_picking_another_folder_drops_the_actions_edited_for_the_first(
     other = work_dir / "other"
     other.mkdir()
     write_file(other / "tasks.yaml", TASKS)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1051,7 +1051,7 @@ async def test_picking_another_folder_drops_the_actions_edited_for_the_first(
 
 async def test_picking_the_same_folder_keeps_the_actions(work_dir: Path) -> None:
     settings = _settings(work_dir, after_task=[Action(command="true")])
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1064,7 +1064,7 @@ async def test_picking_the_same_folder_keeps_the_actions(work_dir: Path) -> None
 async def test_the_tasks_pane_keeps_room_at_common_terminal_sizes(
     work_dir: Path, size: tuple[int, int]
 ) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test(size=size) as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.pause()
@@ -1074,14 +1074,14 @@ async def test_the_tasks_pane_keeps_room_at_common_terminal_sizes(
         assert region.width >= 30
 
 
-def _activity_lines(app: AlrApp) -> list[str]:
+def _activity_lines(app: MilhouseApp) -> list[str]:
     return [strip.text.rstrip() for strip in app.query_one(ActivityPane).lines]
 
 
 async def test_the_activity_pane_follows_the_running_task(work_dir: Path) -> None:
     first = Task(id=1, name="First", prompt="p")
     second = Task(id=2, name="Second", prompt="p")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         tasks = app.query_one(TasksPane)
@@ -1130,7 +1130,7 @@ async def test_browsing_another_task_gives_way_to_the_next_task_start(
     first = Task(id=1, name="First", prompt="p")
     second = Task(id=2, name="Second", prompt="p")
     third = Task(id=3, name="Third", prompt="p")
-    app = AlrApp(_settings(work_dir, THREE_TASKS))
+    app = MilhouseApp(_settings(work_dir, THREE_TASKS))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         tasks = app.query_one(TasksPane)
@@ -1162,7 +1162,7 @@ async def test_a_late_row_zero_highlight_does_not_pull_the_activity_back(
     work_dir: Path,
 ) -> None:
     second = Task(id=2, name="Second", prompt="p")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         tasks = app.query_one(TasksPane)
@@ -1222,7 +1222,7 @@ async def test_stop_during_a_action_kills_the_action_and_ends_stopped(
     settings = _logged_settings(
         work_dir, _with_actions(f"echo $$ > {pid_file}; sleep 30")
     )
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         pid = int(await wait_for_text(pid_file))
@@ -1247,7 +1247,7 @@ async def test_stop_in_the_second_task_keeps_the_first_completed(
     monkeypatch.setenv("FAKECLAUDE_RECORD_FILE", str(record))
     monkeypatch.setenv("FAKECLAUDE_BLOCK_ON", "Second")
     settings = _logged_settings(work_dir, WORKING_TASKS)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: len(fake_claude_records(record)) == 2)
@@ -1263,7 +1263,7 @@ async def test_stop_in_the_second_task_keeps_the_first_completed(
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_a_clean_run_leaves_exit_code_0(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -1276,7 +1276,7 @@ async def test_a_failed_task_leaves_exit_code_1(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_OUTPUT", '{"state":"failed","error":"nope"}')
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -1289,7 +1289,7 @@ async def test_the_users_stop_leaves_exit_code_130(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -1305,7 +1305,7 @@ async def test_sigterm_during_a_run_leaves_exit_code_143_in_the_app_and_the_ledg
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_logged_settings(work_dir, TASKS))
+    app = MilhouseApp(_logged_settings(work_dir, TASKS))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -1318,7 +1318,7 @@ async def test_sigterm_during_a_run_leaves_exit_code_143_in_the_app_and_the_ledg
 
 
 async def test_sigterm_with_no_run_leaves_exit_code_143(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -1354,7 +1354,7 @@ async def test_a_run_that_dies_without_a_result_leaves_exit_code_1(
     fake_run: Callable[..., Awaitable[None]],
 ) -> None:
     monkeypatch.setattr(app_module, "run", fake_run)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -1368,7 +1368,7 @@ async def test_stop_during_prepare_leaves_exit_code_130(
 ) -> None:
     entered = asyncio.Event()
     _hold_prepare(monkeypatch, entered, refuse_first_cancel=False)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(entered.is_set)
@@ -1380,7 +1380,7 @@ async def test_stop_during_prepare_leaves_exit_code_130(
 
 
 async def test_quitting_without_a_run_leaves_exit_code_0(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("q")
 
@@ -1390,10 +1390,10 @@ async def test_quitting_without_a_run_leaves_exit_code_0(work_dir: Path) -> None
 def test_run_app_returns_the_apps_exit_code(
     monkeypatch: pytest.MonkeyPatch, work_dir: Path
 ) -> None:
-    def finish_with_4(self: AlrApp, **kwargs: object) -> None:
+    def finish_with_4(self: MilhouseApp, **kwargs: object) -> None:
         self.exit_code = 4
 
-    monkeypatch.setattr(AlrApp, "run", finish_with_4)
+    monkeypatch.setattr(MilhouseApp, "run", finish_with_4)
 
     assert app_module.run_app(_settings(work_dir)) == 4
 
@@ -1403,10 +1403,10 @@ def test_run_app_turns_the_mouse_off(
 ) -> None:
     seen: dict[str, object] = {}
 
-    def record(self: AlrApp, **kwargs: object) -> None:
+    def record(self: MilhouseApp, **kwargs: object) -> None:
         seen.update(kwargs)
 
-    monkeypatch.setattr(AlrApp, "run", record)
+    monkeypatch.setattr(MilhouseApp, "run", record)
 
     app_module.run_app(_settings(work_dir))
 
@@ -1421,7 +1421,7 @@ def test_run_app_turns_the_mouse_off(
 async def test_hotkeys_open_the_setup_dialogs_before_start(
     work_dir: Path, key: str, dialog: type[ModalScreen[object]]
 ) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1432,7 +1432,7 @@ async def test_hotkeys_open_the_setup_dialogs_before_start(
 
 @pytest.mark.parametrize("key", ["t", "x"])
 async def test_viewer_hotkeys_open_a_viewer(work_dir: Path, key: str) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1447,7 +1447,7 @@ async def test_setup_hotkeys_do_nothing_while_running(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch, key: str
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -1465,7 +1465,7 @@ async def test_viewer_hotkeys_work_while_running(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -1480,7 +1480,7 @@ async def test_viewer_hotkeys_work_while_running(
 
 
 async def test_hotkeys_do_not_fire_inside_a_dialog(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("f")
@@ -1500,7 +1500,7 @@ NO_ACTIONS_TASKS = TASKS.replace("  after_task: []\n", "")
 async def test_the_whole_setup_runs_from_the_keyboard_alone(work_dir: Path) -> None:
     write_file(work_dir / "run" / "tasks.yaml", NO_ACTIONS_TASKS)
     settings = RunSettings(logging=False)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         # The folder dialog starts on the working directory; add the folder to it.
         await until(lambda: isinstance(app.screen, FolderDialog))
@@ -1527,7 +1527,7 @@ async def test_the_whole_setup_runs_from_the_keyboard_alone(work_dir: Path) -> N
 async def test_a_run_event_that_arrives_after_the_app_stopped_is_ignored(
     work_dir: Path,
 ) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test():
         await until(lambda: app.state is AppState.READY)
 
@@ -1537,7 +1537,7 @@ async def test_a_run_event_that_arrives_after_the_app_stopped_is_ignored(
     app.on_run_event(RunEvent(Activity(first, "late")))
 
 
-async def _tab_to(app: AlrApp, pilot: Pilot, widget_id: str) -> None:
+async def _tab_to(app: MilhouseApp, pilot: Pilot, widget_id: str) -> None:
     """Tab along the real focus chain until the widget has focus; fail if it never does."""
     for _ in range(20):
         if app.focused is not None and app.focused.id == widget_id:
@@ -1558,7 +1558,7 @@ async def test_reset_failed_flag_leaves_the_file_alone_at_launch(
     work_dir: Path,
 ) -> None:
     settings = _settings(work_dir, FAILED_TASKS, reset_failed=True)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.pause()
@@ -1575,7 +1575,7 @@ async def test_start_with_reset_failed_runs_the_reset_task_and_completes_it(
     work_dir: Path,
 ) -> None:
     settings = _settings(work_dir, FAILED_TASKS, reset_failed=True)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1599,7 +1599,7 @@ def _states(settings: RunSettings) -> list[str]:
 async def test_a_file_with_a_failed_task_opens_with_start_blocked(
     work_dir: Path,
 ) -> None:
-    app = AlrApp(_settings(work_dir, FAILED_TASKS))
+    app = MilhouseApp(_settings(work_dir, FAILED_TASKS))
     async with app.run_test() as pilot:
         await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.pause()
@@ -1617,7 +1617,7 @@ async def test_the_reason_counts_several_failed_tasks(work_dir: Path) -> None:
         "    name: Second\n    prompt: p\n",
         "    name: Second\n    prompt: p\n    state: failed\n",
     )
-    app = AlrApp(_settings(work_dir, both))
+    app = MilhouseApp(_settings(work_dir, both))
     async with app.run_test() as pilot:
         await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.pause()
@@ -1628,7 +1628,7 @@ async def test_the_reason_counts_several_failed_tasks(work_dir: Path) -> None:
 
 
 async def test_r_lists_the_failed_tasks(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir, FAILED_TASKS))
+    app = MilhouseApp(_settings(work_dir, FAILED_TASKS))
     async with app.run_test() as pilot:
         await until(lambda: app.query_one(TasksPane).row_count == 2)
 
@@ -1641,7 +1641,7 @@ async def test_r_lists_the_failed_tasks(work_dir: Path) -> None:
 async def test_escape_in_the_reset_dialog_changes_nothing(work_dir: Path) -> None:
     settings = _settings(work_dir, FAILED_TASKS)
     before = Path(settings.tasks_file).read_bytes()
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.press("r")
@@ -1658,7 +1658,7 @@ async def test_enter_in_the_reset_dialog_resets_and_enables_start(
     work_dir: Path,
 ) -> None:
     settings = _settings(work_dir, DONE_AND_FAILED, after_task=[Action(command="true")])
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.query_one(TasksPane).row_count == 2)
         await pilot.press("r")
@@ -1677,7 +1677,7 @@ async def test_enter_in_the_reset_dialog_resets_and_enables_start(
 
 
 async def test_r_does_nothing_when_no_task_failed(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -1688,7 +1688,7 @@ async def test_r_does_nothing_when_no_task_failed(work_dir: Path) -> None:
 
 
 async def test_r_does_nothing_when_no_file_is_loaded() -> None:
-    app = AlrApp(RunSettings())
+    app = MilhouseApp(RunSettings())
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, FolderDialog))
         await pilot.press("escape")
@@ -1705,7 +1705,7 @@ async def test_r_does_nothing_while_running(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -1720,7 +1720,7 @@ async def test_r_does_nothing_while_running(
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_r_does_nothing_once_finished(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -1740,7 +1740,7 @@ async def test_the_flag_resets_a_file_picked_in_the_folder_dialog_in_memory_only
     settings = RunSettings(
         permissions=Permissions.SKIP, logging=False, reset_failed=True
     )
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, FolderDialog))
 
@@ -1751,13 +1751,13 @@ async def test_the_flag_resets_a_file_picked_in_the_folder_dialog_in_memory_only
         assert app.query_one(TasksPane).get_row("1")[0] != "✖"
 
 
-def _logging_disabled(app: AlrApp) -> bool:
+def _logging_disabled(app: MilhouseApp) -> bool:
     return app.query_one("#logging", Select).disabled
 
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_the_logging_dropdown_locks_from_start_on(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.pause()
@@ -1783,7 +1783,7 @@ async def test_the_logging_dropdown_is_disabled_while_running_and_enabled_after_
         raise OSError("gone")
 
     monkeypatch.setattr(app_module, "prepare", held_then_failing)
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("s")
@@ -1811,7 +1811,7 @@ GREYED = {
 }
 
 
-def _menu_disabled(app: AlrApp) -> dict[str, bool]:
+def _menu_disabled(app: MilhouseApp) -> dict[str, bool]:
     return {item: app.query_one(f"#menu-{item}", Button).disabled for item in MENU}
 
 
@@ -1820,7 +1820,7 @@ def _expected_menu(state: str) -> dict[str, bool]:
 
 
 async def test_nothing_is_greyed_out_before_start() -> None:
-    app = AlrApp(RunSettings())
+    app = MilhouseApp(RunSettings())
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -1830,7 +1830,7 @@ async def test_nothing_is_greyed_out_before_start() -> None:
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_nothing_is_greyed_out_when_ready(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.pause()
@@ -1843,7 +1843,7 @@ async def test_a_run_greys_out_the_inert_buttons_and_quit_returns_after(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("s")
@@ -1860,7 +1860,7 @@ async def test_tab_skips_the_greyed_out_buttons(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("s")
@@ -1883,12 +1883,12 @@ async def test_tab_skips_the_greyed_out_buttons(
         await _finished(app)
 
 
-def _status_line(app: AlrApp) -> str:
+def _status_line(app: MilhouseApp) -> str:
     return str(app.query_one("#progress", Static).render())
 
 
 async def test_the_status_line_is_empty_before_start(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.pause()
@@ -1901,7 +1901,7 @@ async def test_the_status_line_shows_the_task_and_session(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir), clock=HandClock())
+    app = MilhouseApp(_settings(work_dir), clock=HandClock())
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -1917,7 +1917,9 @@ async def test_the_status_line_shows_the_running_action(
     work_dir: Path, tmp_path: Path
 ) -> None:
     pid_file = tmp_path / "action.pid"
-    app = AlrApp(_settings(work_dir, _with_actions(f"echo $$ > {pid_file}; sleep 30")))
+    app = MilhouseApp(
+        _settings(work_dir, _with_actions(f"echo $$ > {pid_file}; sleep 30"))
+    )
     async with app.run_test() as pilot:
         await pilot.press("s")
         pid = int(await wait_for_text(pid_file))
@@ -1936,7 +1938,7 @@ async def test_the_status_line_ticks_with_the_clock(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     clock = HandClock()
-    app = AlrApp(_settings(work_dir), clock=clock)
+    app = MilhouseApp(_settings(work_dir), clock=clock)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -1953,7 +1955,7 @@ async def test_the_status_line_ticks_with_the_clock(
 async def test_the_status_line_is_cleared_when_the_summary_appears(
     work_dir: Path,
 ) -> None:
-    app = AlrApp(_settings(work_dir, WORKING_TASKS))
+    app = MilhouseApp(_settings(work_dir, WORKING_TASKS))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.screen.query("#close"))
@@ -1967,7 +1969,7 @@ async def test_the_status_line_sits_whole_between_the_panes(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch, size: tuple[int, int]
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir), clock=HandClock())
+    app = MilhouseApp(_settings(work_dir), clock=HandClock())
     async with app.run_test(size=size) as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -1984,7 +1986,7 @@ async def test_the_status_line_sits_whole_between_the_panes(
         await _finished(app)
 
 
-def _time_cell(app: AlrApp, row: int) -> str:
+def _time_cell(app: MilhouseApp, row: int) -> str:
     return str(app.query_one(TasksPane).get_cell_at((row, 3)))
 
 
@@ -1994,7 +1996,7 @@ async def test_the_running_task_time_ticks_with_the_clock(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     clock = HandClock()
-    app = AlrApp(_settings(work_dir), clock=clock)
+    app = MilhouseApp(_settings(work_dir), clock=clock)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: _time_cell(app, 0) == "0.0s")
@@ -2016,7 +2018,7 @@ async def test_the_status_line_counts_only_the_pending_tasks(
     three = (TASKS + "  - id: 3\n    name: Third\n    prompt: p\n").replace(
         "prompt: p\n", "prompt: p\n    state: completed\n", 1
     )
-    app = AlrApp(_settings(work_dir, three), clock=HandClock())
+    app = MilhouseApp(_settings(work_dir, three), clock=HandClock())
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -2029,7 +2031,7 @@ async def test_the_status_line_counts_only_the_pending_tasks(
 
 @pytest.mark.usefixtures("fake_claude")
 async def test_the_ticker_stops_when_the_run_ends(work_dir: Path) -> None:
-    app = AlrApp(_settings(work_dir, WORKING_TASKS), clock=HandClock())
+    app = MilhouseApp(_settings(work_dir, WORKING_TASKS), clock=HandClock())
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.screen.query("#close"))
@@ -2042,7 +2044,7 @@ async def test_the_ticker_stops_when_the_app_unmounts(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir), clock=HandClock())
+    app = MilhouseApp(_settings(work_dir), clock=HandClock())
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app._ticker is not None)
@@ -2061,7 +2063,7 @@ async def test_a_long_action_is_cut_so_the_timers_stay_on_the_line(
     pid_file = tmp_path / "action.pid"
     padding = "x" * 120
     clock = HandClock()
-    app = AlrApp(
+    app = MilhouseApp(
         _settings(
             work_dir, _with_actions(f"echo $$ > {pid_file}; sleep 30 # {padding}")
         ),
@@ -2086,7 +2088,7 @@ async def test_a_long_action_is_cut_so_the_timers_stay_on_the_line(
 @pytest.mark.usefixtures("fake_claude")
 async def test_a_clean_run_finishes_done_with_a_summary(work_dir: Path) -> None:
     settings = _settings(work_dir, WORKING_TASKS)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -2099,10 +2101,10 @@ async def test_a_clean_run_finishes_done_with_a_summary(work_dir: Path) -> None:
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_enter_on_a_clean_runs_summary_exits_alr_with_code_0(
+async def test_enter_on_a_clean_runs_summary_exits_milhouse_with_code_0(
     work_dir: Path,
 ) -> None:
-    app = AlrApp(_settings(work_dir, WORKING_TASKS))
+    app = MilhouseApp(_settings(work_dir, WORKING_TASKS))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.screen.query("#close"))
@@ -2114,11 +2116,11 @@ async def test_enter_on_a_clean_runs_summary_exits_alr_with_code_0(
 
 
 @pytest.mark.usefixtures("fake_claude")
-async def test_enter_on_a_failed_runs_summary_closes_it_and_keeps_alr_open(
+async def test_enter_on_a_failed_runs_summary_closes_it_and_keeps_milhouse_open(
     work_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(app_module, "run", _crashing_run)
-    app = AlrApp(_settings(work_dir, WORKING_TASKS))
+    app = MilhouseApp(_settings(work_dir, WORKING_TASKS))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.screen.query("#close"))
@@ -2136,7 +2138,7 @@ async def test_a_failed_check_on_start_shows_an_error_and_stays_ready(
     work_dir: Path,
 ) -> None:
     settings = _settings(work_dir)
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         # Broken after the view loaded it, so only the checks on Start can see it.
@@ -2155,7 +2157,7 @@ async def test_a_failed_after_run_action_leaves_exit_code_4(work_dir: Path) -> N
     tasks = TASKS.replace(
         "after_task: []", "after_task: []\n  after_run:\n    - action: exit 1"
     )
-    app = AlrApp(_settings(work_dir, tasks))
+    app = MilhouseApp(_settings(work_dir, tasks))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("s")
@@ -2173,7 +2175,7 @@ async def test_a_refused_start_with_reset_failed_leaves_the_file_and_logs_alone(
     settings.logging = True
     # A file where the logs folder must go, so the run log cannot open.
     (work_dir / "run" / "logs").write_text("not a folder", encoding="utf-8")
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -2198,7 +2200,7 @@ async def test_the_status_line_updates_when_an_event_arrives(
 ) -> None:
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     tasks = TASKS.replace("after_task: []", "after_task:\n    - action: make lint")
-    app = AlrApp(_settings(work_dir, tasks), clock=HandClock())
+    app = MilhouseApp(_settings(work_dir, tasks), clock=HandClock())
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: "session" in _status_line(app))
@@ -2221,7 +2223,7 @@ async def test_the_status_line_updates_when_an_event_arrives(
 async def test_the_main_screen_is_operable_by_focus_and_keys(work_dir: Path) -> None:
     settings = _settings(work_dir)
     settings.logging = True
-    app = AlrApp(settings)
+    app = MilhouseApp(settings)
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -2240,7 +2242,7 @@ async def test_a_worker_ending_after_the_app_exits_is_ignored(
 ) -> None:
     """Textual takes the screens down before it cancels the run worker on exit."""
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
-    app = AlrApp(_settings(work_dir))
+    app = MilhouseApp(_settings(work_dir))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await until(lambda: app.state is AppState.RUNNING)
@@ -2261,12 +2263,12 @@ def _sandbox_settings(tasks_file: str, name: str) -> RunSettings:
     )
 
 
-def _radio_labels(app: AlrApp) -> list[str]:
+def _radio_labels(app: MilhouseApp) -> list[str]:
     """The labels of the open permissions dialog's radios, in order."""
     return [str(button.label) for button in app.screen.query(RadioButton)]
 
 
-def _pressed_label(app: AlrApp) -> str:
+def _pressed_label(app: MilhouseApp) -> str:
     """The label of the pressed radio in the open permissions dialog."""
     pressed = app.screen.query_one(RadioSet).pressed_button
     assert pressed is not None
@@ -2278,7 +2280,7 @@ async def test_launch_does_not_ask_permissions_with_a_settings_file_flag(
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     given = write_file(work_dir / "run" / "mine.json", "{}")
-    app = AlrApp(
+    app = MilhouseApp(
         RunSettings(
             tasks_file=tasks_file,
             sandbox_file=given,
@@ -2298,7 +2300,7 @@ async def test_launch_does_not_ask_permissions_with_a_sandbox_flag(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_sandbox_settings(tasks_file, "large"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -2312,7 +2314,7 @@ async def test_a_sandbox_flag_keeps_its_answer_when_the_folder_is_chosen(
 ) -> None:
     folder = work_dir / "run"
     write_file(folder / "tasks.yaml", TASKS)
-    app = AlrApp(_sandbox_settings("", "tight"))
+    app = MilhouseApp(_sandbox_settings("", "tight"))
     async with app.run_test() as pilot:
         await until(lambda: isinstance(app.screen, FolderDialog))
 
@@ -2329,7 +2331,7 @@ async def test_p_reopens_the_dialog_preselected_to_the_current_answer(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_sandbox_settings(tasks_file, "large"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -2339,11 +2341,11 @@ async def test_p_reopens_the_dialog_preselected_to_the_current_answer(
         assert _pressed_label(app) == "large"
 
 
-async def test_a_file_added_while_alr_runs_shows_up_the_next_time_the_dialog_opens(
+async def test_a_file_added_while_milhouse_runs_shows_up_the_next_time_the_dialog_opens(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_sandbox_settings(tasks_file, "tight"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "tight"))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
         await pilot.press("p")
@@ -2369,7 +2371,7 @@ async def test_choosing_a_sandbox_over_a_settings_file_names_it_in_the_strip(
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     given = write_file(work_dir / "run" / "mine.json", "{}")
-    app = AlrApp(
+    app = MilhouseApp(
         RunSettings(
             tasks_file=tasks_file,
             sandbox_file=given,
@@ -2396,7 +2398,7 @@ async def test_choosing_skip_after_a_sandbox_forgets_the_sandbox(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_sandbox_settings(tasks_file, "large"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -2414,7 +2416,7 @@ async def test_choosing_skip_after_a_sandbox_forgets_the_sandbox(
 async def test_x_before_start_shows_the_chosen_sandbox_file(work_dir: Path) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     chosen = write_file(sandboxes_dir() / "my_sandbox.json", '{"sandbox": {}}\n')
-    app = AlrApp(_sandbox_settings(tasks_file, "my_sandbox"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "my_sandbox"))
     async with app.run_test() as pilot:
         await until(lambda: app.state is AppState.READY)
 
@@ -2432,7 +2434,7 @@ async def test_x_while_running_shows_the_file_on_disk(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
     sandbox_file = write_file(work_dir / "run" / "mine.json", "{}")
-    app = AlrApp(
+    app = MilhouseApp(
         RunSettings(
             tasks_file=tasks_file,
             sandbox_file=sandbox_file,
@@ -2461,7 +2463,7 @@ async def test_start_with_a_named_sandbox_writes_nothing_to_the_run_folder(
     work_dir: Path,
 ) -> None:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    app = AlrApp(_sandbox_settings(tasks_file, "large"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "large"))
     async with app.run_test() as pilot:
         await pilot.press("s")
         await _finished(app)
@@ -2478,7 +2480,7 @@ async def test_the_permissions_dialog_keeps_ok_on_screen_with_a_long_list(
     for number in range(14):
         write_file(sandboxes_dir() / f"extra_{number:02}.json", "{}")
 
-    app = AlrApp(_sandbox_settings(tasks_file, "tight"))
+    app = MilhouseApp(_sandbox_settings(tasks_file, "tight"))
     async with app.run_test(size=(80, 24)) as pilot:
         await until(lambda: app.state is AppState.READY)
 

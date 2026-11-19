@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from helpers import chmodded
 
-from alr.config import (
+from milhouse.config import (
     Config,
     SandboxDefault,
     config_dir,
@@ -18,7 +18,7 @@ from alr.config import (
     load,
     parse,
 )
-from alr.errors import (
+from milhouse.errors import (
     CONFIG_SETUP_MISSING,
     CONFIG_UNWRITABLE,
     INVALID_CONFIG,
@@ -53,7 +53,7 @@ defaults:
 
 def make_folder(tmp_path: Path) -> Path:
     """Create a config folder holding both prompt files and the shipped sandboxes."""
-    folder = tmp_path / "alr"
+    folder = tmp_path / "milhouse"
     (folder / "prompts").mkdir(parents=True)
     (folder / "sandboxes").mkdir()
     (folder / "sandboxes" / "tight.json").write_text("{}", encoding="utf-8")
@@ -70,7 +70,7 @@ def replace(old: str, new: str) -> str:
 
 
 def test_config_dir_is_under_the_home_folder(tmp_path: Path) -> None:
-    assert config_dir(tmp_path) == tmp_path / ".local" / "alr"
+    assert config_dir(tmp_path) == tmp_path / ".local" / "milhouse"
 
 
 def test_config_dir_defaults_to_the_real_home(
@@ -78,7 +78,7 @@ def test_config_dir_defaults_to_the_real_home(
 ) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    assert config_dir() == tmp_path / ".local" / "alr"
+    assert config_dir() == tmp_path / ".local" / "milhouse"
 
 
 def test_parse_reads_the_documented_file(tmp_path: Path) -> None:
@@ -179,7 +179,7 @@ def test_default_with_a_sandboxes_path_that_is_a_file_is_refused_as_a_non_folder
 
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
-def test_default_with_a_sandboxes_folder_alr_cannot_list_is_config_unwritable(
+def test_default_with_a_sandboxes_folder_milhouse_cannot_list_is_config_unwritable(
     dry_run: bool, tmp_path: Path, locked_folder: None
 ) -> None:
     folder = make_folder(tmp_path)
@@ -438,7 +438,7 @@ def test_create_folder_creates_a_missing_dot_local(tmp_path: Path) -> None:
 
     create_folder(tmp_path)
 
-    assert (tmp_path / ".local" / "alr" / "config.yaml").is_file()
+    assert (tmp_path / ".local" / "milhouse" / "config.yaml").is_file()
 
 
 def test_create_folder_leaves_no_staging_files_behind(tmp_path: Path) -> None:
@@ -594,7 +594,7 @@ def locked_folder(tmp_path: Path) -> Iterator[Path]:
 def test_a_local_folder_that_cannot_be_searched_is_refused(
     locked_folder: Path, look: Callable[[Path], object]
 ) -> None:
-    # locked/.local/alr: the check of alr cannot get past locked/.
+    # locked/.local/milhouse: the check of milhouse cannot get past locked/.
     with pytest.raises(RefusedError) as caught:
         look(locked_folder)
 
@@ -660,24 +660,26 @@ def test_two_creations_racing_both_succeed_and_keep_the_winners_edits(
     folder = config_dir(tmp_path)
     review = folder / "prompts" / "task_review.md"
     real_copyfile = shutil.copyfile
-    other_alr_ran: list[bool] = []
+    other_milhouse_ran: list[bool] = []
 
-    def other_alr_wins_and_the_user_edits(source: Path, target: Path) -> None:
-        if not other_alr_ran:
-            other_alr_ran.append(True)
+    def other_milhouse_wins_and_the_user_edits(source: Path, target: Path) -> None:
+        if not other_milhouse_ran:
+            other_milhouse_ran.append(True)
             # The other process finishes its whole creation between our staging and our rename.
             create_folder(tmp_path)
             review.write_text("edited after the other one's creation", encoding="utf-8")
 
         real_copyfile(source, target)
 
-    monkeypatch.setattr("alr.config.shutil.copyfile", other_alr_wins_and_the_user_edits)
+    monkeypatch.setattr(
+        "milhouse.config.shutil.copyfile", other_milhouse_wins_and_the_user_edits
+    )
 
     create_folder(tmp_path)
 
     assert review.read_text(encoding="utf-8") == "edited after the other one's creation"
     assert load(tmp_path).task_review_prompt == str(review)
-    assert sorted(path.name for path in folder.parent.iterdir()) == ["alr"]
+    assert sorted(path.name for path in folder.parent.iterdir()) == ["milhouse"]
 
 
 def copy_files_then(
@@ -694,7 +696,7 @@ def copy_files_then(
         copies.append(Path(target).name)
         real_copyfile(source, target)
 
-    monkeypatch.setattr("alr.config.shutil.copyfile", copy_then_act)
+    monkeypatch.setattr("milhouse.config.shutil.copyfile", copy_then_act)
 
 
 def raise_disk_full() -> None:
@@ -740,7 +742,7 @@ def test_a_reader_never_sees_the_folder_before_it_is_whole(
         seen.append(folder.exists())
         real_copyfile(source, target)
 
-    monkeypatch.setattr("alr.config.shutil.copyfile", look_before_each_copy)
+    monkeypatch.setattr("milhouse.config.shutil.copyfile", look_before_each_copy)
 
     create_folder(tmp_path)
 

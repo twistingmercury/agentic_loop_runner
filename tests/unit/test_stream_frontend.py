@@ -16,12 +16,12 @@ from helpers import (
     write_file,
 )
 
-from alr.engine import loop, proc
-from alr.engine.actions import action_env
-from alr.engine.sandbox import bypass_args
-from alr.plain.frontend import PlainFrontEnd
-from alr.errors import RunError
-from alr.record.events import (
+from milhouse.engine import loop, proc
+from milhouse.engine.actions import action_env
+from milhouse.engine.sandbox import bypass_args
+from milhouse.plain.frontend import PlainFrontEnd
+from milhouse.errors import RunError
+from milhouse.record.events import (
     Activity,
     Event,
     ActionFinished,
@@ -32,8 +32,8 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.stream.frontend import StreamFrontEnd
-from alr.tasks import COMPLETED, FAILED, Action, Shared, Task, TaskList
+from milhouse.stream.frontend import StreamFrontEnd
+from milhouse.tasks import COMPLETED, FAILED, Action, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 
@@ -457,7 +457,7 @@ async def test_an_action_receives_the_task_name_verbatim(
 ) -> None:
     out = tmp_path / "out"
     task = Task(1, HOSTILE_NAME, "p")
-    action = Action(command=f"printf %s \"$ALR_TASK_NAME\" > '{out}'")
+    action = Action(command=f"printf %s \"$MILHOUSE_TASK_NAME\" > '{out}'")
 
     error = await action_front_end.run_action(
         task, action, action_env(task, "tasks.yaml", "logs")
@@ -492,7 +492,7 @@ async def test_an_action_receives_paths_with_spaces(
     folder.mkdir()
     task = Task(1, "First", "p")
     action = Action(
-        command='printf %s "$ALR_TASK_FILE|$ALR_LOG_DIR" > "$ALR_LOG_DIR/out"'
+        command='printf %s "$MILHOUSE_TASK_FILE|$MILHOUSE_LOG_DIR" > "$MILHOUSE_LOG_DIR/out"'
     )
     env = action_env(task, str(folder / "my tasks.yaml"), str(folder))
 

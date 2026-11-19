@@ -13,7 +13,7 @@ dev = [
 ]
 
 [project]
-name = "alr"
+name = "milhouse"
 version = "0.0.1"
 description = "A tool for running ralph loops"
 readme = "README.md"
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-alr = "alr.main:main"
+milhouse = "milhouse.main:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -44,4 +44,4 @@ extend-exclude = ["docs", ".claude"]
 select = ["F", "N"]
 
 [tool.setuptools.package-data]
-alr = ["skills/**/*", "defaults/**/*"]
+milhouse = ["skills/**/*", "defaults/**/*"]

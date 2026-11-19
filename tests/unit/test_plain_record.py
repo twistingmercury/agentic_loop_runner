@@ -11,10 +11,10 @@ from helpers import (
     run_loop,
 )
 
-from alr.engine import proc
-from alr.errors import RunError
-from alr.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
-from alr.record.events import (
+from milhouse.engine import proc
+from milhouse.errors import RunError
+from milhouse.plain.frontend import _READ_SIZE, PlainFrontEnd, _tee
+from milhouse.record.events import (
     Activity,
     Event,
     ActionFinished,
@@ -25,7 +25,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import Action, RunResult, Shared, Task, TaskList
+from milhouse.tasks import Action, RunResult, Shared, Task, TaskList
 
 pytestmark = pytest.mark.usefixtures("fake_claude")
 

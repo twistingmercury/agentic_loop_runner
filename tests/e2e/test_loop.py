@@ -13,7 +13,7 @@ from e2e_helpers import (
     expected_stdin,
     fake_claude_records,
     read_tasks_yaml,
-    run_alr,
+    run_milhouse,
     run_args,
     shared_block,
     task_states,
@@ -44,7 +44,7 @@ def test_loop_runs_every_task_in_order(tmp_path: Path, fake_claude: Path) -> Non
     )
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
@@ -89,7 +89,7 @@ def test_loop_failed_task_refuses_to_run(tmp_path: Path, fake_claude: Path) -> N
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
@@ -125,7 +125,7 @@ def test_loop_reset_failed_runs_the_failed_task_without_a_word(
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         "--reset-failed",
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
@@ -143,7 +143,7 @@ def test_loop_stops_on_first_failure(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={
             "FAKECLAUDE_EXIT_CODE": "3",
@@ -164,7 +164,7 @@ def test_loop_stops_on_first_failure(tmp_path: Path, fake_claude: Path) -> None:
 def test_loop_prompt_echoed_to_stdout(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 0, res
     shared = SHARED_PROMPT
@@ -181,7 +181,7 @@ def test_loop_claude_missing_from_path(tmp_path: Path) -> None:
     empty_path_dir = tmp_path / "empty"
     empty_path_dir.mkdir()
 
-    res = run_alr(*run_args(tasks_path), env={"PATH": str(empty_path_dir)})
+    res = run_milhouse(*run_args(tasks_path), env={"PATH": str(empty_path_dir)})
 
     assert res.code != 0, res
     assert "task 1: Only task failed: claude: not found on PATH" in res.err
@@ -197,7 +197,7 @@ def test_loop_claude_missing_from_path(tmp_path: Path) -> None:
 )
 def test_removed_flag_rejected(flag: str) -> None:
     """Without the unknown-flag line and exit code 2, a returning flag would pass as a missing --dir."""
-    res = run_alr(flag)
+    res = run_milhouse(flag)
 
     assert res.code == 2, res
     assert f"unrecognized arguments: {flag}\n" in res.err
@@ -209,7 +209,7 @@ def assert_startup_failure(tmp_path: Path, tasks: str, want: str) -> None:
     tasks_path = write_tasks_yaml(tmp_path, tasks)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )

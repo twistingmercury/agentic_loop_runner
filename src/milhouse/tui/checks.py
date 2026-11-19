@@ -1,0 +1,39 @@
+"""The checks the dialogs make on an answer, using the same functions a run uses."""
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from milhouse.engine.loop import read_tasks
+from milhouse.engine.sandbox import sandbox_args
+from milhouse.errors import UsageError
+from milhouse.tasks import TaskList
+
+
+@dataclass(frozen=True)
+class FolderCheck:
+    """A run folder that passed: its task file and the loaded tasks."""
+
+    tasks_file: str
+    task_list: TaskList
+
+
+async def check_folder(folder: str) -> FolderCheck:
+    """Accept a run folder, or raise why not.
+
+    A file with failed tasks is accepted: the view shows them and offers a
+    reset.
+    """
+    tasks_file = Path(folder) / "tasks.yaml"
+    if not tasks_file.is_file():
+        raise UsageError(f"no tasks.yaml in {folder}")
+
+    task_list = read_tasks(str(tasks_file))
+    return FolderCheck(str(tasks_file), task_list)
+
+
+def check_sandbox(path: str, name: str = "") -> None:
+    """Accept a sandbox settings file, or raise why not; the run reads it the same way.
+
+    name is the sandbox picked by name, empty for a --sandbox-settings file.
+    """
+    sandbox_args(path, name)

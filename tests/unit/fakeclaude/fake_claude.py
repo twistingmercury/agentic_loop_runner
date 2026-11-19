@@ -1,6 +1,6 @@
 """A scriptable stand-in for the `claude` executable, used only by the tests.
 
-alr always starts claude with an argv it builds itself and the assembled
+milhouse always starts claude with an argv it builds itself and the assembled
 prompt on stdin, so nothing here can be driven by flags. Every behavior is
 controlled through the environment variables below, which are the whole
 interface.

@@ -2,7 +2,7 @@
 
 import pytest
 
-from alr.stream.parser import parse_stream_line
+from milhouse.stream.parser import parse_stream_line
 
 DONE = '{"state": "completed", "error": ""}'
 

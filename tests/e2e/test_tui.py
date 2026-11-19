@@ -8,7 +8,7 @@ from pathlib import Path
 import pexpect
 from e2e_helpers import (
     assert_no_tmp_file,
-    find_alr,
+    find_milhouse,
     read_tasks_yaml,
     shared_block,
     task_states,
@@ -30,7 +30,7 @@ CTRL_C = "\x03"
 
 
 def _spawn(folder: Path, extra_env: dict[str, str]) -> pexpect.spawn:
-    """Start alr on the folder and wait until the view is drawn and ready for keys.
+    """Start milhouse on the folder and wait until the view is drawn and ready for keys.
 
     TERM lets Textual draw, --yolo answers that step. Keys sent before the first
     draw can be lost, so nothing is returned before "(s)tart", which the Start
@@ -38,7 +38,7 @@ def _spawn(folder: Path, extra_env: dict[str, str]) -> pexpect.spawn:
     """
     env = {**os.environ, "TERM": "xterm-256color", **extra_env}
     child = pexpect.spawn(
-        find_alr(),
+        find_milhouse(),
         ["-d", str(folder), "--yolo"],
         env=env,
         encoding="utf-8",
@@ -57,7 +57,7 @@ def test_view_runs_a_task_to_done(tmp_path: Path, fake_claude: Path) -> None:
     try:
         child.send("s")
         child.expect("Run done")
-        # The summary's Exit button has focus, so Enter ends alr.
+        # The summary's Exit button has focus, so Enter ends milhouse.
         child.send("\r")
         child.expect(pexpect.EOF)
     finally:
@@ -156,7 +156,7 @@ def test_a_view_that_ignored_sighup_still_stops_when_its_terminal_closes(
         "FAKECLAUDE_DESCENDANT_PID_FILE": str(descendant_pid_file),
     }
     child = pexpect.spawn(
-        find_alr(),
+        find_milhouse(),
         ["-d", str(folder), "--yolo"],
         env=env,
         encoding="utf-8",
@@ -172,13 +172,13 @@ def test_a_view_that_ignored_sighup_still_stops_when_its_terminal_closes(
         child.expect("▶")
 
         # Closing the master end hangs the terminal up for real: the kernel sends
-        # SIGHUP, which alr catches although it was ignored at start.
+        # SIGHUP, which milhouse catches although it was ignored at start.
         os.close(child.child_fd)
         deadline = time.monotonic() + 15
         while child.isalive() and time.monotonic() < deadline:
             time.sleep(0.05)
 
-        assert not child.isalive(), "alr did not stop on the hangup"
+        assert not child.isalive(), "milhouse did not stop on the hangup"
     finally:
         if child.isalive():
             os.kill(child.pid, signal.SIGKILL)

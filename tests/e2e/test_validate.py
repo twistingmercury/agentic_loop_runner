@@ -10,8 +10,8 @@ from e2e_helpers import (
     DRY_RUN_TASKS_YAML,
     VALID_TASKS_YAML,
     fake_claude_records,
-    run_alr,
-    start_alr,
+    run_milhouse,
+    start_milhouse,
     wait_for_file,
     wait_process_gone,
     write_tasks_yaml,
@@ -31,7 +31,7 @@ def test_validate_prints_the_review_and_writes_the_log(
     tasks_path = write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
     record = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         "-d",
         str(tmp_path),
         "--validate",
@@ -59,7 +59,7 @@ def test_validate_skips_the_review_on_a_warning(
     write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
     record = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         "-d",
         str(tmp_path),
         "--validate",
@@ -76,7 +76,7 @@ def test_validate_skips_the_review_on_a_warning(
 def test_validate_reports_a_failed_review(tmp_path: Path, fake_claude: Path) -> None:
     write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
 
-    res = run_alr(
+    res = run_milhouse(
         "-d",
         str(tmp_path),
         "--validate",
@@ -97,7 +97,7 @@ def test_validate_is_rejected_with_reset_failed(
     write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
     record = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         "-d",
         str(tmp_path),
         "--validate",
@@ -114,11 +114,11 @@ def test_validate_passes_sandbox_and_action_timeout_to_the_review(
     tmp_path: Path, fake_claude: Path, home: Path
 ) -> None:
     write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
-    tight = home / ".local" / "alr" / "sandboxes" / "tight.json"
+    tight = home / ".local" / "milhouse" / "sandboxes" / "tight.json"
     tight.unlink()
     record = tmp_path / "record.ndjson"
 
-    named = run_alr(
+    named = run_milhouse(
         "-d",
         str(tmp_path),
         "--validate",
@@ -135,7 +135,7 @@ def test_validate_passes_sandbox_and_action_timeout_to_the_review(
     assert str(tight) in call["stdin"]
 
     started = time.monotonic()
-    limited = run_alr(
+    limited = run_milhouse(
         "-d",
         str(tmp_path),
         "--validate",
@@ -155,7 +155,7 @@ def test_validate_stops_on_sighup(tmp_path: Path, fake_claude: Path) -> None:
     ready_file = tmp_path / "ready"
     env = {"FAKECLAUDE_BLOCK": "1", "FAKECLAUDE_READY_FILE": str(ready_file)}
 
-    with start_alr("-d", str(tmp_path), "--validate", env=env) as process:
+    with start_milhouse("-d", str(tmp_path), "--validate", env=env) as process:
         try:
             # The fake claude writes its pid once it is blocking in the review.
             claude_pid = int(wait_for_file(ready_file, 10))
@@ -165,7 +165,7 @@ def test_validate_stops_on_sighup(tmp_path: Path, fake_claude: Path) -> None:
             assert err == "error: interrupted\n"
             [log] = review_logs(tmp_path)
             assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
-            # Checked before the cleanup below, so it sees what alr itself left behind.
+            # Checked before the cleanup below, so it sees what milhouse itself left behind.
             wait_process_gone(claude_pid, 10)
         finally:
             process.kill()

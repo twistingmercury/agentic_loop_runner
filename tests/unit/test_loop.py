@@ -18,12 +18,12 @@ from helpers import (
     write_file,
 )
 
-from alr import tasks
-from alr.engine import loop
-from alr.engine.result import RESULT_REQUEST
-from alr.engine.sandbox import bypass_args
-from alr.engine.stop import Stop
-from alr.errors import (
+from milhouse import tasks
+from milhouse.engine import loop
+from milhouse.engine.result import RESULT_REQUEST
+from milhouse.engine.sandbox import bypass_args
+from milhouse.engine.stop import Stop
+from milhouse.errors import (
     AfterRunFailedError,
     FailedTasksError,
     RefusedError,
@@ -32,8 +32,8 @@ from alr.errors import (
     TaskFileError,
     quote,
 )
-from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import (
+from milhouse.plain.frontend import PlainFrontEnd
+from milhouse.tasks import (
     COMPLETED,
     FAILED,
     PENDING,
@@ -975,7 +975,7 @@ async def test_a_failed_task_ends_failed_with_exit_1(
     assert front_end.endings == [(RunResult.FAILED, 1)]
 
 
-async def test_a_crash_that_is_not_an_alr_error_ends_failed_with_exit_1(
+async def test_a_crash_that_is_not_an_milhouse_error_ends_failed_with_exit_1(
     record: Path, tmp_path: Path
 ) -> None:
     front_end = _RecordingFrontEnd(crash=RuntimeError("boom"))

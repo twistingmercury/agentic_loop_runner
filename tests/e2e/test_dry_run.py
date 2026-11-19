@@ -8,7 +8,7 @@ from e2e_helpers import (
     ONE_TASK_TABLE,
     SKIPPED_SANDBOX_LINE,
     VALID_TASKS_YAML,
-    run_alr,
+    run_milhouse,
     run_args,
     run_dry_run,
     shared_block,
@@ -68,7 +68,7 @@ def test_dry_run_refuses_a_failed_task_like_a_real_run(
 
 
 def test_dry_run_missing_dir_flag() -> None:
-    res = run_alr("--dry-run")
+    res = run_milhouse("--dry-run")
 
     assert res.code == 2, res
     # Usage follows the error and names every flag, so match the error line.
@@ -78,7 +78,7 @@ def test_dry_run_missing_dir_flag() -> None:
 def test_dry_run_with_reset_failed_is_refused(tmp_path: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
-    res = run_alr("-d", str(tmp_path), "--dry-run", "--reset-failed")
+    res = run_milhouse("-d", str(tmp_path), "--dry-run", "--reset-failed")
 
     assert res.code == 2, res
     assert (
@@ -126,7 +126,7 @@ def test_dry_run_refuses_a_read_only_log_folder_like_a_real_run(
     logs.chmod(0o500)
 
     try:
-        res = run_alr("-d", str(tmp_path), "--dry-run")
+        res = run_milhouse("-d", str(tmp_path), "--dry-run")
     finally:
         logs.chmod(0o700)
 
@@ -144,8 +144,8 @@ def test_dry_run_refuses_a_dangling_logs_symlink_like_a_real_run(
     logs = tmp_path / "logs"
     logs.symlink_to("/nonexistent/x")
 
-    dry = run_alr("-d", str(tmp_path), "--dry-run")
-    real = run_alr(*run_args(tasks_path))
+    dry = run_milhouse("-d", str(tmp_path), "--dry-run")
+    real = run_milhouse(*run_args(tasks_path))
 
     assert dry.code == 3, dry
     assert dry.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
@@ -166,7 +166,7 @@ def test_dry_run_accepts_a_logs_symlink_to_an_existing_folder(
     target.mkdir()
     (tmp_path / "logs").symlink_to(target)
 
-    res = run_alr("-d", str(tmp_path), "--dry-run")
+    res = run_milhouse("-d", str(tmp_path), "--dry-run")
 
     assert res.code == 0, res
     assert res.out == f"{ONE_TASK_TABLE}{SKIPPED_SANDBOX_LINE}{tasks_path} is valid\n"
@@ -217,7 +217,7 @@ def test_dry_run_strict_passes_a_clean_file(tmp_path: Path, fake_claude: Path) -
 def test_strict_without_dry_run_is_a_usage_error(tmp_path: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
-    res = run_alr("-d", str(tasks_path.parent), "--strict", "--yolo")
+    res = run_milhouse("-d", str(tasks_path.parent), "--strict", "--yolo")
 
     assert res.code == 2, res
     assert "error: --strict can only be used with --dry-run\n" in res.err

@@ -1,7 +1,7 @@
-"""A commit is an action: real `git commit` actions run through the installed alr.
+"""A commit is an action: real `git commit` actions run through the installed milhouse.
 
-alr has no commit concept, so each test sets up a git repository, lists the
-actions in the task file, runs alr in the repository, and then looks at what
+milhouse has no commit concept, so each test sets up a git repository, lists the
+actions in the task file, runs milhouse in the repository, and then looks at what
 git, the task file, and the run log say.
 """
 
@@ -15,11 +15,11 @@ from e2e_helpers import (
     ONE_TASK,
     fake_claude_records,
     read_tasks_yaml,
-    run_alr,
+    run_milhouse,
     run_args,
     run_log,
     shared_block,
-    start_alr,
+    start_milhouse,
     task_states,
     wait_for_file,
     write_tasks_yaml,
@@ -27,7 +27,7 @@ from e2e_helpers import (
 from test_signal import stopped_at_exit
 
 # The fake claude changes no files, so this action does each task's "work".
-WORK = 'echo "$ALR_TASK_NAME" > "task-$ALR_TASK_ID.txt"'
+WORK = 'echo "$MILHOUSE_TASK_NAME" > "task-$MILHOUSE_TASK_ID.txt"'
 
 # Copied verbatim from the README and the task file template, so the suite tests
 # the action users copy. It adds everything from the repository root, then
@@ -35,12 +35,12 @@ WORK = 'echo "$ALR_TASK_NAME" > "task-$ALR_TASK_ID.txt"'
 # for an `:(exclude)` pathspec that names an ignored path) and a visible one stays
 # out. The diff guard lets a task that changed nothing pass.
 COMMIT = (
-    'git add -A -- :/ && git reset -q -- "$ALR_TASK_FILE" "$ALR_LOG_DIR" '
-    '&& (git diff --cached --quiet || git commit -s -m "$ALR_TASK_NAME")'
+    'git add -A -- :/ && git reset -q -- "$MILHOUSE_TASK_FILE" "$MILHOUSE_LOG_DIR" '
+    '&& (git diff --cached --quiet || git commit -s -m "$MILHOUSE_TASK_NAME")'
 )
 
 # Like WORK, but the second task changes nothing.
-WORK_EXCEPT_TASK_2 = '[ "$ALR_TASK_ID" = 2 ] || ' + WORK
+WORK_EXCEPT_TASK_2 = '[ "$MILHOUSE_TASK_ID" = 2 ] || ' + WORK
 
 
 def actions(*commands: str) -> list[dict[str, str]]:
@@ -93,7 +93,7 @@ def git_committed_files(repo: Path) -> list[str]:
 def test_a_commit_action_commits_each_task(git_repo: Path, fake_claude: Path) -> None:
     tasks_path = make_run(git_repo, ["one", "two"], [WORK, COMMIT])
 
-    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+    res = run_milhouse(*run_args(tasks_path), cwd=git_repo)
 
     assert res.code == 0, res
     assert git_subjects(git_repo) == ["two", "one"]
@@ -114,7 +114,7 @@ def test_a_gitignored_run_folder_still_commits(
         git_repo, ["one", "two"], [WORK, COMMIT], folder_name=".local/feature"
     )
 
-    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+    res = run_milhouse(*run_args(tasks_path), cwd=git_repo)
 
     assert res.code == 0, res
     assert git_subjects(git_repo)[:2] == ["two", "one"]
@@ -125,7 +125,7 @@ def test_a_gitignored_run_folder_still_commits(
 
 
 @pytest.mark.parametrize("relative", [True, False])
-def test_alr_started_in_a_subdirectory_commits_changes_elsewhere(
+def test_milhouse_started_in_a_subdirectory_commits_changes_elsewhere(
     git_repo: Path, fake_claude: Path, relative: bool
 ) -> None:
     subdir = git_repo / "sub"
@@ -137,7 +137,7 @@ def test_alr_started_in_a_subdirectory_commits_changes_elsewhere(
     )
     folder = "../run" if relative else str(tasks_path.parent)
 
-    res = run_alr("--yolo", f"--dir={folder}", cwd=subdir)
+    res = run_milhouse("--yolo", f"--dir={folder}", cwd=subdir)
 
     assert res.code == 0, res
     assert git_subjects(git_repo) == ["one"]
@@ -152,7 +152,7 @@ def test_a_task_that_changes_nothing_still_completes(
 ) -> None:
     tasks_path = make_run(git_repo, ["one", "two"], [WORK_EXCEPT_TASK_2, COMMIT])
 
-    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+    res = run_milhouse(*run_args(tasks_path), cwd=git_repo)
 
     assert res.code == 0, res
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed", 2: "completed"}
@@ -166,7 +166,7 @@ def test_a_hostile_task_name_is_data(git_repo: Path, fake_claude: Path) -> None:
     name = 'fix "auth"; $(touch pwned) `touch pwned2`'
     tasks_path = make_run(git_repo, [name], [WORK, COMMIT])
 
-    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+    res = run_milhouse(*run_args(tasks_path), cwd=git_repo)
 
     assert res.code == 0, res
     assert git_subjects(git_repo) == [name]
@@ -179,7 +179,7 @@ def test_a_failing_action_fails_the_task_and_stops(
 ) -> None:
     tasks_path = make_run(git_repo, ["one", "two"], [WORK, "false", COMMIT])
 
-    res = run_alr(*run_args(tasks_path), cwd=git_repo)
+    res = run_milhouse(*run_args(tasks_path), cwd=git_repo)
 
     assert res.code == 1, res
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "failed", 2: "pending"}
@@ -194,7 +194,7 @@ def test_after_run_failure_exits_4_and_tasks_stay_completed(
         tmp_path, shared_block("Body.", [], actions("exit 9")) + ONE_TASK
     )
 
-    res = run_alr(*run_args(tasks_path), cwd=tmp_path)
+    res = run_milhouse(*run_args(tasks_path), cwd=tmp_path)
 
     assert res.code == 4, res
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
@@ -216,7 +216,7 @@ def test_a_rerun_retries_after_run_when_every_task_is_completed(
     record_file = tmp_path / "record.ndjson"
     env = {"FAKECLAUDE_RECORD_FILE": str(record_file)}
 
-    first = run_alr(*run_args(tasks_path), cwd=tmp_path, env=env)
+    first = run_milhouse(*run_args(tasks_path), cwd=tmp_path, env=env)
 
     assert first.code == 4, first
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
@@ -227,7 +227,7 @@ def test_a_rerun_retries_after_run_when_every_task_is_completed(
 
     (tmp_path / "marker").touch()
 
-    second = run_alr(*run_args(tasks_path), cwd=tmp_path, env=env)
+    second = run_milhouse(*run_args(tasks_path), cwd=tmp_path, env=env)
 
     assert second.code == 0, second
     assert ran.read_text(encoding="utf-8").splitlines() == ["ran", "ran"]
@@ -263,7 +263,7 @@ def test_old_flags_are_refused_naming_the_replacement(
     tasks_path = write_tasks_yaml(tmp_path, shared_block() + ONE_TASK)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path), *args, env={"FAKECLAUDE_RECORD_FILE": str(record_file)}
     )
 
@@ -294,7 +294,7 @@ def test_old_task_file_keys_are_refused_naming_the_replacement(
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path), env={"FAKECLAUDE_RECORD_FILE": str(record_file)}
     )
 
@@ -314,7 +314,7 @@ def test_sigint_during_after_run_exits_130_and_tasks_stay_completed(
         tmp_path, shared_block("Body.", [], after_run) + ONE_TASK
     )
 
-    with stopped_at_exit(start_alr(*run_args(tasks_path)), ready_file) as process:
+    with stopped_at_exit(start_milhouse(*run_args(tasks_path)), ready_file) as process:
         wait_for_file(ready_file, 10)
 
         process.send_signal(signal.SIGINT)
@@ -334,14 +334,14 @@ def test_after_run_actions_get_no_task_variables(
     folder = tmp_path.resolve()
     seen = folder / "seen.txt"
     report = (
-        'printf "%s|%s|%s|%s" "${ALR_TASK_ID-unset}" "${ALR_TASK_NAME-unset}" '
-        f'"$ALR_TASK_FILE" "$ALR_LOG_DIR" > "{seen}"'
+        'printf "%s|%s|%s|%s" "${MILHOUSE_TASK_ID-unset}" "${MILHOUSE_TASK_NAME-unset}" '
+        f'"$MILHOUSE_TASK_FILE" "$MILHOUSE_LOG_DIR" > "{seen}"'
     )
     tasks_path = write_tasks_yaml(
         folder, shared_block("Body.", [], actions(report)) + ONE_TASK
     )
 
-    res = run_alr(*run_args(tasks_path), cwd=folder)
+    res = run_milhouse(*run_args(tasks_path), cwd=folder)
 
     assert res.code == 0, res
     assert seen.read_text(encoding="utf-8") == (

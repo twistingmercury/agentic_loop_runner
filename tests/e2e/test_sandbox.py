@@ -1,6 +1,6 @@
 """--sandbox, --sandbox-settings, and --yolo: a run must choose one, and the sandbox keys are forced.
 
---sandbox <name> reads ~/.local/alr/sandboxes/<name>.json; a run folder's own
+--sandbox <name> reads ~/.local/milhouse/sandboxes/<name>.json; a run folder's own
 sandbox.json is never read.
 """
 
@@ -23,7 +23,7 @@ from e2e_helpers import (
     expected_stdin,
     fake_claude_records,
     read_tasks_yaml,
-    run_alr,
+    run_milhouse,
     run_dry_run,
     run_log,
     shared_block,
@@ -141,7 +141,7 @@ def run_with_flags(
     tasks_path = write_tasks_yaml(folder, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         f"--dir={tasks_path.parent}",
         *flags,
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
@@ -150,7 +150,7 @@ def run_with_flags(
 
 
 def with_auto_allow(doc: dict[str, Any]) -> dict[str, Any]:
-    """The shipped file as claude gets it: alr adds the fourth forced key, which the files do not carry."""
+    """The shipped file as claude gets it: milhouse adds the fourth forced key, which the files do not carry."""
     return {**doc, "sandbox": {**doc["sandbox"], "autoAllowBashIfSandboxed": True}}
 
 
@@ -295,7 +295,7 @@ def test_dry_run_names_sandbox_settings(tmp_path: Path, fake_claude: Path) -> No
 
 def sandboxes_folder(home: Path) -> Path:
     """Where the sandbox files live in the test's home."""
-    return home / ".local" / "alr" / "sandboxes"
+    return home / ".local" / "milhouse" / "sandboxes"
 
 
 def run_folder(
@@ -310,7 +310,7 @@ def run_folder(
     tasks_path = write_tasks_yaml(folder, tasks_yaml)
     write_sandbox_settings(folder, sandbox_json)
     record_file = tmp_path / "record.ndjson"
-    res = run_alr(
+    res = run_milhouse(
         "-d",
         str(folder),
         *flags,
@@ -320,7 +320,7 @@ def run_folder(
 
 
 def folder_notice(folder: Path) -> str:
-    """The line alr prints for a run folder that still holds a sandbox.json."""
+    """The line milhouse prints for a run folder that still holds a sandbox.json."""
     return f"{folder}/sandbox.json is no longer read; pick a sandbox with --sandbox <name>\n"
 
 

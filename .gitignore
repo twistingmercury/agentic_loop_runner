@@ -3,6 +3,8 @@
 dist/
 
 **/.local/
+**/.milhouse/
+# Run folders the tool left under its old name; they stay on disk, never in git.
 **/.alr/
 **/.scratch/
 **/.bin/
@@ -13,7 +15,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
-**/alr.egg-info
+**/milhouse.egg-info
 
 # Linux
 *~

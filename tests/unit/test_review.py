@@ -24,11 +24,11 @@ from helpers import (
     write_file,
 )
 
-from alr import review as review_module
-from alr.engine import proc
-from alr.engine.stop import Stop
-from alr.errors import AlrError, ReviewError
-from alr.review import review
+from milhouse import review as review_module
+from milhouse.engine import proc
+from milhouse.engine.stop import Stop
+from milhouse.errors import MilhouseError, ReviewError
+from milhouse.review import review
 
 TASKS_YAML = "shared:\n  prompt: shared\ntasks:\n  - {id: 1, name: a, prompt: p}\n"
 
@@ -201,7 +201,7 @@ def test_review_prompt_names_the_skill_the_task_file_and_the_sandbox_file(
     run_review(io.StringIO(), tasks_file, sandbox_file, "", Stop())
 
     prompt = recorded_call(record)["stdin"]
-    assert "alr-task-review" in prompt
+    assert "milhouse-task-review" in prompt
     assert tasks_file in prompt
     assert sandbox_file in prompt
 
@@ -212,7 +212,7 @@ def test_review_prompt_says_there_is_no_sandbox_file(
     run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     prompt = recorded_call(record)["stdin"]
-    assert "alr-task-review" in prompt
+    assert "milhouse-task-review" in prompt
     assert tasks_file in prompt
     assert "There is no sandbox settings file" in prompt
 
@@ -374,7 +374,7 @@ def test_a_missing_claude_raises_before_any_output_and_writes_no_log(
         run_review(out, tasks_file, "", "", Stop())
 
     assert str(raised.value) == "review: claude is not on the PATH"
-    assert isinstance(raised.value, AlrError)
+    assert isinstance(raised.value, MilhouseError)
     assert out.getvalue() == ""
     assert not logs_folder(tasks_file).exists()
 
@@ -592,7 +592,7 @@ def test_a_missing_skill_raises_before_the_review_line_and_starts_no_claude(
 
     skills = config / "skills"
     assert str(raised.value) == (
-        f"review: the alr-task-review skill is not installed in {skills}"
+        f"review: the milhouse-task-review skill is not installed in {skills}"
     )
     assert out.getvalue() == ""
     assert not logs_folder(tasks_file).exists()
@@ -628,7 +628,7 @@ def test_a_path_with_a_line_break_is_quoted_in_the_prompt_and_the_header(
 
     quoted = json.dumps(odd_tasks)
     prompt = recorded_call(record)["stdin"]
-    assert f"alr task file {quoted}." in prompt
+    assert f"milhouse task file {quoted}." in prompt
     assert odd_tasks not in prompt
     header = review_log(odd_tasks).read_text(encoding="utf-8").split("\n\n")[0]
     assert header.splitlines()[1] == f"task file: {quoted}"
@@ -686,7 +686,7 @@ def test_the_prompt_is_exactly_the_three_lines_without_a_sandbox_file(
     prompt = recorded_call(record)["stdin"]
     quoted_tasks = json.dumps(tasks_file)
     assert prompt == (
-        f"Use the alr-task-review skill to review the alr task file {quoted_tasks}.\n"
+        f"Use the milhouse-task-review skill to review the milhouse task file {quoted_tasks}.\n"
         "There is no sandbox settings file for this run.\n"
         "Reply with what the skill says to report and nothing else.\n"
     )
@@ -701,7 +701,7 @@ def test_the_prompt_is_exactly_the_three_lines_with_a_sandbox_file(
     quoted_tasks = json.dumps(tasks_file)
     quoted_sandbox = json.dumps(sandbox_file)
     assert prompt == (
-        f"Use the alr-task-review skill to review the alr task file {quoted_tasks}.\n"
+        f"Use the milhouse-task-review skill to review the milhouse task file {quoted_tasks}.\n"
         f"The sandbox settings file the run will use is {quoted_sandbox}.\n"
         "Reply with what the skill says to report and nothing else.\n"
     )
@@ -724,7 +724,7 @@ def test_a_skills_folder_without_skill_md_fails_before_the_review_line(
     record: Path, tasks_file: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = tmp_path / "cfg"
-    (config / "skills" / "alr-task-review").mkdir(parents=True)
+    (config / "skills" / "milhouse-task-review").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
     out = io.StringIO()
 
@@ -732,7 +732,7 @@ def test_a_skills_folder_without_skill_md_fails_before_the_review_line(
         run_review(out, tasks_file, "", "", Stop())
 
     assert str(raised.value) == (
-        f"review: the alr-task-review skill is not installed in {config / 'skills'}"
+        f"review: the milhouse-task-review skill is not installed in {config / 'skills'}"
     )
     assert out.getvalue() == ""
     assert not logs_folder(tasks_file).exists()
@@ -743,7 +743,7 @@ def test_a_skill_the_sync_could_not_update_fails_the_review(
     record: Path, tasks_file: str, home: Path
 ) -> None:
     # The autouse home fixture synced the bundled skill; this copy is an older one.
-    installed = home / ".claude" / "skills" / "alr-task-review" / "SKILL.md"
+    installed = home / ".claude" / "skills" / "milhouse-task-review" / "SKILL.md"
     installed.write_text("an older skill\n", encoding="utf-8")
     out = io.StringIO()
 
@@ -752,7 +752,7 @@ def test_a_skill_the_sync_could_not_update_fails_the_review(
 
     skills = home / ".claude" / "skills"
     assert str(raised.value) == (
-        f"review: the alr-task-review skill is not installed in {skills}"
+        f"review: the milhouse-task-review skill is not installed in {skills}"
     )
     assert out.getvalue() == ""
     assert not logs_folder(tasks_file).exists()
@@ -868,7 +868,7 @@ def test_a_cancel_while_the_child_is_starting_leaves_no_claude_running(
 
     # A claude left running writes its pid file within moments of starting,
     # which is after the cancel; without this wait the check below would
-    # almost always find no file and pass whatever alr did.
+    # almost always find no file and pass whatever milhouse did.
     time.sleep(0.5)
     if pid_file.exists():
         wait_for_exit(int(pid_file.read_text()))
@@ -911,7 +911,7 @@ def test_the_session_starts_in_its_own_process_group(
     run_review(io.StringIO(), tasks_file, "", "", Stop())
 
     pid, group = (int(number) for number in groups.read_text().split())
-    # It leads a group of its own, and that group is not alr's.
+    # It leads a group of its own, and that group is not milhouse's.
     assert group == pid
     assert group != os.getpgrp()
 

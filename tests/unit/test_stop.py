@@ -1,6 +1,6 @@
 import signal
 
-from alr.engine.stop import Stop
+from milhouse.engine.stop import Stop
 
 
 def test_a_stop_defaults_to_sigint() -> None:

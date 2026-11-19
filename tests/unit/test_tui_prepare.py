@@ -7,19 +7,19 @@ from pathlib import Path
 import pytest
 from helpers import block_saving, write_file
 
-from alr.engine.sandbox import sandbox_args
-from alr.engine.stop import Stop
-from alr.errors import (
+from milhouse.engine.sandbox import sandbox_args
+from milhouse.engine.stop import Stop
+from milhouse.errors import (
     TASK_FILE_UNWRITABLE,
     FailedTasksError,
     RefusedError,
     RunLogError,
 )
-from alr.record.runlog import RunLog
-from alr.sandboxes import sandboxes_dir
-from alr.tasks import Action, parse_tasks
-from alr.tui.prepare import prepare
-from alr.tui.settings import Permissions, RunSettings
+from milhouse.record.runlog import RunLog
+from milhouse.sandboxes import sandboxes_dir
+from milhouse.tasks import Action, parse_tasks
+from milhouse.tui.prepare import prepare
+from milhouse.tui.settings import Permissions, RunSettings
 
 TASKS = """shared:
   prompt: do it
@@ -285,7 +285,7 @@ def _refuse_the_task_file_save(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(tasks_file: str, task_list: object) -> None:
         raise RefusedError(TASK_FILE_UNWRITABLE, "failed to save tasks")
 
-    monkeypatch.setattr("alr.tui.prepare.save_for_start", refuse)
+    monkeypatch.setattr("milhouse.tui.prepare.save_for_start", refuse)
 
 
 async def test_prepare_saves_the_task_file_and_writes_no_sandbox_json(

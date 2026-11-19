@@ -1,7 +1,7 @@
-"""Helpers for the black-box tests: they run the installed alr command against the fake claude.
+"""Helpers for the black-box tests: they run the installed milhouse command against the fake claude.
 
 Plain functions live here and fixtures in conftest.py. The suite never imports
-alr; the command line is its only way in.
+milhouse; the command line is its only way in.
 
 Ported from gralph's tests/e2e. Not ported: skill_check_test.go and
 wizard_signal_linux_test.go. The full-screen view is covered by test_tui.py.
@@ -51,12 +51,12 @@ ONE_TASK_TABLE = (
 )
 
 
-def find_alr() -> str:
-    """The alr command on PATH; the suite has nothing to test without it."""
-    found = shutil.which("alr")
+def find_milhouse() -> str:
+    """The milhouse command on PATH; the suite has nothing to test without it."""
+    found = shutil.which("milhouse")
     if found is None:
         raise pytest.UsageError(
-            "the alr command is not on PATH: install the alr wheel before running these tests"
+            "the milhouse command is not on PATH: install the milhouse wheel before running these tests"
         )
 
     return found
@@ -69,15 +69,15 @@ class Result:
     err: str
 
 
-def run_alr(
+def run_milhouse(
     *args: str,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
     timeout: float = 60.0,
 ) -> Result:
-    """Run the real alr command, with no terminal, and return what it printed."""
+    """Run the real milhouse command, with no terminal, and return what it printed."""
     done = subprocess.run(
-        [find_alr(), *args],
+        [find_milhouse(), *args],
         env={**os.environ, **(env or {})},
         cwd=cwd,
         capture_output=True,
@@ -107,13 +107,13 @@ class TerminalResult:
     err: str
 
 
-def run_alr_in_terminal(
+def run_milhouse_in_terminal(
     *args: str,
     keys: str | None = None,
     env: dict[str, str] | None = None,
     timeout: float = 30.0,
 ) -> TerminalResult:
-    """Run the real alr command with a terminal on stdin and stdout.
+    """Run the real milhouse command with a terminal on stdin and stdout.
 
     With keys, they are typed once the setup question is on screen. Without,
     nothing is typed, so a run that asked anyway would wait and time out.
@@ -124,7 +124,7 @@ def run_alr_in_terminal(
         stderr_file = Path(folder) / "stderr"
         child = pexpect.spawn(
             "/bin/sh",
-            ["-c", _STDERR_TO_FILE, "sh", str(stderr_file), find_alr(), *args],
+            ["-c", _STDERR_TO_FILE, "sh", str(stderr_file), find_milhouse(), *args],
             env={**os.environ, **(env or {})},
             encoding="utf-8",
             timeout=timeout,
@@ -141,7 +141,7 @@ def run_alr_in_terminal(
         err = stderr_file.read_text(encoding="utf-8")
 
     assert child.exitstatus is not None, (
-        f"alr was stopped by signal {child.signalstatus}"
+        f"milhouse was stopped by signal {child.signalstatus}"
     )
     return TerminalResult(child.exitstatus, shown.replace("\r\n", "\n"), err)
 
@@ -257,7 +257,7 @@ def run_dry_run(tmp_path: Path, tasks_yaml: str, *flags: str) -> tuple[Result, P
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         "-d",
         str(tasks_path.parent),
         "--dry-run",
@@ -342,10 +342,12 @@ def wait_process_gone(pid: int, timeout: float) -> None:
         time.sleep(0.01)
 
 
-def start_alr(*args: str, env: dict[str, str] | None = None) -> subprocess.Popen[str]:
-    """Start the real alr command without waiting for it, for the signal tests."""
+def start_milhouse(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.Popen[str]:
+    """Start the real milhouse command without waiting for it, for the signal tests."""
     return subprocess.Popen(
-        [find_alr(), *args],
+        [find_milhouse(), *args],
         env={**os.environ, **(env or {})},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,

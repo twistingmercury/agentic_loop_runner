@@ -19,10 +19,10 @@ from textual.widgets import (
     TextArea,
 )
 
-from alr.sandboxes import Sandbox, list_sandboxes, sandboxes_dir
-from alr.tui.checks import FolderCheck
-from alr.tasks import FAILED, Action, Task
-from alr.tui.dialogs import (
+from milhouse.sandboxes import Sandbox, list_sandboxes, sandboxes_dir
+from milhouse.tui.checks import FolderCheck
+from milhouse.tasks import FAILED, Action, Task
+from milhouse.tui.dialogs import (
     ErrorDialog,
     ResetDialog,
     SummaryDialog,
@@ -32,7 +32,7 @@ from alr.tui.dialogs import (
     PermissionChoice,
     PermissionsDialog,
 )
-from alr.tui.settings import Permissions, RunSettings
+from milhouse.tui.settings import Permissions, RunSettings
 
 TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 

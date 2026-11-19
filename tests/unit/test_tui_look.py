@@ -9,9 +9,9 @@ from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import Button
 
-from alr.sandboxes import list_sandboxes
-from alr.tui.app import AlrApp
-from alr.tui.dialogs import (
+from milhouse.sandboxes import list_sandboxes
+from milhouse.tui.app import MilhouseApp
+from milhouse.tui.dialogs import (
     ErrorDialog,
     FileViewer,
     FolderDialog,
@@ -20,7 +20,7 @@ from alr.tui.dialogs import (
     ResetDialog,
     SummaryDialog,
 )
-from alr.tui.settings import Permissions, RunSettings
+from milhouse.tui.settings import Permissions, RunSettings
 
 TASKS = "shared:\n  prompt: p\n  after_task: []\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 SIZES = [(80, 24), (140, 40)]
@@ -37,9 +37,9 @@ DIALOGS: dict[str, Callable[[str], Screen[object]]] = {
 
 
 @pytest.fixture
-def app(work_dir: Path) -> AlrApp:
+def app(work_dir: Path) -> MilhouseApp:
     tasks_file = write_file(work_dir / "run" / "tasks.yaml", TASKS)
-    return AlrApp(
+    return MilhouseApp(
         RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False)
     )
 
@@ -47,7 +47,7 @@ def app(work_dir: Path) -> AlrApp:
 @pytest.mark.parametrize("size", SIZES, ids=["80x24", "140x40"])
 @pytest.mark.parametrize("name", list(DIALOGS))
 async def test_a_dialog_is_a_centered_box_over_the_main_window(
-    app: AlrApp, name: str, size: tuple[int, int]
+    app: MilhouseApp, name: str, size: tuple[int, int]
 ) -> None:
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
@@ -66,15 +66,15 @@ async def test_a_dialog_is_a_centered_box_over_the_main_window(
         assert app.screen_stack[-2] is main
 
 
-def _strip_button(app: AlrApp) -> Button:
+def _strip_button(app: MilhouseApp) -> Button:
     return app.query_one("#start", Button)
 
 
-def _menu_button(app: AlrApp) -> Button:
+def _menu_button(app: MilhouseApp) -> Button:
     return app.query_one("#menu-folder", Button)
 
 
-async def _dialog_button(app: AlrApp, pilot: Pilot) -> Button:
+async def _dialog_button(app: MilhouseApp, pilot: Pilot) -> Button:
     app.push_screen(FolderDialog("."))
     await pilot.pause()
     return app.screen.query_one("#ok", Button)
@@ -82,7 +82,7 @@ async def _dialog_button(app: AlrApp, pilot: Pilot) -> Button:
 
 @pytest.mark.parametrize("where", ["strip", "menu", "dialog"])
 async def test_buttons_are_flat_one_row_and_only_focus_changes_them(
-    app: AlrApp, where: str
+    app: MilhouseApp, where: str
 ) -> None:
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.pause()
@@ -106,7 +106,7 @@ async def test_buttons_are_flat_one_row_and_only_focus_changes_them(
 
 
 async def test_a_greyed_out_button_looks_different_from_an_enabled_one(
-    app: AlrApp,
+    app: MilhouseApp,
 ) -> None:
     async with app.run_test(size=(110, 32)) as pilot:
         await pilot.pause()

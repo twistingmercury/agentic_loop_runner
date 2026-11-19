@@ -1,12 +1,12 @@
-"""The alr entry point: flush both streams, then exit with the code."""
+"""The milhouse entry point: flush both streams, then exit with the code."""
 
 import io
 import os
 
 import pytest
 
-from alr import cli
-from alr import main as entry
+from milhouse import cli
+from milhouse import main as entry
 
 
 class RecordingStream(io.StringIO):

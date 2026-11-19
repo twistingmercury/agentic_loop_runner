@@ -7,14 +7,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from e2e_helpers import YES, find_alr, run_alr, run_alr_in_terminal
+from e2e_helpers import YES, find_milhouse, run_milhouse, run_milhouse_in_terminal
 
 FAKE_CLAUDE_SOURCE = Path(__file__).parent / "testdata" / "fake_claude.py"
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """Stop at once, with one message, when alr is missing rather than fail every test."""
-    find_alr()
+    """Stop at once, with one message, when milhouse is missing rather than fail every test."""
+    find_milhouse()
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def _isolate_git(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
 def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Give every test an empty home folder of its own.
 
-    A real run creates ~/.local/alr on first run, so a shared home would make
+    A real run creates ~/.local/milhouse on first run, so a shared home would make
     the first test to run see a first-run line that no later test sees.
 
     This uses its own MonkeyPatch, not the monkeypatch fixture, so it does not
@@ -92,7 +92,7 @@ def set_up_config(home: Path) -> None:
     """Set up the config folder in the test's home the way a user does.
 
     A real run refuses on a machine that was never set up, and the tests have
-    no terminal. So each test starts after the one-time setup: alr runs in a
+    no terminal. So each test starts after the one-time setup: milhouse runs in a
     terminal and is answered yes. test_config_dir.py replaces this fixture,
     because it tests the setup itself.
 
@@ -101,12 +101,12 @@ def set_up_config(home: Path) -> None:
     test's home then holds the skills, and no real run in a test prints an
     Added line for them.
     """
-    done = run_alr_in_terminal(keys=YES)
+    done = run_milhouse_in_terminal(keys=YES)
 
     assert done.code == 0, done
-    assert (home / ".local" / "alr" / "config.yaml").is_file()
+    assert (home / ".local" / "milhouse" / "config.yaml").is_file()
 
-    synced = run_alr("--yolo", f"--dir={home}")
+    synced = run_milhouse("--yolo", f"--dir={home}")
 
     assert synced.code == 2, synced
-    assert (home / ".claude" / "skills" / "alr-task-file" / "SKILL.md").is_file()
+    assert (home / ".claude" / "skills" / "milhouse-task-file" / "SKILL.md").is_file()

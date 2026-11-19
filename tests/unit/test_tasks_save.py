@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from helpers import block_saving
 
-from alr import tasks
-from alr.errors import TaskFileError, quote
-from alr.tasks import (
+from milhouse import tasks
+from milhouse.errors import TaskFileError, quote
+from milhouse.tasks import (
     COMPLETED,
     FAILED,
     PENDING,

@@ -7,7 +7,7 @@ from textual.events import Resize
 from textual.geometry import Size
 from textual.widgets.data_table import ColumnKey
 
-from alr.record.events import (
+from milhouse.record.events import (
     Activity,
     ActionFinished,
     RunDone,
@@ -15,7 +15,7 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import (
+from milhouse.tasks import (
     COMPLETED,
     FAILED,
     RUN_SCOPE,
@@ -24,7 +24,7 @@ from alr.tasks import (
     Task,
     TaskList,
 )
-from alr.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, ActionsPane, TasksPane
+from milhouse.tui.panes import ACTIVITY_LINE_CAP, ActivityPane, ActionsPane, TasksPane
 
 FIRST = Task(id=1, name="First", prompt="p")
 SECOND = Task(id=2, name="Second", prompt="p")

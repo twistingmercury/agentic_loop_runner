@@ -6,21 +6,21 @@ from pathlib import Path
 from e2e_helpers import (
     TWO_TASKS_YAML,
     Result,
-    run_alr,
+    run_milhouse,
     run_args,
     write_tasks_yaml,
 )
 
 
 def test_version_flag() -> None:
-    res = run_alr("--version")
+    res = run_milhouse("--version")
 
     assert res.code == 0, res
-    assert re.fullmatch(r"alr version: \S+ [a-z]+/\S+\n", res.out)
+    assert re.fullmatch(r"milhouse version: \S+ [a-z]+/\S+\n", res.out)
 
 
 def test_help_flag() -> None:
-    res = run_alr("--help")
+    res = run_milhouse("--help")
 
     assert res.code == 0, res
     for flag in (
@@ -41,7 +41,7 @@ def test_help_flag() -> None:
 
 
 def test_missing_tasks() -> None:
-    res = run_alr()
+    res = run_milhouse()
 
     assert res.code == 2, res
     assert "error: required flag --dir not set\n" in res.err
@@ -51,7 +51,7 @@ def test_skip_permissions_is_an_unknown_flag(tmp_path: Path, fake_claude: Path) 
     """--yolo replaced it; exit 2 and the unknown-flag line keep the old name from coming back as an alias."""
     tasks_path = write_tasks_yaml(tmp_path, TWO_TASKS_YAML)
 
-    res = run_alr("--skip-permissions", f"--dir={tasks_path.parent}")
+    res = run_milhouse("--skip-permissions", f"--dir={tasks_path.parent}")
 
     assert res.code == 2, res
     assert "unrecognized arguments: --skip-permissions\n" in res.err
@@ -62,7 +62,7 @@ def run_two_tasks(folder: Path, *flags: str) -> tuple[Result, str]:
     """Run a fresh copy of the two-task file and return the result and the saved file."""
     folder.mkdir()
     tasks_path = write_tasks_yaml(folder, TWO_TASKS_YAML)
-    res = run_alr(*run_args(tasks_path), *flags)
+    res = run_milhouse(*run_args(tasks_path), *flags)
     return res, tasks_path.read_text(encoding="utf-8")
 
 

@@ -16,10 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # build/build.sh passes the exact wheel it just built or found in dist/. Naming
 # one file means a stale wheel in dist/ can never be installed. The pins act as
 # constraints so the wheel's PyYAML range cannot move the pinned version.
-ARG ALR_WHEEL
-COPY dist/${ALR_WHEEL} /tmp/${ALR_WHEEL}
-RUN pip install --no-cache-dir -c requirements.txt /tmp/${ALR_WHEEL} \
-    && rm -f /tmp/${ALR_WHEEL}
+ARG MILHOUSE_WHEEL
+COPY dist/${MILHOUSE_WHEEL} /tmp/${MILHOUSE_WHEEL}
+RUN pip install --no-cache-dir -c requirements.txt /tmp/${MILHOUSE_WHEEL} \
+    && rm -f /tmp/${MILHOUSE_WHEEL}
 
 COPY --chown=tester:tester tests/e2e/ .
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from e2e_helpers import (
     VALID_TASKS_YAML,
     read_task_log,
-    run_alr,
+    run_milhouse,
     run_dry_run,
     run_args,
     write_tasks_yaml,
@@ -21,7 +21,7 @@ def test_log_dir_is_an_unknown_flag(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
     log_dir = tmp_path / "elsewhere"
 
-    res = run_alr(*run_args(tasks_path), f"--log-dir={log_dir}")
+    res = run_milhouse(*run_args(tasks_path), f"--log-dir={log_dir}")
 
     assert res.code == 2, res
     assert f"unrecognized arguments: --log-dir={log_dir}\n" in res.err
@@ -35,7 +35,7 @@ def test_plain_run_leaves_a_log_in_the_run_folder(
 ) -> None:
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 0, res
     (folder,) = (tmp_path / "logs").iterdir()
@@ -54,7 +54,7 @@ def test_plain_run_leaves_a_log_in_the_run_folder(
 def test_plain_run_logs_the_sessions_stderr(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_STDERR": "session-said-this\n"},
     )

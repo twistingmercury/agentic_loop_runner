@@ -7,7 +7,7 @@ from e2e_helpers import (
     expected_stdin,
     fake_claude_records,
     read_tasks_yaml,
-    run_alr,
+    run_milhouse,
     task_states,
     shared_block,
     write_tasks_yaml,
@@ -35,7 +35,7 @@ def test_dir_runs_with_only_tasks_yaml(tmp_path: Path, fake_claude: Path) -> Non
     assert [path.name for path in folder.iterdir()] == ["tasks.yaml"]
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         "--yolo",
         "-d",
         str(folder),
@@ -55,7 +55,7 @@ def test_dir_missing_tasks_file(tmp_path: Path, fake_claude: Path) -> None:
     folder = run_folder(tmp_path)
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         "--yolo",
         "-d",
         str(folder),
@@ -71,7 +71,7 @@ def test_dir_dry_run(tmp_path: Path, fake_claude: Path) -> None:
     folder = run_folder(tmp_path)
     tasks_path = write_tasks_yaml(folder, DRY_RUN_TASKS_YAML)
 
-    res = run_alr("--dry-run", "-d", str(folder))
+    res = run_milhouse("--dry-run", "-d", str(folder))
 
     assert res.code == 0, res
     assert f"{tasks_path} is valid\n" in res.out

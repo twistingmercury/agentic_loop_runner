@@ -22,17 +22,17 @@ from typing import Any
 
 import pytest
 
-from alr import tasks
-from alr.engine import loop
-from alr.engine.frontend import FrontEnd
-from alr.engine.sandbox import bypass_args
-from alr.engine.stop import Stop
-from alr.errors import RunCancelledError
-from alr.plain.frontend import PlainFrontEnd
-from alr.tasks import RunResult, Shared, TaskList
+from milhouse import tasks
+from milhouse.engine import loop
+from milhouse.engine.frontend import FrontEnd
+from milhouse.engine.sandbox import bypass_args
+from milhouse.engine.stop import Stop
+from milhouse.errors import RunCancelledError
+from milhouse.plain.frontend import PlainFrontEnd
+from milhouse.tasks import RunResult, Shared, TaskList
 
 SHARED = Shared(prompt="shared")
-ALR = Path(sys.executable).parent / "alr"
+MILHOUSE = Path(sys.executable).parent / "milhouse"
 
 
 def write_file(path: Path, content: str) -> str:
@@ -273,10 +273,12 @@ async def until(condition: Callable[[], object]) -> None:
     pytest.fail("timed out waiting for the condition")
 
 
-def start_alr(*args: str, env: dict[str, str] | None = None) -> subprocess.Popen[str]:
-    """Start the real alr command without waiting for it, for the signal tests."""
+def start_milhouse(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.Popen[str]:
+    """Start the real milhouse command without waiting for it, for the signal tests."""
     return subprocess.Popen(
-        [str(ALR), *args],
+        [str(MILHOUSE), *args],
         env={**os.environ, **(env or {})},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,

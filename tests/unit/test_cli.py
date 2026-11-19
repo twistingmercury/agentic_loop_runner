@@ -18,21 +18,21 @@ from typing import Any
 
 import pytest
 from helpers import (
-    ALR,
+    MILHOUSE,
     chmodded,
     fake_claude_records,
-    start_alr,
+    start_milhouse,
     wait_for_exit,
     wait_for_file,
 )
 
-from alr import cli
-from alr.config import SandboxDefault
-from alr.engine.sandbox import sandbox_args
-from alr.engine.stop import Stop
-from alr.errors import AlrError, RefusedError, RunCancelledError, UsageError
-from alr.skillinstall import skills_folder, sync
-from alr.tui.settings import Permissions, RunSettings
+from milhouse import cli
+from milhouse.config import SandboxDefault
+from milhouse.engine.sandbox import sandbox_args
+from milhouse.engine.stop import Stop
+from milhouse.errors import MilhouseError, RefusedError, RunCancelledError, UsageError
+from milhouse.skillinstall import skills_folder, sync
+from milhouse.tui.settings import Permissions, RunSettings
 
 ONE_TASK_YAML = (
     "shared:\n  prompt: shared\ntasks:\n  - id: 1\n    name: a\n    prompt: p\n"
@@ -110,7 +110,7 @@ def test_session_args_errors(
     file: str,
     skip: bool,
     dry_run: bool,
-    error: type[AlrError],
+    error: type[MilhouseError],
     want: str,
 ) -> None:
     path = str(tmp_path / file) if file else ""
@@ -121,7 +121,7 @@ def test_session_args_errors(
     assert want.format(path=path) in str(caught.value)
 
 
-# Go's TestSessionArgs_WizardLeavesTheChoiceOpen is not ported: alr has no wizard.
+# Go's TestSessionArgs_WizardLeavesTheChoiceOpen is not ported: milhouse has no wizard.
 
 
 @pytest.mark.parametrize(
@@ -159,9 +159,9 @@ def test_version_prints_one_line(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["--version"]) == 0
 
     out = capsys.readouterr().out
-    assert out.startswith("alr version: ")
+    assert out.startswith("milhouse version: ")
     assert out.count("\n") == 1
-    assert re.fullmatch(r"alr version: \S+ [a-z]+/\S+\n", out)
+    assert re.fullmatch(r"milhouse version: \S+ [a-z]+/\S+\n", out)
 
 
 @pytest.mark.parametrize(
@@ -516,7 +516,7 @@ def test_a_signal_leaves_no_traceback_and_no_change(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = start_alr("-d", str(tmp_path), "--yolo")
+    process = start_milhouse("-d", str(tmp_path), "--yolo")
     try:
         claude_pid = int(wait_for_file(ready))
         process.send_signal(stop)
@@ -556,7 +556,7 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 
 def _add_sandbox(folder: Path, content: str = "{}") -> Path:
-    """Put a sandbox.json in a run folder, where alr no longer looks."""
+    """Put a sandbox.json in a run folder, where milhouse no longer looks."""
     path = folder / "sandbox.json"
     path.write_text(content, encoding="utf-8")
     return path
@@ -564,7 +564,7 @@ def _add_sandbox(folder: Path, content: str = "{}") -> Path:
 
 def _sandboxes(home: Path) -> Path:
     """The folder the sandbox files live in."""
-    return home / ".local" / "alr" / "sandboxes"
+    return home / ".local" / "milhouse" / "sandboxes"
 
 
 def _write_sandbox(home: Path, name: str, content: str = "{}") -> Path:
@@ -575,7 +575,7 @@ def _write_sandbox(home: Path, name: str, content: str = "{}") -> Path:
 
 
 def _notice(folder: Path) -> str:
-    """The line alr prints for a run folder that still holds a sandbox.json."""
+    """The line milhouse prints for a run folder that still holds a sandbox.json."""
     return f"{folder}/sandbox.json is no longer read; pick a sandbox with --sandbox <name>\n"
 
 
@@ -756,8 +756,8 @@ def _capture_view(monkeypatch: pytest.MonkeyPatch) -> list[RunSettings]:
         seen.append(settings)
         return 0
 
-    monkeypatch.setattr("alr.cli.wants_tui", lambda args: True)
-    monkeypatch.setattr("alr.cli.run_app", run_app)
+    monkeypatch.setattr("milhouse.cli.wants_tui", lambda args: True)
+    monkeypatch.setattr("milhouse.cli.run_app", run_app)
     return seen
 
 
@@ -872,8 +872,8 @@ def test_a_real_run_adds_the_skills_and_says_so(
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
 
     captured = capsys.readouterr()
-    task_skill = skills / "alr-task-file"
-    review_skill = skills / "alr-task-review"
+    task_skill = skills / "milhouse-task-file"
+    review_skill = skills / "milhouse-task-review"
     assert captured.out == f"Added {task_skill}\nAdded {review_skill}\n"
     assert captured.err == ""
     assert (task_skill / "SKILL.md").is_file()
@@ -907,14 +907,14 @@ def test_a_real_run_updates_an_edited_skill(
 ) -> None:
     skills = _empty_skills_folder(tmp_path, monkeypatch)
     sync()
-    edited = skills / "alr-task-file" / "SKILL.md"
+    edited = skills / "milhouse-task-file" / "SKILL.md"
     bundled_text = edited.read_text(encoding="utf-8")
     edited.write_text("my own edit\n", encoding="utf-8")
 
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
 
     captured = capsys.readouterr()
-    assert captured.out == f"Updated {skills / 'alr-task-file'}\n"
+    assert captured.out == f"Updated {skills / 'milhouse-task-file'}\n"
     assert captured.err == ""
     assert edited.read_text(encoding="utf-8") == bundled_text
 
@@ -931,7 +931,7 @@ def test_a_symlink_at_a_skill_name_is_replaced_with_a_warning_and_an_updated_lin
     linked_target = tmp_path / "versioned-skill"
     linked_target.mkdir()
     (linked_target / "SKILL.md").write_text("mine\n", encoding="utf-8")
-    link = skills / "alr-task-file"
+    link = skills / "milhouse-task-file"
     link.symlink_to(linked_target, target_is_directory=True)
 
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
@@ -954,7 +954,7 @@ def test_a_plain_file_at_a_skill_name_is_replaced_with_a_warning_and_an_updated_
 ) -> None:
     skills = _empty_skills_folder(tmp_path, monkeypatch)
     skills.mkdir(parents=True)
-    plain_file = skills / "alr-task-file"
+    plain_file = skills / "milhouse-task-file"
     plain_file.write_text("not a folder", encoding="utf-8")
 
     assert cli.main(["-d", str(folder), "--yolo"]) == 0
@@ -974,14 +974,14 @@ def test_dry_run_says_updated_for_a_differing_skill(
 ) -> None:
     skills = _empty_skills_folder(tmp_path, monkeypatch)
     sync()
-    edited = skills / "alr-task-file" / "SKILL.md"
+    edited = skills / "milhouse-task-file" / "SKILL.md"
     edited.write_text("my own edit\n", encoding="utf-8")
 
     assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
 
     out = capsys.readouterr().out
-    assert f"skill: {skills / 'alr-task-file'} (updated on a real run)\n" in out
-    assert "alr-task-review" not in out
+    assert f"skill: {skills / 'milhouse-task-file'} (updated on a real run)\n" in out
+    assert "milhouse-task-review" not in out
     assert edited.read_text(encoding="utf-8") == "my own edit\n"
 
 
@@ -995,7 +995,7 @@ def test_dry_run_says_what_it_would_replace(
 ) -> None:
     skills = _empty_skills_folder(tmp_path, monkeypatch)
     sync()
-    target = skills / "alr-task-file"
+    target = skills / "milhouse-task-file"
     shutil.rmtree(target)
     linked_target = tmp_path / "versioned-skill"
     linked_target.mkdir()
@@ -1027,8 +1027,8 @@ def test_the_skills_sync_before_the_task_file_is_resolved(
 
     assert code == 2
     assert "no tasks.yaml" in capsys.readouterr().err
-    assert (skills / "alr-task-file" / "SKILL.md").is_file()
-    assert (skills / "alr-task-review" / "SKILL.md").is_file()
+    assert (skills / "milhouse-task-file" / "SKILL.md").is_file()
+    assert (skills / "milhouse-task-review" / "SKILL.md").is_file()
 
 
 def test_a_skills_folder_that_cannot_be_written_warns_and_the_run_goes_on(
@@ -1045,8 +1045,8 @@ def test_a_skills_folder_that_cannot_be_written_warns_and_the_run_goes_on(
     code = cli.main(["-d", str(folder), "--yolo"])
 
     err = capsys.readouterr().err
-    assert "warning: skill alr-task-file: " in err
-    assert "warning: skill alr-task-review: " in err
+    assert "warning: skill milhouse-task-file: " in err
+    assert "warning: skill milhouse-task-review: " in err
     assert record.is_file()
     # The run's own code: a warning must not turn a good run into a failure.
     assert code == 0
@@ -1064,8 +1064,8 @@ def test_dry_run_reports_the_skills_and_writes_nothing(
     assert cli.main(["-d", str(folder), "--dry-run", "--plain"]) == 0
 
     out = capsys.readouterr().out
-    task_skill = skills / "alr-task-file"
-    review_skill = skills / "alr-task-review"
+    task_skill = skills / "milhouse-task-file"
+    review_skill = skills / "milhouse-task-review"
     assert out.startswith(
         f"skill: {task_skill} (added on a real run)\n"
         f"skill: {review_skill} (added on a real run)\n"
@@ -1574,7 +1574,7 @@ defaults:
 
 def _write_config(home: Path, text: str) -> None:
     """Replace config.yaml in the folder the home fixture already created."""
-    (home / ".local" / "alr" / "config.yaml").write_text(text, encoding="utf-8")
+    (home / ".local" / "milhouse" / "config.yaml").write_text(text, encoding="utf-8")
 
 
 SETUP_PROMPT = "Create them? [y/N] "
@@ -1583,7 +1583,7 @@ REFUSED_SETUP = "error: refused: config-setup-missing: "
 
 @pytest.fixture
 def terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make alr see a terminal, so a person could answer.
+    """Make milhouse see a terminal, so a person could answer.
 
     This patches the check itself: pytest swaps stdin and stdout around each
     phase, so a patch on their isatty made in a fixture does not survive into
@@ -1594,7 +1594,7 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def no_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make alr see pipes, whatever runs the tests."""
+    """Make milhouse see pipes, whatever runs the tests."""
     monkeypatch.setattr(cli, "_terminal_attached", lambda: False)
 
 
@@ -1630,10 +1630,10 @@ def _reply(monkeypatch: pytest.MonkeyPatch, reply: str) -> list[str]:
 
 
 def _fail_if_asked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail the test if alr asks anything."""
+    """Fail the test if milhouse asks anything."""
 
     def read_answer(prompt: str) -> str:
-        pytest.fail(f"alr asked: {prompt}")
+        pytest.fail(f"milhouse asked: {prompt}")
 
     monkeypatch.setattr(cli, "_read_answer", read_answer)
 
@@ -1645,7 +1645,7 @@ def test_the_setup_question_names_what_it_will_create_before_creating_it(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    config_folder = fresh_home / ".local" / "alr"
+    config_folder = fresh_home / ".local" / "milhouse"
     seen_when_asked: list[bool] = []
 
     def read_answer(prompt: str) -> str:
@@ -1678,7 +1678,7 @@ def test_the_setup_notice_lists_every_folder_and_file_in_creation_order(
 ) -> None:
     _reply(monkeypatch, "n")
     local = fresh_home / ".local"
-    config_folder = local / "alr"
+    config_folder = local / "milhouse"
 
     cli.main(["-d", str(folder), "--yolo", "--plain"])
 
@@ -1704,7 +1704,7 @@ def test_the_setup_notice_leaves_out_a_parent_that_already_exists(
 ) -> None:
     _reply(monkeypatch, "n")
     (fresh_home / ".local").mkdir()
-    config_folder = fresh_home / ".local" / "alr"
+    config_folder = fresh_home / ".local" / "milhouse"
 
     cli.main(["-d", str(folder), "--yolo", "--plain"])
 
@@ -1742,13 +1742,13 @@ def test_yes_sets_up_the_config_and_stops_without_a_run(
     code = cli.main(["-d", str(folder), "--yolo", "--plain"])
 
     captured = capsys.readouterr()
-    config_folder = fresh_home / ".local" / "alr"
+    config_folder = fresh_home / ".local" / "milhouse"
     assert code == 0
     assert (config_folder / "config.yaml").is_file()
     assert (config_folder / "prompts" / "task_review.md").is_file()
     assert (config_folder / "prompts" / "task_remediation.md").is_file()
     assert f"The configuration is set up in {config_folder}." in captured.out
-    assert "Run alr again" in captured.out
+    assert "Run milhouse again" in captured.out
     assert captured.err == ""
     assert sessions == []
 
@@ -1774,7 +1774,7 @@ def test_anything_but_yes_creates_nothing_and_refuses(
     assert not (fresh_home / ".local").exists()
     assert "Nothing was created." in captured.out
     assert captured.err.startswith(REFUSED_SETUP)
-    assert "run alr again and answer y to create it" in captured.err
+    assert "run milhouse again and answer y to create it" in captured.err
     assert len(captured.err.splitlines()) == 1
     assert sessions == []
 
@@ -1797,11 +1797,11 @@ def test_the_end_of_input_counts_as_no(
     captured = capsys.readouterr()
     assert code == 3
     assert not (fresh_home / ".local").exists()
-    # The unanswered question's line is ended before alr says anything else.
-    assert captured.out.startswith("alr needs to set up")
+    # The unanswered question's line is ended before milhouse says anything else.
+    assert captured.out.startswith("milhouse needs to set up")
     assert captured.out.endswith(f"{SETUP_PROMPT}\nNothing was created.\n")
     assert captured.err.startswith(REFUSED_SETUP)
-    assert "run alr again and answer y to create it" in captured.err
+    assert "run milhouse again and answer y to create it" in captured.err
     assert len(captured.err.splitlines()) == 1
     assert sessions == []
 
@@ -1826,7 +1826,7 @@ def test_the_question_is_printed_to_stdout_not_given_to_input(
     assert prompts_given_to_input == [()]
 
 
-def test_without_a_terminal_alr_neither_asks_nor_writes_and_refuses(
+def test_without_a_terminal_milhouse_neither_asks_nor_writes_and_refuses(
     folder: Path,
     fresh_home: Path,
     no_terminal: None,
@@ -1844,7 +1844,7 @@ def test_without_a_terminal_alr_neither_asks_nor_writes_and_refuses(
     assert captured.out == ""
     assert captured.err.startswith(REFUSED_SETUP)
     assert "the config setup is missing" in captured.err
-    assert "run alr in a terminal once to create it" in captured.err
+    assert "run milhouse in a terminal once to create it" in captured.err
     assert len(captured.err.splitlines()) == 1
     assert sessions == []
 
@@ -1932,7 +1932,7 @@ def test_a_file_where_the_config_folder_belongs_refuses_before_asking(
 ) -> None:
     _fail_if_asked(monkeypatch)
     (fresh_home / ".local").mkdir()
-    (fresh_home / ".local" / "alr").write_text("in the way", encoding="utf-8")
+    (fresh_home / ".local" / "milhouse").write_text("in the way", encoding="utf-8")
 
     code = cli.main(["-d", str(folder), "--yolo", "--plain"])
 
@@ -2237,7 +2237,7 @@ def test_a_sandbox_refusal_leaves_no_skill_written(
     shutil.rmtree(_sandboxes(home))
 
     # Sandboxes sync first, so its refusal must come before any skill is written.
-    with chmodded(home / ".local" / "alr", 0o500):
+    with chmodded(home / ".local" / "milhouse", 0o500):
         code = cli.main(["-d", str(folder), "--yolo"])
 
     assert code == 3
@@ -2330,7 +2330,7 @@ def _sandboxes_cannot_be_searched(home: Path) -> Iterator[str]:
 def _sandboxes_missing_from_a_read_only_config_folder(home: Path) -> Iterator[str]:
     """Leave no place to make the sandboxes folder; yield the refusal every run must give."""
     shutil.rmtree(_sandboxes(home))
-    with chmodded(home / ".local" / "alr", 0o500):
+    with chmodded(home / ".local" / "milhouse", 0o500):
         yield (
             "config-unwritable: cannot add the sandboxes to "
             f"{_sandboxes(home)}: Permission denied"
@@ -2357,7 +2357,7 @@ def _sandboxes_missing_from_a_read_only_config_folder(home: Path) -> Iterator[st
         ),
     ],
 )
-def test_a_sandboxes_folder_alr_cannot_use_is_refused_the_same_way_by_every_run(
+def test_a_sandboxes_folder_milhouse_cannot_use_is_refused_the_same_way_by_every_run(
     unusable: Callable[[Path], AbstractContextManager[str]],
     flags: list[str],
     dry_run: bool,
@@ -2383,7 +2383,7 @@ def test_a_sandboxes_folder_alr_cannot_use_is_refused_the_same_way_by_every_run(
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["real run", "dry run"])
 @pytest.mark.parametrize("by", ["flag", "config default"])
-def test_a_sandboxes_folder_alr_cannot_list_is_refused_when_a_name_is_looked_up(
+def test_a_sandboxes_folder_milhouse_cannot_list_is_refused_when_a_name_is_looked_up(
     by: str,
     dry_run: bool,
     home: Path,
@@ -2427,7 +2427,7 @@ def test_the_sandbox_flag_is_documented_in_the_help() -> None:
     help_text = " ".join(cli._parser().format_help().split())
 
     assert "--sandbox <name>" in help_text
-    assert "the named file from ~/.local/alr/sandboxes/" in help_text
+    assert "the named file from ~/.local/milhouse/sandboxes/" in help_text
 
 
 REVIEW_SKIPPED = "review skipped: the dry run found problems; fix them and run again\n"
@@ -2484,10 +2484,10 @@ def test_validate_syncs_the_skills_before_the_dry_run(
     out = capsys.readouterr().out
     assert code == 0
     assert out.startswith(
-        f"Added {skills / 'alr-task-file'}\nAdded {skills / 'alr-task-review'}\n"
+        f"Added {skills / 'milhouse-task-file'}\nAdded {skills / 'milhouse-task-review'}\n"
         "   ID  STATE      NAME\n"
     )
-    assert (skills / "alr-task-review" / "SKILL.md").is_file()
+    assert (skills / "milhouse-task-review" / "SKILL.md").is_file()
     # A plain dry run only reports; --validate really wrote them.
     assert "skill:" not in out
 
@@ -2572,7 +2572,7 @@ def test_validate_fails_before_the_review_when_the_skill_cannot_be_put_in_place(
     captured = capsys.readouterr()
     assert code == 1
     assert captured.err.endswith(
-        f"error: review: the alr-task-review skill is not installed in {config / 'skills'}\n"
+        f"error: review: the milhouse-task-review skill is not installed in {config / 'skills'}\n"
     )
     assert f"{clean_folder / 'tasks.yaml'} is valid\n" in captured.out
     assert "review:" not in captured.out
@@ -2657,7 +2657,7 @@ def test_validate_never_opens_the_view(
         return 0
 
     # The real wants_tui decides; only the view itself is replaced.
-    monkeypatch.setattr("alr.cli.run_app", record_settings)
+    monkeypatch.setattr("milhouse.cli.run_app", record_settings)
 
     code = cli.main(["-d", str(clean_folder), "--validate"])
 
@@ -2678,7 +2678,7 @@ def test_validate_stops_on_a_signal_during_the_review(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = start_alr("-d", str(clean_folder), "--validate")
+    process = start_milhouse("-d", str(clean_folder), "--validate")
     try:
         claude_pid = int(wait_for_file(ready))
         process.send_signal(stop)
@@ -2706,7 +2706,7 @@ def test_validate_stop_kills_everything_the_session_started(
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
     monkeypatch.setenv("FAKECLAUDE_DESCENDANT_PID_FILE", str(descendant_file))
 
-    process = start_alr("-d", str(clean_folder), "--validate")
+    process = start_milhouse("-d", str(clean_folder), "--validate")
     try:
         wait_for_file(ready)
         descendant_pid = int(wait_for_file(descendant_file))
@@ -2729,7 +2729,7 @@ def test_validate_stops_on_sighup(
     monkeypatch.setenv("FAKECLAUDE_BLOCK", "1")
     monkeypatch.setenv("FAKECLAUDE_READY_FILE", str(ready))
 
-    process = start_alr("-d", str(clean_folder), "--validate")
+    process = start_milhouse("-d", str(clean_folder), "--validate")
     claude_pid = 0
     try:
         claude_pid = int(wait_for_file(ready))
@@ -2739,12 +2739,12 @@ def test_validate_stops_on_sighup(
         assert err == "error: interrupted\n"
         [log] = _review_logs(clean_folder)
         assert log.read_text(encoding="utf-8").endswith("\n\nstopped by SIGHUP\n")
-        # Checked before the cleanup below, so it sees what alr itself left behind.
+        # Checked before the cleanup below, so it sees what milhouse itself left behind.
         wait_for_exit(claude_pid)
     finally:
         process.kill()
         # Only a failing test gets here with claude still running: a SIGHUP
-        # nobody handles kills alr and strands the blocked fake claude.
+        # nobody handles kills milhouse and strands the blocked fake claude.
         if claude_pid:
             _kill_quietly(claude_pid)
 
@@ -2761,7 +2761,7 @@ def test_a_hangup_with_a_dead_terminal_exits_129(
     # Python exits 120 when flushing stdout fails at shutdown, so a hangup that
     # takes the terminal with it must still exit 129.
     process = subprocess.Popen(
-        [str(ALR), "-d", str(clean_folder), "--validate"],
+        [str(MILHOUSE), "-d", str(clean_folder), "--validate"],
         stdin=subprocess.DEVNULL,
         stdout=slave,
         stderr=slave,
@@ -2774,12 +2774,12 @@ def test_a_hangup_with_a_dead_terminal_exits_129(
         os.close(master)
         process.wait(timeout=10)
         assert process.returncode == 129
-        # Checked before the cleanup below, so it sees what alr itself left behind.
+        # Checked before the cleanup below, so it sees what milhouse itself left behind.
         wait_for_exit(claude_pid)
     finally:
         process.kill()
         # Only a failing test gets here with claude still running: a SIGHUP
-        # nobody handles kills alr and strands the blocked fake claude.
+        # nobody handles kills milhouse and strands the blocked fake claude.
         if claude_pid:
             _kill_quietly(claude_pid)
 
@@ -2796,7 +2796,7 @@ def test_a_hangup_with_a_dead_terminal_and_an_unwritable_log_exits_129(
     # The warning that the log was not written goes to the terminal that just
     # died; it must not replace the stop's exit 129.
     process = subprocess.Popen(
-        [str(ALR), "-d", str(clean_folder), "--validate"],
+        [str(MILHOUSE), "-d", str(clean_folder), "--validate"],
         stdin=subprocess.DEVNULL,
         stdout=slave,
         stderr=slave,
@@ -2813,13 +2813,13 @@ def test_a_hangup_with_a_dead_terminal_and_an_unwritable_log_exits_129(
         os.close(master)
         process.wait(timeout=10)
         assert process.returncode == 129
-        # Checked before the cleanup below, so it sees what alr itself left behind.
+        # Checked before the cleanup below, so it sees what milhouse itself left behind.
         wait_for_exit(claude_pid)
     finally:
         logs.chmod(0o700)
         process.kill()
         # Only a failing test gets here with claude still running: a SIGHUP
-        # nobody handles kills alr and strands the blocked fake claude.
+        # nobody handles kills milhouse and strands the blocked fake claude.
         if claude_pid:
             _kill_quietly(claude_pid)
 
@@ -2841,7 +2841,7 @@ def test_validate_flushes_stdout_before_the_review_error(
     no_claude.mkdir()
 
     done = subprocess.run(
-        [str(ALR), "-d", str(clean_folder), "--validate"],
+        [str(MILHOUSE), "-d", str(clean_folder), "--validate"],
         env={**os.environ, "PATH": str(no_claude)},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -2868,7 +2868,7 @@ def test_validate_stop_before_the_session_starts_exits_with_the_signal_code(
         signal.raise_signal(signal.SIGTERM)
         return 0
 
-    monkeypatch.setattr("alr.cli.dry_run", stopped_as_the_dry_run_ends)
+    monkeypatch.setattr("milhouse.cli.dry_run", stopped_as_the_dry_run_ends)
 
     code = cli.main(["-d", str(clean_folder), "--validate"])
 
@@ -2922,7 +2922,7 @@ class _ReviewCalls:
 def review_calls(monkeypatch: pytest.MonkeyPatch) -> _ReviewCalls:
     """Replace the review with one that only records what it was given."""
     calls = _ReviewCalls()
-    monkeypatch.setattr("alr.cli.review", calls.review)
+    monkeypatch.setattr("milhouse.cli.review", calls.review)
     return calls
 
 
@@ -2963,7 +2963,7 @@ def test_validate_puts_the_signal_handlers_back(
         signal.raise_signal(signal.SIGTERM)
         await asyncio.sleep(60)
 
-    monkeypatch.setattr("alr.cli.review", stopped)
+    monkeypatch.setattr("milhouse.cli.review", stopped)
 
     assert cli.main(["-d", str(clean_folder), "--validate"]) == 143
     assert _stop_signal_handlers() == before
@@ -3019,7 +3019,7 @@ def test_a_second_signal_during_the_stop_is_ignored(
             await asyncio.sleep(0.1)
             cleaned_up.append(True)
 
-    monkeypatch.setattr("alr.cli.review", stopped_twice)
+    monkeypatch.setattr("milhouse.cli.review", stopped_twice)
 
     code = cli.main(["-d", str(clean_folder), "--validate"])
 

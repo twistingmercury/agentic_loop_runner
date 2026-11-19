@@ -1,4 +1,4 @@
-"""Actions: the commands alr runs itself after a session reports completed."""
+"""Actions: the commands milhouse runs itself after a session reports completed."""
 
 import asyncio
 import contextlib
@@ -19,11 +19,11 @@ from helpers import (
     wait_until_gone,
 )
 
-from alr.engine import actions
-from alr.engine import loop as loop_module
-from alr.engine.actions import action_env, merged_env
-from alr.errors import AfterRunFailedError, RunError
-from alr.tasks import (
+from milhouse.engine import actions
+from milhouse.engine import loop as loop_module
+from milhouse.engine.actions import action_env, merged_env
+from milhouse.errors import AfterRunFailedError, RunError
+from milhouse.tasks import (
     COMPLETED,
     FAILED,
     PENDING,
@@ -207,8 +207,8 @@ async def test_run_loop_actions_never_reach_claude(
         ),
         pytest.param('x=1\ntest "$x" = 1', "", id="multi-line command"),
         pytest.param(
-            "alr-no-such-command",
-            'action "alr-no-such-command" failed: exit status 127',
+            "milhouse-no-such-command",
+            'action "milhouse-no-such-command" failed: exit status 127',
             id="command not found",
         ),
         pytest.param(
@@ -281,7 +281,7 @@ async def test_run_loop_action_stdin_is_empty_not_inherited(
     # Under pytest stdin is already empty, so an action that inherited it would
     # still read nothing; a file with content shows the difference.
     stdin_file = tmp_path / "stdin"
-    stdin_file.write_text("alr-stdin-marker\n")
+    stdin_file.write_text("milhouse-stdin-marker\n")
     # The brackets show everything the action read before end-of-file.
     action = Action(command="printf 'action-read=[%s]\\n' \"$(cat)\"")
 
@@ -292,7 +292,9 @@ async def test_run_loop_action_stdin_is_empty_not_inherited(
     assert "action-read=[]\n" in output, (
         "the action must see end-of-file before any input"
     )
-    assert "alr-stdin-marker" not in output, "alr's stdin must not reach an action"
+    assert "milhouse-stdin-marker" not in output, (
+        "milhouse's stdin must not reach an action"
+    )
 
 
 @pytest.mark.parametrize(
@@ -566,17 +568,26 @@ def test_action_env_for_a_task(tmp_path: Path) -> None:
     env = action_env(task, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
 
     assert env == {
-        "ALR_TASK_ID": "7",
-        "ALR_TASK_NAME": 'fix "auth"; $(x)',
-        "ALR_TASK_FILE": str(tmp_path / "tasks.yaml"),
-        "ALR_LOG_DIR": str(tmp_path / "logs"),
+        "MILHOUSE_TASK_ID": "7",
+        "MILHOUSE_TASK_NAME": 'fix "auth"; $(x)',
+        "MILHOUSE_TASK_FILE": str(tmp_path / "tasks.yaml"),
+        "MILHOUSE_LOG_DIR": str(tmp_path / "logs"),
     }
+
+
+def test_action_env_names_all_start_with_the_tool_name(tmp_path: Path) -> None:
+    task = Task(id=7, name="n", prompt="p")
+    env = action_env(task, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
+
+    stray = [name for name in env if not name.startswith("MILHOUSE_")]
+
+    assert stray == []
 
 
 def test_action_env_after_the_run_has_no_task_variables(tmp_path: Path) -> None:
     env = action_env(None, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
 
-    assert sorted(env) == ["ALR_LOG_DIR", "ALR_TASK_FILE"]
+    assert sorted(env) == ["MILHOUSE_LOG_DIR", "MILHOUSE_TASK_FILE"]
 
 
 def test_action_env_makes_relative_paths_absolute(
@@ -587,47 +598,47 @@ def test_action_env_makes_relative_paths_absolute(
     env = action_env(None, "tasks.yaml", "logs")
 
     assert env == {
-        "ALR_TASK_FILE": str(tmp_path / "tasks.yaml"),
-        "ALR_LOG_DIR": str(tmp_path / "logs"),
+        "MILHOUSE_TASK_FILE": str(tmp_path / "tasks.yaml"),
+        "MILHOUSE_LOG_DIR": str(tmp_path / "logs"),
     }
 
 
 def test_merged_env_drops_inherited_task_variables_for_after_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A nested alr started from an action inherits the outer task's variables.
-    monkeypatch.setenv("ALR_TASK_ID", "9")
-    monkeypatch.setenv("ALR_TASK_NAME", "outer")
+    # A nested milhouse started from an action inherits the outer task's variables.
+    monkeypatch.setenv("MILHOUSE_TASK_ID", "9")
+    monkeypatch.setenv("MILHOUSE_TASK_NAME", "outer")
     monkeypatch.setenv("KEEP_ME", "yes")
     env = action_env(None, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
 
     merged = merged_env(env)
 
-    assert "ALR_TASK_ID" not in merged
-    assert "ALR_TASK_NAME" not in merged
+    assert "MILHOUSE_TASK_ID" not in merged
+    assert "MILHOUSE_TASK_NAME" not in merged
     assert merged["KEEP_ME"] == "yes"
-    assert merged["ALR_LOG_DIR"] == str(tmp_path / "logs")
+    assert merged["MILHOUSE_LOG_DIR"] == str(tmp_path / "logs")
 
 
 def test_merged_env_gives_an_after_task_action_its_own_task_variables(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ALR_TASK_ID", "9")
-    monkeypatch.setenv("ALR_TASK_NAME", "outer")
+    monkeypatch.setenv("MILHOUSE_TASK_ID", "9")
+    monkeypatch.setenv("MILHOUSE_TASK_NAME", "outer")
     task = Task(id=7, name="inner", prompt="p")
     env = action_env(task, str(tmp_path / "tasks.yaml"), str(tmp_path / "logs"))
 
     merged = merged_env(env)
 
-    assert merged["ALR_TASK_ID"] == "7"
-    assert merged["ALR_TASK_NAME"] == "inner"
+    assert merged["MILHOUSE_TASK_ID"] == "7"
+    assert merged["MILHOUSE_TASK_NAME"] == "inner"
 
 
 async def test_the_loop_gives_an_action_the_task_and_the_run_paths(
     tmp_path: Path,
 ) -> None:
     seen = tmp_path / "seen"
-    command = 'printf "%s|%s|%s" "$ALR_TASK_ID" "$ALR_TASK_FILE" "$ALR_LOG_DIR"'
+    command = 'printf "%s|%s|%s" "$MILHOUSE_TASK_ID" "$MILHOUSE_TASK_FILE" "$MILHOUSE_LOG_DIR"'
     task_list = _with_actions_task(Action(command=f"{command} > '{seen}'"))
     tasks_file = tmp_path / "tasks.yaml"
 
@@ -670,7 +681,7 @@ async def test_after_run_runs_once_after_the_last_task(tmp_path: Path) -> None:
 
 async def test_after_run_gets_the_run_variables_and_no_task(tmp_path: Path) -> None:
     out = tmp_path / "env"
-    command = f'printf \'%s|%s|%s\' "${{ALR_TASK_ID-unset}}" "$ALR_TASK_FILE" "$ALR_LOG_DIR" > \'{out}\''
+    command = f'printf \'%s|%s|%s\' "${{MILHOUSE_TASK_ID-unset}}" "$MILHOUSE_TASK_FILE" "$MILHOUSE_LOG_DIR" > \'{out}\''
     task_list = _after_run_list(after_run=[Action(command=command)])
     tasks_file = tmp_path / "tasks.yaml"
 
@@ -865,7 +876,7 @@ async def test_run_loop_a_tasks_own_action_sees_the_task_variables(
 ) -> None:
     seen = tmp_path / "seen"
     show_task = Action(
-        command=f"printf '%s|%s' \"$ALR_TASK_ID\" \"$ALR_TASK_NAME\" > '{seen}'"
+        command=f"printf '%s|%s' \"$MILHOUSE_TASK_ID\" \"$MILHOUSE_TASK_NAME\" > '{seen}'"
     )
     task_list = TaskList(
         shared=Shared(prompt="shared", after_task=[]),

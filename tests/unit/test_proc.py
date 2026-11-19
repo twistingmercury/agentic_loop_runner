@@ -16,7 +16,7 @@ from helpers import (
     wait_until_gone,
 )
 
-from alr.engine import proc
+from milhouse.engine import proc
 
 
 async def test_cancel_kills_the_whole_group(tmp_path: Path) -> None:
@@ -295,11 +295,11 @@ async def test_cancel_stops_the_group_without_sigterm(
 
 
 # Runs a command whose escaped descendant holds the pipes past the grace period,
-# then lets the loop close and the garbage go, as the end of alr does.
+# then lets the loop close and the garbage go, as the end of milhouse does.
 _CUT_OFF_SCRIPT = """
 import asyncio, gc, os, signal, sys
 from pathlib import Path
-from alr.engine import proc
+from milhouse.engine import proc
 
 proc._DRAIN_GRACE = 0.2
 pid_file = Path(sys.argv[1])
