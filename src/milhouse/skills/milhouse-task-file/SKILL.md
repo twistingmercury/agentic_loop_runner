@@ -8,9 +8,12 @@ description: >-
 
 # milhouse Task File
 
-Generate the one file an milhouse run needs: `tasks.yaml`, holding a `shared`
-block (the shared prompt) and an ordered task list. Respect the user's destination, project
-scope, verification, and commit policies.
+Generate the one file a milhouse run needs: `tasks.yaml`, holding a `shared`
+block (the shared prompt) and an ordered task list. Unless the user names
+another destination, it goes in its own run folder at the project root,
+`.milhouse/<name>/tasks.yaml`, where `<name>` is a short kebab-case name for the
+work. Respect the user's destination, project scope, verification, and commit
+policies.
 
 ## How milhouse uses the file
 
@@ -118,7 +121,10 @@ authorized.
 
 1. Read repository instructions and relevant design/build documents. Establish
    scope, output destination, actual document paths, and project verification
-   and Git policies. Do not add automatic commits where none are required.
+   and Git policies. The output destination is `.milhouse/<name>/` at the
+   project root unless the user names another one; create the folder when it is
+   missing, and never reuse a folder that already holds a different task list.
+   Do not add automatic commits where none are required.
 2. Read [the YAML task template](templates/tasks_template.yaml).
 3. Ask the user whether milhouse should commit after each task. If it should,
    `after_task` ends with the commit action above, the `Commits` line in
@@ -198,8 +204,8 @@ authorized.
    works without this skill installed. Apart from the project's own checks and
    each task's closing Finish block, keep generic rules out of task prompts;
    they live once, in `shared.prompt`.
-8. Validate `tasks.yaml` with `milhouse -d <run folder> --validate` (the run folder
-   holds `tasks.yaml`), adding the sandbox flag the run will use (ask the user
+8. Validate `tasks.yaml` with `milhouse -d .milhouse/<name> --validate` (or the
+   run folder the user named; the run folder holds `tasks.yaml`), adding the sandbox flag the run will use (ask the user
    which one when you do not know). It applies the same rules a real run does
    and exits non-zero on an invalid file. When the file has no warnings, it
    then starts a fresh Claude Code session that reads the file with the
@@ -217,6 +223,10 @@ authorized.
    `GENERATE_*` token remains in the file.
 9. Report the output path, the checks performed, and the review's findings or
    `NO FINDINGS`. Do not launch the loop merely to validate generated files.
+   Check that git ignores `.milhouse/` in this project (`git check-ignore -q
+   .milhouse/<name>/tasks.yaml`). When it does not, tell the user to add
+   `.milhouse/` to `.gitignore`, because the commit actions would otherwise
+   take the run folder's logs; do not edit `.gitignore` yourself unless asked.
    When an action commits, also tell the user that the commit takes whatever
    is in the work tree, so a sandbox settings file kept inside the repository
    needs a `.gitignore` line (or its own path in the `git reset` step). Do not edit

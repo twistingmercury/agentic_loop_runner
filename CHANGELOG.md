@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The bundled `milhouse-task-file` skill now saves a task file as
+  `.milhouse/<name>/tasks.yaml` at the project root, one folder per task list,
+  unless you name another place. It validates that folder with
+  `milhouse -d .milhouse/<name> --validate`, and tells you to add `.milhouse/`
+  to `.gitignore` when git does not already ignore it, since the commit
+  actions would otherwise take the run folder's logs.
+
 ## [0.6.0] - 2026-11-19
 
 ### Changed
