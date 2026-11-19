@@ -4,7 +4,7 @@
 ![Version](https://img.shields.io/github/v/tag/twistingmercury/milhouse?sort=semver)
 
 > **Maturity Level**: Emerging - in active, initial development; expect breaking changes.</br>
-> **Version**: v0.5.6
+> **Version**: v0.6.0
 >
 > - **Emerging**: Prototype, not production-ready, expect breaking changes
 > - **Basic**: Production-ready but actively evolving, expect minor version changes

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-19
+
 ### Changed
 
 - The tool is now called `milhouse` (ADR-041). The command, the package, the
@@ -19,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and logs the old tool wrote (`.alr/`) stay where they are, and milhouse does
   not read them. If a task file has an action that reads an `ALR_*` variable,
   change it to the new name. The earlier entries below keep the old name.
+- The GitHub repository is now `twistingmercury/milhouse` (and its wiki moved
+  with it). GitHub redirects the old address.
 
 ## [0.5.6] - 2026-11-18
 
