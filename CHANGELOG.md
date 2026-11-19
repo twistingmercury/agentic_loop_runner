@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The tool is now called `milhouse` (ADR-041). The command, the package, the
+  `MILHOUSE_TASK_FILE`, `MILHOUSE_LOG_DIR`, `MILHOUSE_TASK_ID`, and
+  `MILHOUSE_TASK_NAME` variables, `~/.local/milhouse`, and the bundled skills
+  (`milhouse-task-file`, `milhouse-task-review`) all use the new name. It's a
+  fresh install, so the old `~/.local/alr`, the old `alr-task-file` and
+  `alr-task-review` skills, and the installed `alr` stay until you delete
+  them. If a task file has an action that reads an `ALR_*` variable, change it
+  to the new name. The earlier entries below keep the old name.
+
 ## [0.5.6] - 2026-11-18
 
 ### Changed
