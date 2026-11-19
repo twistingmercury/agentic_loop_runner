@@ -1,6 +1,8 @@
 # Template for tasks.yaml. SKILL.md holds the field rules and task-scoping
 # guidance; this header covers only how to fill in this file.
 #
+# - Save the file as .milhouse/<name>/tasks.yaml at the project root, one folder
+#   per task list, unless the user names another place.
 # - Replace every GENERATE_* token. Copy the task entry once per task.
 # - The shared prompt below covers the project, the task-file rule, and the
 #   result line contract; put only task-specific content in each task's `prompt`.
