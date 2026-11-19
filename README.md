@@ -1,7 +1,7 @@
 # Agentic Loop Runner (milhouse)
 
 ![Maturity](https://img.shields.io/badge/maturity-emerging-orange)
-![Version](https://img.shields.io/github/v/tag/twistingmercury/agentic_loop_runner?sort=semver)
+![Version](https://img.shields.io/github/v/tag/twistingmercury/milhouse?sort=semver)
 
 > **Maturity Level**: Emerging - in active, initial development; expect breaking changes.</br>
 > **Version**: v0.5.6
@@ -27,19 +27,19 @@ a `tasks.yaml` list, one fresh Claude session per task. It began as the Python p
 [gralph](https://github.com/twistingmercury/gralph) and has since evolved beyond it
 ([ADR-022](docs/design/02_architectural_decisions.md#adr-022-alr-has-evolved-beyond-gralph)).
 
-Everything a user needs lives in the [wiki](https://github.com/twistingmercury/agentic_loop_runner/wiki):
+Everything a user needs lives in the [wiki](https://github.com/twistingmercury/milhouse/wiki):
 
-| To do this                                 | Read                                                                                                                   |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Install milhouse                           | [Install](https://github.com/twistingmercury/agentic_loop_runner/wiki/Install)                                         |
-| Make a first run                           | [Your first run](https://github.com/twistingmercury/agentic_loop_runner/wiki/Your-first-run)                           |
-| Write a task file                          | [Write a task file](https://github.com/twistingmercury/agentic_loop_runner/wiki/Write-a-task-file)                     |
-| Run commands around tasks (tests, commits) | [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions)                                         |
-| Choose what sessions may touch             | [Permissions and the sandbox](https://github.com/twistingmercury/agentic_loop_runner/wiki/Permissions-and-the-sandbox) |
-| Use the full-screen view                   | [Reading the screen](https://github.com/twistingmercury/agentic_loop_runner/wiki/Reading-the-screen)                   |
-| Script it, read the logs and exit codes    | [Plain mode and the run log](https://github.com/twistingmercury/agentic_loop_runner/wiki/Plain-mode-and-the-run-log)   |
-| Look up a flag, an exit code, a refusal    | [Command-line reference](https://github.com/twistingmercury/agentic_loop_runner/wiki/Command-line-reference)           |
-| Recover from a failed task                 | [When a task fails](https://github.com/twistingmercury/agentic_loop_runner/wiki/When-a-task-fails)                     |
+| To do this                                 | Read                                                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| Install milhouse                           | [Install](https://github.com/twistingmercury/milhouse/wiki/Install)                                         |
+| Make a first run                           | [Your first run](https://github.com/twistingmercury/milhouse/wiki/Your-first-run)                           |
+| Write a task file                          | [Write a task file](https://github.com/twistingmercury/milhouse/wiki/Write-a-task-file)                     |
+| Run commands around tasks (tests, commits) | [Actions](https://github.com/twistingmercury/milhouse/wiki/Actions)                                         |
+| Choose what sessions may touch             | [Permissions and the sandbox](https://github.com/twistingmercury/milhouse/wiki/Permissions-and-the-sandbox) |
+| Use the full-screen view                   | [Reading the screen](https://github.com/twistingmercury/milhouse/wiki/Reading-the-screen)                   |
+| Script it, read the logs and exit codes    | [Plain mode and the run log](https://github.com/twistingmercury/milhouse/wiki/Plain-mode-and-the-run-log)   |
+| Look up a flag, an exit code, a refusal    | [Command-line reference](https://github.com/twistingmercury/milhouse/wiki/Command-line-reference)           |
+| Recover from a failed task                 | [When a task fails](https://github.com/twistingmercury/milhouse/wiki/When-a-task-fails)                     |
 
 [CHANGELOG.md](CHANGELOG.md) records every release and every break.
 
@@ -71,14 +71,14 @@ and each build plan is in [docs/plans/](docs/plans/).
 - The task file is code: its prompts go to Claude and its actions run through `sh -c`.
   Do not run `milhouse` on a task file you do not trust.
 - `milhouse` ends only what it started, takes no lock, and promises no commit per task. The
-  [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions) page
+  [Actions](https://github.com/twistingmercury/milhouse/wiki/Actions) page
   lists these limits.
 
 ## Development Considerations
 
 Requires Python >= 3.12 and [uv](https://docs.astral.sh/uv/). The e2e tests need Docker.
 Contribution rules and the release process are on the
-[Contributing](https://github.com/twistingmercury/agentic_loop_runner/wiki/Contributing)
+[Contributing](https://github.com/twistingmercury/milhouse/wiki/Contributing)
 wiki page.
 
 ### Quick Start
