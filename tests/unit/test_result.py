@@ -1,7 +1,12 @@
 import pytest
 
-from alr.engine.result import RESULT_REQUEST, last_result_line, outcome, parse_result
-from alr.tasks import COMPLETED, FAILED
+from milhouse.engine.result import (
+    RESULT_REQUEST,
+    last_result_line,
+    outcome,
+    parse_result,
+)
+from milhouse.tasks import COMPLETED, FAILED
 
 EXIT_ERROR = "exit status 1"
 

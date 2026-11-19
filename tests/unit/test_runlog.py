@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from helpers import refuse_removal
 
-from alr.errors import RefusedError, RunLogError
-from alr.record import runlog
-from alr.record.events import (
+from milhouse.errors import RefusedError, RunLogError
+from milhouse.record import runlog
+from milhouse.record.events import (
     Activity,
     Event,
     ActionFinished,
@@ -25,8 +25,8 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.record.runlog import Info, RunLog, run_dir
-from alr.tasks import COMPLETED, FAILED, RUN_SCOPE, Action, RunResult, Task
+from milhouse.record.runlog import Info, RunLog, run_dir
+from milhouse.tasks import COMPLETED, FAILED, RUN_SCOPE, Action, RunResult, Task
 
 STAMP = '"time":"2026-10-01T14:02:11-04:00"'
 

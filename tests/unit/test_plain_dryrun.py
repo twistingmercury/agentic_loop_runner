@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 from helpers import write_file
 
-from alr.errors import FailedTasksError, RefusedError
-from alr.plain.dryrun import dry_run
-from alr.plain.dryrun_checks import check_task_list
-from alr.sandboxes import sandboxes_dir
-from alr.tasks import parse_tasks
+from milhouse.errors import FailedTasksError, RefusedError
+from milhouse.plain.dryrun import dry_run
+from milhouse.plain.dryrun_checks import check_task_list
+from milhouse.sandboxes import sandboxes_dir
+from milhouse.tasks import parse_tasks
 
 # What a dry run with no sandbox settings file prints where the sandbox line goes.
 SKIPPED_LINE = "sandbox rules skipped: no sandbox settings file\n"

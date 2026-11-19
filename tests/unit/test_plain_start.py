@@ -18,8 +18,8 @@ from helpers import (
     write_file,
 )
 
-from alr.engine.sandbox import bypass_args
-from alr.errors import (
+from milhouse.engine.sandbox import bypass_args
+from milhouse.errors import (
     FAILED_TASKS_MESSAGE,
     AfterRunFailedError,
     FailedTasksError,
@@ -27,9 +27,9 @@ from alr.errors import (
     RunError,
     RunLogError,
 )
-from alr.plain.start import start
-from alr.record.events import Activity, Event
-from alr.record.runlog import RunLog, run_dir
+from milhouse.plain.start import start
+from milhouse.record.events import Activity, Event
+from milhouse.record.runlog import RunLog, run_dir
 
 VALID_TASKS_YAML = """shared:
   prompt: shared
@@ -145,7 +145,7 @@ async def test_start_gives_actions_the_log_folder_beside_the_task_file(
     tasks_file = write_file(
         tmp_path / "tasks.yaml",
         "shared:\n  prompt: shared\n  after_task:\n"
-        f"    - action: printf %s \"$ALR_LOG_DIR\" > '{seen}'\n"
+        f"    - action: printf %s \"$MILHOUSE_LOG_DIR\" > '{seen}'\n"
         "tasks:\n  - {id: 1, name: First, prompt: p1}\n",
     )
 
@@ -392,7 +392,7 @@ async def test_start_twice_in_the_same_second_keeps_two_run_folders(
     tasks_file = write_file(tmp_path / "tasks.yaml", ONE_TASK_YAML)
     same_second = datetime(2026, 10, 7, 15, 56, 18, tzinfo=timezone.utc)
     monkeypatch.setattr(
-        "alr.plain.start.run_dir",
+        "milhouse.plain.start.run_dir",
         lambda log_dir, _start: run_dir(log_dir, same_second),
     )
 
@@ -475,7 +475,7 @@ async def test_start_log_write_failure_stops_the_run_and_the_child(
         "run_finished",
     ]
     assert ledger[1]["task"] == 1
-    # Not "stopped": no signal asked for it, and alr exits 1 like any other failure.
+    # Not "stopped": no signal asked for it, and milhouse exits 1 like any other failure.
     assert ledger[-1]["result"] == "failed", "a failed log write must not claim success"
     assert ledger[-1]["exit"] == 1
     assert ledger[-1]["error"] == "RunLogError: disk full"

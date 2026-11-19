@@ -1,10 +1,10 @@
 ---
-version: 20
-date: 2026-11-10
-notes: "The System Model table lists alr.review (ADR-036). Earlier: The System Model row for alr.skillinstall describes the startup sync, and the step 2 row drops `--install-skill` (ADR-035). Earlier: The System Model row for alr.skillinstall says it copies every bundled skill (ADR-033). Earlier: The System Model table lists alr.config (ADR-031) and alr.sandboxes (ADR-032). Earlier: The core concept diagram names the sandbox settings JSON as a file from ~/.local/alr/sandboxes/ or --sandbox-settings, not the run folder (ADR-032). Earlier: The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses alr as a tool; alr embeds no agent framework (ADR-022)."
+version: 21
+date: 2026-11-19
+notes: "The tool is renamed to milhouse (ADR-041). Earlier: The System Model table lists milhouse.review (ADR-036). Earlier: The System Model row for milhouse.skillinstall describes the startup sync, and the step 2 row drops `--install-skill` (ADR-035). Earlier: The System Model row for milhouse.skillinstall says it copies every bundled skill (ADR-033). Earlier: The System Model table lists milhouse.config (ADR-031) and milhouse.sandboxes (ADR-032). Earlier: The core concept diagram names the sandbox settings JSON as a file from ~/.local/milhouse/sandboxes/ or --sandbox-settings, not the run folder (ADR-032). Earlier: The loop description names a task's own actions, run before the shared ones (ADR-029). Earlier: Documents ADR-026: the task file holds after_task and after_run actions instead of gates, and a commit is an action, so the introduction, the diagram, the loop description, and the engine row say so; the view's commit setting is gone. Earlier: The view's commit setting offers none (the default), per task, and after all; the introduction and the roadmap say so (ADR-024). Earlier: the overview names the --commit task and run modes (ADR-024). Earlier: the System Model table is re-padded so its columns line up; no content changed. Earlier: the plain package line says output is shown and recorded (ADR-023). Earlier: drops the drop-in compatibility claim (ADR-022). The agent is a separate program that uses milhouse as a tool; milhouse embeds no agent framework (ADR-022)."
 ---
 
-# alr — Architecture Overview
+# milhouse — Architecture Overview
 
 [Back to Project README](../../README.md)
 
@@ -19,38 +19,38 @@ notes: "The System Model table lists alr.review (ADR-036). Earlier: The System M
 
 ## Introduction
 
-`alr` (Agentic Loop Runner) runs "Ralph loops" with Claude Code. It reads one YAML task file holding the shared prompt, the actions, and the list of tasks, then works through the list one task at a time, starting a fresh `claude --print` session for each task.
+`milhouse` (Agentic Loop Runner) runs "Ralph loops" with Claude Code. It reads one YAML task file holding the shared prompt, the actions, and the list of tasks, then works through the list one task at a time, starting a fresh `claude --print` session for each task.
 
-`alr` began as the Python port of [gralph](https://github.com/twistingmercury/gralph), which is written in Go. The port exists because a separate agent, to be built later as its own program, will use `alr` as a tool: it runs `alr --plain` and reads the exit code and the run log (`<dir>/logs/<timestamp>/run.jsonl` and `task-N.log`). `alr` itself will not embed an agent framework (ADR-022). Python still fits the runner: Textual and asyncio are Python libraries.
+`milhouse` began as the Python port of [gralph](https://github.com/twistingmercury/gralph), which is written in Go. The port exists because a separate agent, to be built later as its own program, will use `milhouse` as a tool: it runs `milhouse --plain` and reads the exit code and the run log (`<dir>/logs/<timestamp>/run.jsonl` and `task-N.log`). `milhouse` itself will not embed an agent framework (ADR-022). Python still fits the runner: Textual and asyncio are Python libraries.
 
-This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, an Actions dialog for the commands that run after each task and after the run, and `--install-skill`. The first version was built to match gralph v0.12.0's command line, task file, and behavior. `alr` has since evolved beyond gralph and changes flags, formats, and behavior as its own needs require (ADR-022). These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
+This set of documents covers the first two steps. The first ported gralph's engine and its plain (no full-screen view) mode, and is done (v0.0.6). The second adds a Textual full-screen view with setup dialogs, an Actions dialog for the commands that run after each task and after the run, and `--install-skill`. The first version was built to match gralph v0.12.0's command line, task file, and behavior. `milhouse` has since evolved beyond gralph and changes flags, formats, and behavior as its own needs require (ADR-022). These documents replace the earlier learning-project requirements, which are gone from the tree and kept in git history.
 
 ## Core Concept
 
 ```mermaid
 ---
-title: alr and what it talks to
+title: milhouse and what it talks to
 ---
 flowchart TD
     user["User in a terminal, script, or CI"]:::gray
-    alr["alr"]:::blue
+    milhouse["milhouse"]:::blue
 
     subgraph files["Files"]
         tasks["tasks.yaml<br/>shared prompt, actions, tasks"]:::green
-        sandbox["sandbox settings JSON<br/>(~/.local/alr/sandboxes/ or --sandbox-settings)"]:::green
+        sandbox["sandbox settings JSON<br/>(~/.local/milhouse/sandboxes/ or --sandbox-settings)"]:::green
     end
 
-    subgraph programs["Programs alr starts"]
+    subgraph programs["Programs milhouse starts"]
         claude["claude --print"]:::amber
         actions["action commands"]:::amber
     end
 
-    user -->|flags| alr
-    alr -->|reads and writes| tasks
-    alr -->|reads once| sandbox
-    alr -->|"one fresh session per task, prompt on stdin"| claude
-    claude -->|"output ending in a JSON result line"| alr
-    alr -->|"sh -c, after a completed session and after the run"| actions
+    user -->|flags| milhouse
+    milhouse -->|reads and writes| tasks
+    milhouse -->|reads once| sandbox
+    milhouse -->|"one fresh session per task, prompt on stdin"| claude
+    claude -->|"output ending in a JSON result line"| milhouse
+    milhouse -->|"sh -c, after a completed session and after the run"| actions
 
     classDef blue fill:#9ec5f4,stroke:#6e7781,color:#333333
     classDef green fill:#9fd8a8,stroke:#6e7781,color:#333333
@@ -60,27 +60,27 @@ flowchart TD
     style programs fill:#c4cbd3,stroke:#6e7781,color:#333333
 ```
 
-For each pending task, `alr` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has its own `actions` run first, then the file's `shared.after_task` actions, in order, and counts as done only if every one exits zero (ADR-029). A commit is just one of those actions (ADR-026). The task file is saved after every task, and a failed task stops the run. After the last task, `shared.after_run` runs once, even when every task was already completed.
+For each pending task, `milhouse` joins `shared.prompt` and the task, hands the text to a new Claude session on stdin, and reads the outcome from the last line of the session's output. A completed task then has its own `actions` run first, then the file's `shared.after_task` actions, in order, and counts as done only if every one exits zero (ADR-029). A commit is just one of those actions (ADR-026). The task file is saved after every task, and a failed task stops the run. After the last task, `shared.after_run` runs once, even when every task was already completed.
 
 ## System Model
 
-| Component            | Description                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `alr.cli`            | Parses flags, runs the startup checks, picks the front end, sets the exit code                          |
-| `alr.tasks`          | Parses, validates, and atomically saves the task file                                                   |
-| `alr.config`         | The config folder `~/.local/alr`: creates it on first run, then reads `config.yaml` (ADR-031)           |
-| `alr.sandboxes`      | The sandbox files in `~/.local/alr/sandboxes/`: adds the shipped ones, lists, finds by name (ADR-032)   |
-| `alr.engine`         | The shared run logic: the loop, the outcome rule, actions, session flags, process handling              |
-| `alr.plain`          | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                    |
-| `alr.record`         | The run events and the run log writer, shared by both front ends                                        |
-| `alr.stream`         | Everything only the full-screen path does: stream-json parsing and the stream front end                 |
-| `alr.tui`            | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker   |
-| `alr.skillinstall`   | Startup sync: adds or replaces the bundled skills in `~/.claude/skills`                                 |
-| `alr.review`         | `--validate`: the fresh read-only review session and the review log                                     |
+| Component               | Description                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `milhouse.cli`          | Parses flags, runs the startup checks, picks the front end, sets the exit code                             |
+| `milhouse.tasks`        | Parses, validates, and atomically saves the task file                                                      |
+| `milhouse.config`       | The config folder `~/.local/milhouse`: creates it on first run, then reads `config.yaml` (ADR-031)         |
+| `milhouse.sandboxes`    | The sandbox files in `~/.local/milhouse/sandboxes/`: adds the shipped ones, lists, finds by name (ADR-032) |
+| `milhouse.engine`       | The shared run logic: the loop, the outcome rule, actions, session flags, process handling                 |
+| `milhouse.plain`        | Everything only plain mode does: echo, shown-and-recorded output, the dry-run report                       |
+| `milhouse.record`       | The run events and the run log writer, shared by both front ends                                           |
+| `milhouse.stream`       | Everything only the full-screen path does: stream-json parsing and the stream front end                    |
+| `milhouse.tui`          | The Textual full-screen view: the main window, the setup dialogs, the file viewer, and the run worker      |
+| `milhouse.skillinstall` | Startup sync: adds or replaces the bundled skills in `~/.claude/skills`                                    |
+| `milhouse.review`       | `--validate`: the fresh read-only review session and the review log                                        |
 
 ## Key Principles
 
-1. **Began as a port of gralph, and has since evolved beyond it** — The port started from gralph v0.12.0's flags, task file, result line, and behavior, and gralph's tests guided it. `alr` now changes flags, formats, and behavior as its own needs require, and the CHANGELOG records each break (ADR-022). Inside, the code is plain Python and does not imitate Go libraries (ADR-007).
+1. **Began as a port of gralph, and has since evolved beyond it** — The port started from gralph v0.12.0's flags, task file, result line, and behavior, and gralph's tests guided it. `milhouse` now changes flags, formats, and behavior as its own needs require, and the CHANGELOG records each break (ADR-022). Inside, the code is plain Python and does not imitate Go libraries (ADR-007).
 2. **One engine, two front ends** — The rules of a run live in one place. Plain mode and the full-screen path differ only in how a subprocess is run and shown, so they cannot disagree on what counts as completed.
 3. **The engine never prints and never asks which mode it is in** — It is handed a front end and calls it. This keeps the plain path readable on its own and gives the TUI a clean surface to plug into.
 4. **Async from the start** — The engine is built on `asyncio` because the planned TUI (Textual) is async, and because cancelling a run cleanly is simpler there.
@@ -93,7 +93,7 @@ For each pending task, `alr` joins `shared.prompt` and the task, hands the text 
 | 1    | Engine, plain mode, dry-run, and the stream path plus run log                                                              | Done (v0.0.6) |
 | 2    | Textual full-screen view with setup dialogs, an Actions dialog, logging in both modes                                      | Done          |
 | 3    | Other ways to make runs more deterministic (single-file input is done: gralph v0.11.0 moved the prompt into the task file) | Later         |
-| 4    | A separate agent program that uses `alr` as a tool (ADR-022); not part of `alr`                                            | Later         |
+| 4    | A separate agent program that uses `milhouse` as a tool (ADR-022); not part of `milhouse`                                  | Later         |
 
 ## Document Navigation
 

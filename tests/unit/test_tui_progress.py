@@ -2,7 +2,7 @@
 
 import pytest
 
-from alr.record.events import (
+from milhouse.record.events import (
     Activity,
     ActionFinished,
     ActionStarted,
@@ -11,8 +11,8 @@ from alr.record.events import (
     TaskFinished,
     TaskStarted,
 )
-from alr.tasks import RUN_SCOPE, Action, Task
-from alr.tui.progress import Progress
+from milhouse.tasks import RUN_SCOPE, Action, Task
+from milhouse.tui.progress import Progress
 
 FIRST = Task(id=3, name="First", prompt="p")
 SECOND = Task(id=7, name="Second", prompt="p")

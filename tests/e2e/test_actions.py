@@ -1,4 +1,4 @@
-"""Actions: commands from a task's own actions list and the shared after_task list that alr runs itself after each session."""
+"""Actions: commands from a task's own actions list and the shared after_task list that milhouse runs itself after each session."""
 
 import time
 from pathlib import Path
@@ -14,7 +14,7 @@ from e2e_helpers import (
     fake_claude_records,
     read_task_log,
     read_tasks_yaml,
-    run_alr,
+    run_milhouse,
     run_args,
     run_dry_run,
     run_log,
@@ -54,7 +54,7 @@ def test_actions_passing_actions_complete_the_task(
     )
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
@@ -94,7 +94,7 @@ def test_actions_failing_action_fails_the_task_and_blocks_the_next_run(
     args = run_args(tasks_path)
     env = {"FAKECLAUDE_RECORD_FILE": str(record_file)}
 
-    res = run_alr(*args, env=env)
+    res = run_milhouse(*args, env=env)
 
     action_err = 'action "test \\"a\\" = \\"b\\"" failed: exit status 1'
     assert res.code != 0, res
@@ -109,7 +109,7 @@ def test_actions_failing_action_fails_the_task_and_blocks_the_next_run(
 
     # An action failure is an ordinary failed task: the saved file must load
     # again, and the next run must refuse to start.
-    again = run_alr(*args, env=env)
+    again = run_milhouse(*args, env=env)
 
     assert again.code == 3, again
     assert "Some tasks failed previous runs:" in again.out
@@ -124,7 +124,7 @@ def test_actions_failing_action_output_is_in_the_task_log_and_on_the_terminal(
         tmp_path, shared_block("Body.", [{"action": cmd}]) + ONE_TASK
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code != 0, res
     assert "action-said-out" in res.out
@@ -143,7 +143,7 @@ def test_actions_skipped_when_the_session_fails(
         tmp_path, shared_block("Body.", [{"action": f"touch '{marker}'"}]) + ONE_TASK
     )
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_OUTPUT": '{"state":"failed","error":"something broke"}\n'},
     )
@@ -172,7 +172,7 @@ def test_actions_timed_out_action_fails_the_task(
     )
 
     started = time.monotonic()
-    res = run_alr(*run_args(tasks_path), timeout=20)
+    res = run_milhouse(*run_args(tasks_path), timeout=20)
 
     action_err = 'action "sleep 30" timed out after 200ms'
     assert res.code != 0, res
@@ -201,7 +201,7 @@ def test_actions_action_timeout_flag_overrides_the_action_timeout(
     )
 
     started = time.monotonic()
-    res = run_alr(*run_args(tasks_path), "--action-timeout", "200ms", timeout=20)
+    res = run_milhouse(*run_args(tasks_path), "--action-timeout", "200ms", timeout=20)
 
     action_err = 'action "sleep 30" timed out after 200ms'
     assert res.code != 0, res
@@ -266,7 +266,7 @@ def test_actions_bad_action_timeout_flag_runs_nothing(
     record_file = tmp_path / "record.ndjson"
     flags = ["--dry-run"] if dry_run else []
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         f"--action-timeout={value}",
         *flags,
@@ -291,7 +291,7 @@ def test_actions_bad_action_timeout_flag_is_reported_before_anything_else(
     arg: str,
 ) -> None:
     """With --dir also missing, only a check that runs first reports the bad value."""
-    res = run_alr(arg)
+    res = run_milhouse(arg)
 
     assert res.code == 2, res
     assert f"error: {BAD_DURATION}\n" in res.err
@@ -306,7 +306,7 @@ def test_actions_multi_line_action_error_names_only_the_first_line(
         shared_block("Body.", [{"action": "echo first-line\nexit 3\n"}]) + ONE_TASK,
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code != 0, res
     assert (
@@ -342,7 +342,7 @@ def test_actions_shared_actions_run_for_every_task(
     )
     record_file = tmp_path / "record.ndjson"
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_RECORD_FILE": str(record_file)},
     )
@@ -375,7 +375,7 @@ def test_actions_a_tasks_own_actions_run_for_that_task_only_and_first(
         + two_tasks_first_with_actions([{"action": own}]),
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 0, res
     # Task 1 runs its own action, then the shared one; task 2 has no own action.
@@ -399,7 +399,7 @@ def test_actions_a_failing_own_action_fails_the_task_and_skips_the_shared_ones(
         + two_tasks_first_with_actions([{"action": "exit 7"}]),
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     action_err = 'action "exit 7" failed: exit status 7'
     assert res.code == 1, res
@@ -486,7 +486,7 @@ def test_actions_a_tasks_own_actions_survive_the_save(
         tmp_path, shared_block("Body.", []) + two_tasks_first_with_actions(own)
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 0, res
     after = read_tasks_yaml(tasks_path)

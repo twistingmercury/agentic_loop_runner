@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import sandbox_args, settings_args, settings_problem
-from alr.errors import RefusedError
+from milhouse.engine.sandbox import sandbox_args, settings_args, settings_problem
+from milhouse.errors import RefusedError
 
 FORCED = {
     "allowUnsandboxedCommands": False,

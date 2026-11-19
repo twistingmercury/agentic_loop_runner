@@ -8,12 +8,12 @@ from e2e_helpers import (
     VALID_TASKS_YAML,
     Result,
     fake_claude_records,
-    run_alr,
+    run_milhouse,
     run_args,
     write_tasks_yaml,
 )
 
-SKILL_NAMES = ("alr-task-file", "alr-task-review")
+SKILL_NAMES = ("milhouse-task-file", "milhouse-task-review")
 
 
 def forget_skills(home: Path) -> None:
@@ -24,7 +24,7 @@ def forget_skills(home: Path) -> None:
 def real_run(tmp_path: Path, env: dict[str, str] | None = None) -> Result:
     """The lightest real run: one task, the fake claude, no sandbox."""
     tasks_path = write_tasks_yaml(tmp_path, VALID_TASKS_YAML)
-    return run_alr(*run_args(tasks_path), env=env)
+    return run_milhouse(*run_args(tasks_path), env=env)
 
 
 def added_lines(skills: Path) -> str:
@@ -64,15 +64,15 @@ def test_an_edited_skill_is_updated(
     tmp_path: Path, home: Path, fake_claude: Path
 ) -> None:
     skills = home / ".claude" / "skills"
-    edited = skills / "alr-task-file" / "SKILL.md"
+    edited = skills / "milhouse-task-file" / "SKILL.md"
     bundled_text = edited.read_text(encoding="utf-8")
     edited.write_text("my own edit\n", encoding="utf-8")
 
     res = real_run(tmp_path)
 
     assert res.code == 0, res
-    assert res.out.startswith(f"Updated {skills / 'alr-task-file'}\n")
-    assert f"{skills / 'alr-task-review'}" not in res.out
+    assert res.out.startswith(f"Updated {skills / 'milhouse-task-file'}\n")
+    assert f"{skills / 'milhouse-task-review'}" not in res.out
     assert edited.read_text(encoding="utf-8") == bundled_text
 
 
@@ -83,7 +83,7 @@ def test_a_symlinked_skill_is_replaced_with_a_warning(
     linked_target = tmp_path / "versioned-skill"
     linked_target.mkdir()
     (linked_target / "SKILL.md").write_text("mine\n", encoding="utf-8")
-    link = skills / "alr-task-file"
+    link = skills / "milhouse-task-file"
     shutil.rmtree(link)
     link.symlink_to(linked_target, target_is_directory=True)
 
@@ -100,14 +100,16 @@ def test_a_symlinked_skill_is_replaced_with_a_warning(
 
 def test_a_dry_run_says_updated_for_an_edited_skill(tmp_path: Path, home: Path) -> None:
     skills = home / ".claude" / "skills"
-    edited = skills / "alr-task-file" / "SKILL.md"
+    edited = skills / "milhouse-task-file" / "SKILL.md"
     edited.write_text("my own edit\n", encoding="utf-8")
     write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
 
-    res = run_alr("-d", str(tmp_path), "--dry-run")
+    res = run_milhouse("-d", str(tmp_path), "--dry-run")
 
     assert res.code == 0, res
-    assert f"skill: {skills / 'alr-task-file'} (updated on a real run)\n" in res.out
+    assert (
+        f"skill: {skills / 'milhouse-task-file'} (updated on a real run)\n" in res.out
+    )
     assert edited.read_text(encoding="utf-8") == "my own edit\n"
 
 
@@ -137,8 +139,8 @@ def test_an_unwritable_skills_folder_warns_and_the_run_goes_on(
     res = real_run(tmp_path, env={"FAKECLAUDE_RECORD_FILE": str(record_file)})
 
     assert res.code == 0, res
-    assert "warning: skill alr-task-file: " in res.err
-    assert "warning: skill alr-task-review: " in res.err
+    assert "warning: skill milhouse-task-file: " in res.err
+    assert "warning: skill milhouse-task-review: " in res.err
     assert len(fake_claude_records(record_file)) == 1
 
 
@@ -147,7 +149,7 @@ def test_a_dry_run_reports_and_writes_nothing(tmp_path: Path, home: Path) -> Non
     write_tasks_yaml(tmp_path, DRY_RUN_TASKS_YAML)
     skills = home / ".claude" / "skills"
 
-    res = run_alr("-d", str(tmp_path), "--dry-run")
+    res = run_milhouse("-d", str(tmp_path), "--dry-run")
 
     assert res.code == 0, res
     assert res.out.startswith(
@@ -159,7 +161,7 @@ def test_a_dry_run_reports_and_writes_nothing(tmp_path: Path, home: Path) -> Non
 
 
 def test_install_skill_is_rejected(home: Path) -> None:
-    res = run_alr("--install-skill")
+    res = run_milhouse("--install-skill")
 
     assert res.code == 2, res
     assert "unrecognized arguments: --install-skill" in res.err

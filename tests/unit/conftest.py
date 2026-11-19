@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from alr.config import create_folder
-from alr.skillinstall import sync
+from milhouse.config import create_folder
+from milhouse.skillinstall import sync
 
 FAKE_CLAUDE_SOURCE = Path(__file__).parent / "fakeclaude" / "fake_claude.py"
 
@@ -52,7 +52,7 @@ def work_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Point the home folder at a temporary one that already holds the config folder.
 
-    No test may touch the real ~/.local/alr. The folder is created up front so
+    No test may touch the real ~/.local/milhouse. The folder is created up front so
     a real run goes straight to its work instead of asking to set up; fresh_home
     is the one without it. The bundled skills are synced up front too, so no
     real run prints an Added line for them.
@@ -71,7 +71,7 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 @pytest.fixture
 def fresh_home(home: Path) -> Path:
-    """The temporary home as a machine that never ran alr: no ~/.local at all."""
+    """The temporary home as a machine that never ran milhouse: no ~/.local at all."""
     shutil.rmtree(home / ".local")
     return home
 

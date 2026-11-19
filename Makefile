@@ -18,7 +18,7 @@ build: ## Builds the wheel, then runs the e2e tests in a container
 	build/build.sh
 
 install: ## Install the locally build wheel
-	uv tool install dist/alr-*.whl --force
+	uv tool install dist/milhouse-*.whl --force
 
-uninstall: ## Uninstalls alr
-	uv tool uninstall alr
+uninstall: ## Uninstalls milhouse
+	uv tool uninstall milhouse

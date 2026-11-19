@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from alr.engine.sandbox import bypass_args
-from alr.errors import RefusedError
-from alr.tui.settings import Permissions, RunSettings
+from milhouse.engine.sandbox import bypass_args
+from milhouse.errors import RefusedError
+from milhouse.tui.settings import Permissions, RunSettings
 
 
 @pytest.mark.parametrize(
@@ -95,7 +95,7 @@ def test_a_named_sandbox_is_not_missing_once_the_folder_is_known() -> None:
     settings = RunSettings(
         tasks_file="t/tasks.yaml",
         permissions=Permissions.SANDBOX,
-        sandbox_file="/h/.local/alr/sandboxes/tight.json",
+        sandbox_file="/h/.local/milhouse/sandboxes/tight.json",
         sandbox_name="tight",
     )
 

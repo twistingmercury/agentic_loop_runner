@@ -12,11 +12,11 @@ import pexpect
 import pytest
 from e2e_helpers import (
     assert_no_tmp_file,
-    find_alr,
+    find_milhouse,
     read_tasks_yaml,
     run_args,
     shared_block,
-    start_alr,
+    start_milhouse,
     task_states,
     wait_for_file,
     wait_process_gone,
@@ -55,7 +55,7 @@ def test_loop_signal_kills_process_tree(
     }
 
     with stopped_at_exit(
-        start_alr(*run_args(tasks_path), env=env),
+        start_milhouse(*run_args(tasks_path), env=env),
         ready_file,
         descendant_pid_file,
     ) as process:
@@ -88,12 +88,12 @@ def test_an_ignored_sighup_does_not_stop_the_run(
     }
 
     with stopped_at_exit(
-        start_alr_ignoring_sighup(*run_args(tasks_path), env=env), ready_file
+        start_milhouse_ignoring_sighup(*run_args(tasks_path), env=env), ready_file
     ) as process:
         wait_for_file(ready_file, 10)
 
         process.send_signal(signal.SIGHUP)
-        # alr handles a stop at once, so a second of silence shows it was ignored.
+        # milhouse handles a stop at once, so a second of silence shows it was ignored.
         with pytest.raises(subprocess.TimeoutExpired):
             process.wait(timeout=1)
 
@@ -129,7 +129,7 @@ def test_a_plain_run_that_ignored_sighup_goes_on_after_its_terminal_closes(
     claude.chmod(0o755)
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
     child = pexpect.spawn(
-        find_alr(),
+        find_milhouse(),
         [*run_args(tasks_path), "--plain"],
         env=env,
         encoding="utf-8",
@@ -143,7 +143,7 @@ def test_a_plain_run_that_ignored_sighup_goes_on_after_its_terminal_closes(
         while child.isalive() and time.monotonic() < deadline:
             time.sleep(0.05)
 
-        assert not child.isalive(), "alr did not finish"
+        assert not child.isalive(), "milhouse did not finish"
     finally:
         if child.isalive():
             os.kill(child.pid, signal.SIGKILL)
@@ -153,13 +153,15 @@ def test_a_plain_run_that_ignored_sighup_goes_on_after_its_terminal_closes(
     assert_no_tmp_file(tasks_path)
 
 
-def start_alr_ignoring_sighup(*args: str, env: dict[str, str]) -> subprocess.Popen[str]:
-    """Start alr as nohup does, with SIGHUP ignored before it runs.
+def start_milhouse_ignoring_sighup(
+    *args: str, env: dict[str, str]
+) -> subprocess.Popen[str]:
+    """Start milhouse as nohup does, with SIGHUP ignored before it runs.
 
-    start_alr takes no such option, so this is a local copy of it.
+    start_milhouse takes no such option, so this is a local copy of it.
     """
     return subprocess.Popen(
-        [find_alr(), *args],
+        [find_milhouse(), *args],
         env={**os.environ, **env},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -182,7 +184,7 @@ def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
     sleeper_pid_file = tmp_path / "sleeper.pid"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # setsid takes the sleeper out of the group alr kills, and it keeps the
+    # setsid takes the sleeper out of the group milhouse kills, and it keeps the
     # session's stdout open; its stderr goes away so it cannot also hold the
     # test's pipe. Short, so a failing run cleans up on its own.
     claude = bin_dir / "claude"
@@ -199,7 +201,7 @@ def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
     env = {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
 
     with stopped_at_exit(
-        start_alr(*run_args(tasks_path), env=env),
+        start_milhouse(*run_args(tasks_path), env=env),
         session_pid_file,
         sleeper_pid_file,
     ) as process:
@@ -220,7 +222,7 @@ def test_sigint_exits_while_an_escaped_descendant_holds_the_session_pipe(
 def stopped_at_exit(
     process: subprocess.Popen[str], *pid_files: Path
 ) -> Iterator[subprocess.Popen[str]]:
-    """Kill alr and every process named in pid_files on the way out, so a failing test leaves nothing running."""
+    """Kill milhouse and every process named in pid_files on the way out, so a failing test leaves nothing running."""
     try:
         with process:
             try:

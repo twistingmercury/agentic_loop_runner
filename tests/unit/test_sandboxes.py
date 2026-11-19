@@ -10,14 +10,14 @@ from pathlib import Path
 import pytest
 from helpers import chmodded
 
-from alr.config import config_dir, create_folder
-from alr.errors import (
+from milhouse.config import config_dir, create_folder
+from milhouse.errors import (
     CONFIG_UNWRITABLE,
     INVALID_CONFIG,
     RefusedError,
     UsageError,
 )
-from alr.sandboxes import (
+from milhouse.sandboxes import (
     Sandbox,
     SandboxChange,
     add_missing,
@@ -37,7 +37,7 @@ SHIPPED = ("large.json", "tight.json")
 
 
 def package_copy(name: str) -> bytes:
-    return (files("alr") / "defaults" / "sandboxes" / name).read_bytes()
+    return (files("milhouse") / "defaults" / "sandboxes" / name).read_bytes()
 
 
 @pytest.fixture
@@ -108,14 +108,16 @@ def test_add_missing_losing_a_race_is_not_an_error_and_keeps_the_winner(
     folder = sandboxes_dir(set_up_home)
     real_link = os.link
 
-    def other_alr_wins_the_first_file(source: str, target: Path) -> None:
-        # Another alr (or the user) writes the file after our "is it there?" check.
+    def other_milhouse_wins_the_first_file(source: str, target: Path) -> None:
+        # Another milhouse (or the user) writes the file after our "is it there?" check.
         if Path(target).name == "large.json":
             Path(target).write_text("the winner\n", encoding="utf-8")
 
         real_link(source, target)
 
-    monkeypatch.setattr("alr.sandboxes.os.link", other_alr_wins_the_first_file)
+    monkeypatch.setattr(
+        "milhouse.sandboxes.os.link", other_milhouse_wins_the_first_file
+    )
 
     added = add_missing(set_up_home)
 
@@ -250,7 +252,7 @@ def test_check_refuses_a_missing_folder_in_a_read_only_config_folder_as_the_real
     assert dry.message == real.message
 
 
-def test_check_refuses_a_folder_alr_cannot_search_as_the_real_run_does(
+def test_check_refuses_a_folder_milhouse_cannot_search_as_the_real_run_does(
     set_up_home: Path, locked_folder: None
 ) -> None:
     add_missing(set_up_home)
@@ -374,7 +376,7 @@ def test_list_of_a_sandboxes_path_that_is_a_dangling_link_is_invalid_config(
         pytest.param(0o400, id="readable but not searchable"),
     ],
 )
-def test_list_of_a_folder_alr_cannot_list_is_config_unwritable(
+def test_list_of_a_folder_milhouse_cannot_list_is_config_unwritable(
     mode: int, set_up_home: Path, locked_folder: None
 ) -> None:
     add_missing(set_up_home)
@@ -691,7 +693,7 @@ def test_sync_shipped_removes_its_temporary_file_when_the_replace_fails(
     def replace_fails(source: str, target: Path) -> None:
         raise OSError(errno.EIO, os.strerror(errno.EIO))
 
-    monkeypatch.setattr("alr.sandboxes.os.replace", replace_fails)
+    monkeypatch.setattr("milhouse.sandboxes.os.replace", replace_fails)
 
     report = sync_shipped(set_up_home)
 
@@ -844,7 +846,7 @@ def test_sync_shipped_writes_its_temporary_file_beside_the_target(
         sources.append(Path(source))
         real_replace(source, target)
 
-    monkeypatch.setattr("alr.sandboxes.os.replace", watch_replace)
+    monkeypatch.setattr("milhouse.sandboxes.os.replace", watch_replace)
 
     sync_shipped(set_up_home)
 
@@ -887,7 +889,7 @@ def test_sync_shipped_replaces_a_read_only_file_in_a_writable_folder(
 def test_is_shipped_sandbox_resolves_the_path_it_is_given(home: Path) -> None:
     folder = sandboxes_dir(home)
     shipped_by_a_dotted_path = folder / ".." / "sandboxes" / "large.json"
-    link = home / "alr_link"
+    link = home / "milhouse_link"
     link.symlink_to(folder)
 
     assert is_shipped_sandbox(shipped_by_a_dotted_path)

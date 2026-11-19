@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from helpers import write_nested_file
 
-from alr.errors import (
+from milhouse.errors import (
     RefusedError,
     TaskFileError,
     UsageError,
 )
-from alr.tui.checks import check_folder, check_sandbox
+from milhouse.tui.checks import check_folder, check_sandbox
 
 TASKS = "shared:\n  prompt: p\ntasks:\n  - id: 1\n    name: A\n    prompt: p\n"
 

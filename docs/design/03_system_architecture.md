@@ -1,10 +1,10 @@
 ---
-version: 58
-date: 2026-11-17
-notes: "The module list names plain/terminal.py instead of tui/terminal.py, the exit code after a finished run is stated, and the test table counts the SIGHUP e2e runs (ADR-040). Earlier: The view's output thread survives a terminal that has gone (ADR-040). Earlier: The view quits itself after a SIGTERM or SIGHUP stop, and only the first stop sets the exit code (ADR-040). Earlier: SIGHUP stops a run like SIGTERM and exits 129: the signal handlers, the stop sequence, the Stopped paragraph, the exit code table, the RunCancelledError row, and the view's handler say so (ADR-040). Earlier: The argv, outcome rule, event list, front end table, and fixed-argv row name --session-id, --resume, and ResultRetried (ADR-039). Earlier: The error handling section and the Claude-returns row say a session that exits 0 without a result line is resumed once, and quote the new error (ADR-039). Earlier: The validate paragraph says the review runs on engine/proc.py and which signals stop it (ADR-036). Earlier: The validate paragraph adds the process group, the denied MCP tools, and the skill check (ADR-036). Earlier: Startup step 1 says --validate syncs the skills like a real run (ADR-036). Earlier: The validate paragraph says the review runs only on a clean dry run (ADR-036). Earlier: Adds --validate and the review (ADR-036): review.py in the module list, the validate paragraph under the dry run, and the ReviewError row (exit 1). Earlier: Startup step 1 describes the sync as reviewed: folders and symlinks count toward identical, a replace keeps the old folder until the copy is in, and the symlink warning is on stderr (ADR-035). Earlier: The startup sync uses $CLAUDE_CONFIG_DIR/skills when the variable is set (ADR-035). Earlier: The startup sync of the bundled skills replaces `--install-skill` (ADR-035): the module comment, the CLI responsibilities, the sync inside startup step 1 (the startup steps are renumbered, and their references), the dry-run lines, and the filesystem table. Earlier: The dry run gains a second pass of six warnings and `--strict` (ADR-034): the module list names `plain/dryrun_checks.py`, the dry-run step lists the warning lines, the skipped-sandbox line, and the `task-file-warnings` refusal. Earlier: `--install-skill` copies every bundled skill folder, in sorted order, and prints one path per line; the skillinstall role, the package data line, the startup step, and the filesystem-writes row say so (ADR-033). Earlier: The cli.py role line says routing, resolving --dir and --sandbox <name>; step 4 no longer opens a sandbox file; step 8 quotes the no-choice error and the refusal that names the flag and the file; the dry-run and dialog bullets match the code; a refusal changes nothing in the run folder, though a real run may have added sandbox files. Earlier: Sandbox files (ADR-032) are built: the package layout has sandboxes.py and no presets.py, the CLI adds the missing shipped files and resolves --sandbox <name>, the engine no longer looks in the run folder, the dialog is one list of sandboxes by name, and sandbox-file-unwritable is gone from the refusal list. Earlier: The unit-test gate also runs mypy over src/. Earlier: The finished summary focuses its button; after a clean run the button is Exit and ends alr with the run's exit code, after a failed or stopped run it is Close and the app stays open. Earlier: Adds the user config folder (ADR-031): alr.config in the package layout, the config setup and config read in the startup order and the CLI responsibilities, the three refusal reasons config-setup-missing, invalid-config, and config-unwritable, exit 0 after a setup, and the boundary rows for reading and creating ~/.local/alr. Earlier: Documents the two sandbox follow-ups: a restore that fails after a refused save is reported in the refusal (same reason, and a second part saying the file could not be restored and now holds the preset), and the sandbox viewer shows the chosen preset under a header saying it is written on Start, until the run starts. Earlier: Fixes the statements ADR-029 made false: an unknown task key is an error, completed means every action in both lists, the task variables reach a task's own actions, the sequence diagram and the trust-boundary row name both lists. Earlier: Documents ADR-029: a task's own actions list is checked by the shared lists' checker and its errors name the task (tasks[<index>] (id <id>): actions[<j>]: ...), the per-task after_task and after_run refusal now says a task's own actions go under actions, any other task key is refused as an unknown key, the engine runs the task's own actions and then shared.after_task as one list, the dry run prints task <id> actions: lines before the shared ones, and the progress line counts the running task's own actions plus the shared ones. Earlier: Documents ADR-027: engine/presets.py, the preset write and its rollback in the startup sequence, the view's permissions dialog, and the refusal reason sandbox-file-unwritable. Earlier: Quotes the refusal messages as the code words them: they end \"see the README (Migrating from commit modes and gates)\", and the per-task gates, after_task, and after_run refusals are listed. Earlier: Documents ADR-026: commits are actions. The commit component is gone (engine/commit.py, the commit lock, the pre-add re-check, the repository checks, git's own session, and the commit guards and their known limits), gates.py is actions.py, and the engine description, the front end interface, both sequence diagrams, the startup order, the exit codes (4 is now an after_run failure, result run_failed), the error table (AfterRunFailedError), the view, and the boundary table describe after_task and after_run actions, their ALR_* variables, and the rule that after_run runs even when every task was already completed. Earlier: Corrects the commit-safety section to ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons name the logs directory and git's message when git cannot answer, the log check covers the whole logs directory, the signing-program claim is narrowed to a program that prompts on /dev/tty, and a Known limits list is added. Earlier: Documents ADR-025 stage 2, commit safety, as built: a flock on alr.lock in the git directory held for the whole committing run (a second run, or a dry run with a commit mode, is refused as locked, after the task file check and before the log folder and clean tree checks); git add and git commit start in their own session, and on Linux the kernel stops them with SIGTERM when alr dies (PR_SET_PDEATHSIG); the task file and log folder are checked again right before every git add, and a path git can now see fails the commit (exit 4); the refusal reason locked is raised, not just listed. Earlier: Corrects the document to ADR-025 after a wording check against the code: log-folder-visible applies to the dry run only with --commit task or run, while failed-tasks and log-unwritable apply to every dry run; the refusal reason list now names locked, which no code raises until ADR-025 stage 2. Earlier: Corrects the document to ADR-025 after the stage 1c re-review: the dry run also refuses an unwritable log folder (log-unwritable) without creating it; a refused start also removes a logs/ folder it created, when it is empty, not only the run folder; task-file-unwritable covers the save of edited gates when the view starts, as well as the --reset-failed save. Earlier: Corrects the document to ADR-025 as amended after the stage 1 review: a refusal leaves nothing on disk, in a fixed order (--reset-failed is applied in memory and saved last, and a failed save is the new reason task-file-unwritable, nine reasons in all); the dry run refuses like a real run (exit 3, failed tasks included); the view carries the stop signal (SIGTERM 143, a second Stop press keeps the code); a stop after the commit landed saves the tasks it covers completed, and a stop in run mode leaves tasks.yaml untouched. Earlier: Documents ADR-025: each AlrError class carries its exit code (usage 2, refused 3, commit failed 4, stop 130 or 143) and the new Exit Codes table lists them; refusals name a reason and write no run log; run_done carries the result and exit code; run mode keeps task states in memory, shows passed, and saves tasks.yaml once at the end; task mode completes a task only after its commit lands. The error table lists the classes alr has. Earlier: Startup order: argparse rejects a bad --commit value, a bare --commit, and --commit-after-all before every step with exit 2, which is said apart from UsageError exiting 1; the log folder is checked before the clean tree; the run commit says 1 task for one task (ADR-024). Earlier: The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
+version: 59
+date: 2026-11-19
+notes: "The tool is renamed to milhouse (ADR-041). Earlier: The module list names plain/terminal.py instead of tui/terminal.py, the exit code after a finished run is stated, and the test table counts the SIGHUP e2e runs (ADR-040). Earlier: The view's output thread survives a terminal that has gone (ADR-040). Earlier: The view quits itself after a SIGTERM or SIGHUP stop, and only the first stop sets the exit code (ADR-040). Earlier: SIGHUP stops a run like SIGTERM and exits 129: the signal handlers, the stop sequence, the Stopped paragraph, the exit code table, the RunCancelledError row, and the view's handler say so (ADR-040). Earlier: The argv, outcome rule, event list, front end table, and fixed-argv row name --session-id, --resume, and ResultRetried (ADR-039). Earlier: The error handling section and the Claude-returns row say a session that exits 0 without a result line is resumed once, and quote the new error (ADR-039). Earlier: The validate paragraph says the review runs on engine/proc.py and which signals stop it (ADR-036). Earlier: The validate paragraph adds the process group, the denied MCP tools, and the skill check (ADR-036). Earlier: Startup step 1 says --validate syncs the skills like a real run (ADR-036). Earlier: The validate paragraph says the review runs only on a clean dry run (ADR-036). Earlier: Adds --validate and the review (ADR-036): review.py in the module list, the validate paragraph under the dry run, and the ReviewError row (exit 1). Earlier: Startup step 1 describes the sync as reviewed: folders and symlinks count toward identical, a replace keeps the old folder until the copy is in, and the symlink warning is on stderr (ADR-035). Earlier: The startup sync uses $CLAUDE_CONFIG_DIR/skills when the variable is set (ADR-035). Earlier: The startup sync of the bundled skills replaces `--install-skill` (ADR-035): the module comment, the CLI responsibilities, the sync inside startup step 1 (the startup steps are renumbered, and their references), the dry-run lines, and the filesystem table. Earlier: The dry run gains a second pass of six warnings and `--strict` (ADR-034): the module list names `plain/dryrun_checks.py`, the dry-run step lists the warning lines, the skipped-sandbox line, and the `task-file-warnings` refusal. Earlier: `--install-skill` copies every bundled skill folder, in sorted order, and prints one path per line; the skillinstall role, the package data line, the startup step, and the filesystem-writes row say so (ADR-033). Earlier: The cli.py role line says routing, resolving --dir and --sandbox <name>; step 4 no longer opens a sandbox file; step 8 quotes the no-choice error and the refusal that names the flag and the file; the dry-run and dialog bullets match the code; a refusal changes nothing in the run folder, though a real run may have added sandbox files. Earlier: Sandbox files (ADR-032) are built: the package layout has sandboxes.py and no presets.py, the CLI adds the missing shipped files and resolves --sandbox <name>, the engine no longer looks in the run folder, the dialog is one list of sandboxes by name, and sandbox-file-unwritable is gone from the refusal list. Earlier: The unit-test gate also runs mypy over src/. Earlier: The finished summary focuses its button; after a clean run the button is Exit and ends milhouse with the run's exit code, after a failed or stopped run it is Close and the app stays open. Earlier: Adds the user config folder (ADR-031): milhouse.config in the package layout, the config setup and config read in the startup order and the CLI responsibilities, the three refusal reasons config-setup-missing, invalid-config, and config-unwritable, exit 0 after a setup, and the boundary rows for reading and creating ~/.local/milhouse. Earlier: Documents the two sandbox follow-ups: a restore that fails after a refused save is reported in the refusal (same reason, and a second part saying the file could not be restored and now holds the preset), and the sandbox viewer shows the chosen preset under a header saying it is written on Start, until the run starts. Earlier: Fixes the statements ADR-029 made false: an unknown task key is an error, completed means every action in both lists, the task variables reach a task's own actions, the sequence diagram and the trust-boundary row name both lists. Earlier: Documents ADR-029: a task's own actions list is checked by the shared lists' checker and its errors name the task (tasks[<index>] (id <id>): actions[<j>]: ...), the per-task after_task and after_run refusal now says a task's own actions go under actions, any other task key is refused as an unknown key, the engine runs the task's own actions and then shared.after_task as one list, the dry run prints task <id> actions: lines before the shared ones, and the progress line counts the running task's own actions plus the shared ones. Earlier: Documents ADR-027: engine/presets.py, the preset write and its rollback in the startup sequence, the view's permissions dialog, and the refusal reason sandbox-file-unwritable. Earlier: Quotes the refusal messages as the code words them: they end \"see the README (Migrating from commit modes and gates)\", and the per-task gates, after_task, and after_run refusals are listed. Earlier: Documents ADR-026: commits are actions. The commit component is gone (engine/commit.py, the commit lock, the pre-add re-check, the repository checks, git's own session, and the commit guards and their known limits), gates.py is actions.py, and the engine description, the front end interface, both sequence diagrams, the startup order, the exit codes (4 is now an after_run failure, result run_failed), the error table (AfterRunFailedError), the view, and the boundary table describe after_task and after_run actions, their MILHOUSE_* variables, and the rule that after_run runs even when every task was already completed. Earlier: Corrects the commit-safety section to ADR-025 after a wording and limits check against the code: the pre-add re-check's exit-4 reasons name the logs directory and git's message when git cannot answer, the log check covers the whole logs directory, the signing-program claim is narrowed to a program that prompts on /dev/tty, and a Known limits list is added. Earlier: Documents ADR-025 stage 2, commit safety, as built: a flock on milhouse.lock in the git directory held for the whole committing run (a second run, or a dry run with a commit mode, is refused as locked, after the task file check and before the log folder and clean tree checks); git add and git commit start in their own session, and on Linux the kernel stops them with SIGTERM when milhouse dies (PR_SET_PDEATHSIG); the task file and log folder are checked again right before every git add, and a path git can now see fails the commit (exit 4); the refusal reason locked is raised, not just listed. Earlier: Corrects the document to ADR-025 after a wording check against the code: log-folder-visible applies to the dry run only with --commit task or run, while failed-tasks and log-unwritable apply to every dry run; the refusal reason list now names locked, which no code raises until ADR-025 stage 2. Earlier: Corrects the document to ADR-025 after the stage 1c re-review: the dry run also refuses an unwritable log folder (log-unwritable) without creating it; a refused start also removes a logs/ folder it created, when it is empty, not only the run folder; task-file-unwritable covers the save of edited gates when the view starts, as well as the --reset-failed save. Earlier: Corrects the document to ADR-025 as amended after the stage 1 review: a refusal leaves nothing on disk, in a fixed order (--reset-failed is applied in memory and saved last, and a failed save is the new reason task-file-unwritable, nine reasons in all); the dry run refuses like a real run (exit 3, failed tasks included); the view carries the stop signal (SIGTERM 143, a second Stop press keeps the code); a stop after the commit landed saves the tasks it covers completed, and a stop in run mode leaves tasks.yaml untouched. Earlier: Documents ADR-025: each MilhouseError class carries its exit code (usage 2, refused 3, commit failed 4, stop 130 or 143) and the new Exit Codes table lists them; refusals name a reason and write no run log; run_done carries the result and exit code; run mode keeps task states in memory, shows passed, and saves tasks.yaml once at the end; task mode completes a task only after its commit lands. The error table lists the classes milhouse has. Earlier: Startup order: argparse rejects a bad --commit value, a bare --commit, and --commit-after-all before every step with exit 2, which is said apart from UsageError exiting 1; the log folder is checked before the clean tree; the run commit says 1 task for one task (ADR-024). Earlier: The view looks for a git work tree only once task or run is chosen, at launch from the flag or from the dropdown; with none git is never run, and the view's responsibilities say so (ADR-024). Earlier: the commit modes are none, task, and run, chosen by one --commit flag (ADR-024); the engine, CLI, and view sections say so, and the view's Commit dropdown has a third option, none, which is the default. Earlier: gate and git reads are bounded: cut off 2 seconds after the process exits, pipes closed, while the session is read to the end (ADR-023). Earlier: plain mode pipes gate, git, and session-stderr output, shows it unchanged, and reports each line as Activity (ADR-023)."
 ---
 
-# alr — System Architecture
+# milhouse — System Architecture
 
 [Back to Overview](00_overview.md) | [Back to Project README](../../README.md)
 
@@ -22,9 +22,9 @@ notes: "The module list names plain/terminal.py instead of tui/terminal.py, the 
 
 ## Architecture Overview
 
-`alr` has one engine and two front ends. The engine holds the rules of a run. A front end decides how each subprocess is
-run and shown. `alr.cli` picks the front end once and hands it to the engine; the engine never asks which one it got.
-The plain front end serves scripts and CI. The stream front end serves the full-screen view, `alr.tui`, which owns the
+`milhouse` has one engine and two front ends. The engine holds the rules of a run. A front end decides how each subprocess is
+run and shown. `milhouse.cli` picks the front end once and hands it to the engine; the engine never asks which one it got.
+The plain front end serves scripts and CI. The stream front end serves the full-screen view, `milhouse.tui`, which owns the
 terminal.
 
 Imports point one way. `cli` imports everything below it (the first diagram leaves out its direct edges to `engine` and
@@ -37,13 +37,13 @@ it. Nothing imports upward, `plain` and `stream` never import each other, and `t
 title: Which package imports which
 ---
 flowchart TD
-    cli["alr.cli<br/>flags, startup checks, routing"]:::blue
-    plain["alr.plain<br/>plain front end, dry-run report"]:::green
-    tui["alr.tui<br/>Textual app, dialogs, run worker"]:::green
-    stream["alr.stream<br/>stream front end, parser"]:::green
-    record["alr.record<br/>run events, run log"]:::green
-    engine["alr.engine<br/>loop, outcome, actions, sandbox, processes"]:::blue
-    tasks["alr.tasks<br/>parse, validate, save"]:::blue
+    cli["milhouse.cli<br/>flags, startup checks, routing"]:::blue
+    plain["milhouse.plain<br/>plain front end, dry-run report"]:::green
+    tui["milhouse.tui<br/>Textual app, dialogs, run worker"]:::green
+    stream["milhouse.stream<br/>stream front end, parser"]:::green
+    record["milhouse.record<br/>run events, run log"]:::green
+    engine["milhouse.engine<br/>loop, outcome, actions, sandbox, processes"]:::blue
+    tasks["milhouse.tasks<br/>parse, validate, save"]:::blue
     cli --> plain
     cli --> tui
     tui --> stream
@@ -59,7 +59,7 @@ flowchart TD
     classDef gray fill: #c4cbd3, stroke: #6e7781, color: #000000
 ```
 
-The engine does not import a front end. It is handed one and calls it through the `FrontEnd` interface, which `alr.cli`
+The engine does not import a front end. It is handed one and calls it through the `FrontEnd` interface, which `milhouse.cli`
 picks once:
 
 ```mermaid
@@ -67,13 +67,13 @@ picks once:
 title: How the engine reaches a front end
 ---
 flowchart TD
-    cli["alr.cli"]:::blue
-    engine["alr.engine"]:::blue
+    cli["milhouse.cli"]:::blue
+    engine["milhouse.engine"]:::blue
     iface(["FrontEnd interface"]):::purple
-    plain["alr.plain<br/>scripts and CI"]:::green
-    stream["alr.stream<br/>the full-screen view"]:::green
-    tui["alr.tui<br/>Textual app"]:::green
-    record["alr.record<br/>run events, run log"]:::green
+    plain["milhouse.plain<br/>scripts and CI"]:::green
+    stream["milhouse.stream<br/>the full-screen view"]:::green
+    tui["milhouse.tui<br/>Textual app"]:::green
+    record["milhouse.record<br/>run events, run log"]:::green
     cli -->|" picks the front end once, hands it over "| engine
     engine -->|" calls the front end it was handed "| iface
     iface -.->|implemented by| plain
@@ -87,30 +87,30 @@ flowchart TD
     classDef gray fill: #c4cbd3, stroke: #6e7781, color: #000000
 ```
 
-`alr.cli` picks the stream front end, inside `alr.tui`, when stdin and stdout are terminals, `--plain` is absent, and
+`milhouse.cli` picks the stream front end, inside `milhouse.tui`, when stdin and stdout are terminals, `--plain` is absent, and
 the run is not a `--dry-run` (ADR-013). Every other run uses the plain front end.
 
 ## Package Layout
 
 ```text
-src/alr/
+src/milhouse/
   main.py          entry point: runs cli, sets the exit code
   cli.py           flags, startup checks in gralph's order, routing, resolving `--dir` and `--sandbox <name>`
-  errors.py        AlrError and its subclasses, each with its exit code, and the refusal reasons
+  errors.py        MilhouseError and its subclasses, each with its exit code, and the refusal reasons
   durations.py     parse and format durations such as 90s and 1m30.5s
   skillinstall.py  startup sync: add or replace the bundled skills in ~/.claude/skills (ADR-035)
   review.py        --validate: the fresh read-only claude session that reviews the task file, and the review log (ADR-036)
-  config.py        the config folder ~/.local/alr: create it all at once, read and validate config.yaml (ADR-031)
-  sandboxes.py     the sandboxes folder ~/.local/alr/sandboxes: add the shipped files that are missing, list the sandboxes, find one by name (ADR-032)
+  config.py        the config folder ~/.local/milhouse: create it all at once, read and validate config.yaml (ADR-031)
+  sandboxes.py     the sandboxes folder ~/.local/milhouse/sandboxes: add the shipped files that are missing, list the sandboxes, find one by name (ADR-032)
   defaults/        config.yaml, prompts/, and sandboxes/ (tight.json, large.json), as package data: what the config folder starts as
-  skills/          the bundled skills (alr-task-file, alr-task-review), as package data
+  skills/          the bundled skills (milhouse-task-file, milhouse-task-review), as package data
   tasks.py         task file: the shared block and tasks, parse, validate (a task name is one line), atomic save, timeout parsing, `RunResult` and `PASSED`
   engine/
     frontend.py    the FrontEnd interface
     loop.py        load the task file, the run loop, save after each task (or once, in run mode), the result and exit code of a run
     stop.py        which signal stopped the run, and the exit code it gives
     result.py      last-line JSON result and the outcome rule
-    actions.py     run an action list in order, the ALR_* variables, effective timeout, first failure
+    actions.py     run an action list in order, the MILHOUSE_* variables, effective timeout, first failure
     sandbox.py     session flags from a sandbox settings file or --yolo
     proc.py        process groups, kill on cancel
   plain/
@@ -137,28 +137,28 @@ src/alr/
     panes/         the tasks, activity, and actions panes
 tests/
   unit/            one test file per module, with its own conftest, helpers, and fakeclaude/
-  e2e/             black-box tests that run the installed alr command in a container, with
+  e2e/             black-box tests that run the installed milhouse command in a container, with
                    their own conftest, helpers, requirements, Dockerfile, and fake claude
   docker-compose.yaml  starts the e2e container
 ```
 
 How gralph's packages map onto this:
 
-| gralph                                       | alr                                        |
-| -------------------------------------------- | ------------------------------------------ |
-| `cmd/main`                                   | `alr.main`, `alr.cli`                      |
-| `internal/tasks`                             | `alr.tasks`                                |
-| `internal/looper` (shared rules)             | `alr.engine`                               |
-| `internal/looper` (`report == nil` branches) | `alr.plain`                                |
-| `internal/looper` (`report != nil` branches) | `alr.stream.frontend`, `alr.stream.parser` |
-| `internal/looper/event.go`                   | `alr.record.events`                        |
-| `internal/runlog`                            | `alr.record.runlog`                        |
-| `internal/tui`                               | `alr.tui`                                  |
-| `internal/skillinstall`, `skills/`           | `alr.skillinstall`, `alr/skills`           |
+| gralph                                       | milhouse                                             |
+| -------------------------------------------- | ---------------------------------------------------- |
+| `cmd/main`                                   | `milhouse.main`, `milhouse.cli`                      |
+| `internal/tasks`                             | `milhouse.tasks`                                     |
+| `internal/looper` (shared rules)             | `milhouse.engine`                                    |
+| `internal/looper` (`report == nil` branches) | `milhouse.plain`                                     |
+| `internal/looper` (`report != nil` branches) | `milhouse.stream.frontend`, `milhouse.stream.parser` |
+| `internal/looper/event.go`                   | `milhouse.record.events`                             |
+| `internal/runlog`                            | `milhouse.record.runlog`                             |
+| `internal/tui`                               | `milhouse.tui`                                       |
+| `internal/skillinstall`, `skills/`           | `milhouse.skillinstall`, `milhouse/skills`           |
 
 ## Component Breakdown
 
-### CLI (alr.cli, alr.main)
+### CLI (milhouse.cli, milhouse.main)
 
 **Responsibilities:**
 
@@ -168,15 +168,15 @@ How gralph's packages map onto this:
 - Refuse the removed flags before any other step, with exit 2 and a message naming the replacement: `--commit` (a
   commit is an action now) and `--gate-timeout` (renamed `--action-timeout`) (ADR-026)
 - Route to the dry run, the plain real run, or the full-screen view (ADR-013)
-- Check the config folder `~/.local/alr` before anything else a real run does (ADR-031): when it is missing, ask
+- Check the config folder `~/.local/milhouse` before anything else a real run does (ADR-031): when it is missing, ask
   `[y/N]` at a terminal and, on a yes, create it and exit 0 without starting the run; on a no, with no terminal, or
   on a `--dry-run`, refuse with `config-setup-missing`. Then add the shipped sandbox files that are missing, naming each
   as `Added <path>` (ADR-032); read and validate `config.yaml` and let its sandbox default
   fill the permission flag nobody passed; and turn `--sandbox <name>` into the path of the named file, refusing an unknown
   name with the names that exist. `--version` never touches the config
 - Install the SIGINT, SIGTERM, and SIGHUP handlers that cancel the run, leaving a SIGHUP that was ignored at start ignored (in plain mode; the view always handles it), and guard stdout and stderr when SIGHUP is ignored so a closed terminal does not end the run (ADR-040)
-- Catch `AlrError` in one place: print `error: <message>` to stderr and exit with the error's own `exit_code` (ADR-025):
-  `UsageError` 2, `RefusedError` 3, `AfterRunFailedError` 4, any other `AlrError` 1. argparse rejects a bad flag value
+- Catch `MilhouseError` in one place: print `error: <message>` to stderr and exit with the error's own `exit_code` (ADR-025):
+  `UsageError` 2, `RefusedError` 3, `AfterRunFailedError` 4, any other `MilhouseError` 1. argparse rejects a bad flag value
   itself, at parse time, with exit 2
 - Record which signal arrived first in a `Stop` and exit 130 (SIGINT), 143 (SIGTERM), or 129 (SIGHUP) when a signal stops the run; a
   second signal changes nothing
@@ -190,7 +190,7 @@ How gralph's packages map onto this:
 | State          | None; passes values down                   |
 | Mode           | Full-screen on a terminal, plain otherwise |
 
-### Task File (alr.tasks)
+### Task File (milhouse.tasks)
 
 **Responsibilities:**
 
@@ -230,7 +230,7 @@ How gralph's packages map onto this:
 | Unknown task key | An error, so a typo cannot hide (ADR-029)     |
 | Unknown root key | An error, so a typo or a leftover cannot hide |
 
-### Engine (alr.engine)
+### Engine (milhouse.engine)
 
 **Responsibilities:**
 
@@ -245,13 +245,13 @@ How gralph's packages map onto this:
   line, run it once more with `--resume <the same id>` in place of `--session-id`, the same flags, and a fixed prompt
   that asks only for the line; use the answer only when it exited cleanly with a valid line (ADR-039)
 - After a completed session, run one list of actions in order: the task's own `actions`, then the file's
-  `shared.after_task` actions (ADR-026, ADR-029). Each is `sh -c <action>` in alr's working directory with no stdin and
+  `shared.after_task` actions (ADR-026, ADR-029). Each is `sh -c <action>` in milhouse's working directory with no stdin and
   a time limit (`--action-timeout`, else the action's `timeout`, else 10 minutes); stop at the first failure, which
-  fails the task and skips every later action from either list. alr does not undo an earlier action, so the order is
+  fails the task and skips every later action from either list. milhouse does not undo an earlier action, so the order is
   the user's: a commit action goes last, in `shared.after_task`
-- Set these environment variables on each action's process, on top of alr's own environment, so a value is data to the
-  shell and never code: `ALR_TASK_FILE` and `ALR_LOG_DIR` (absolute paths) for every action, and `ALR_TASK_ID` and
-  `ALR_TASK_NAME` for a task's own action and an `after_task` action
+- Set these environment variables on each action's process, on top of milhouse's own environment, so a value is data to the
+  shell and never code: `MILHOUSE_TASK_FILE` and `MILHOUSE_LOG_DIR` (absolute paths) for every action, and `MILHOUSE_TASK_ID` and
+  `MILHOUSE_TASK_NAME` for a task's own action and an `after_task` action
 - A task is `completed` only when its session reported success and every action in both lists exited 0; a failing or
   timed-out action saves the task `failed` with `action "<action>" failed: <exit text>` or `action "<action>" timed out
   after <limit>` as the error. Save the task file after every task and stop the run at the first failed task
@@ -262,11 +262,11 @@ How gralph's packages map onto this:
 - Know nothing about git. There is no commit mode, no repository check, and no lock: a commit is whatever the action
   does, and a task is not guaranteed its own commit
 - Tell the front end how the run ended in `run_done`: a `result` (`completed`, `failed`, `run_failed`, or `stopped`)
-  and the `exit_code` alr will return, taken from the error that ended the run or from the `Stop`
+  and the `exit_code` milhouse will return, taken from the error that ended the run or from the `Stop`
 - Measure the duration of each session, action, task, and the run
 - On cancellation, kill the running process group. The file is left untouched: the interrupted task stays `pending`
   (a stop during an `after_task` action included), and a stop during `after_run` leaves the tasks `completed`
-- Never look for a settings file in the run folder: a sandbox is a file picked by name from `~/.local/alr/sandboxes/`
+- Never look for a settings file in the run folder: a sandbox is a file picked by name from `~/.local/milhouse/sandboxes/`
   or given with `--sandbox-settings` (ADR-032)
 - Build the session flags: for `--sandbox-settings`, merge the file with the four forced sandbox keys and return
   `--permission-mode acceptEdits --settings <merged JSON>`; for `--yolo`, return
@@ -274,23 +274,23 @@ How gralph's packages map onto this:
 
 **Known limits of actions:**
 
-- alr ends only the process group it started. After a SIGKILL of alr, an action or a Claude session can keep running,
+- milhouse ends only the process group it started. After a SIGKILL of milhouse, an action or a Claude session can keep running,
   and one still running can write into a later run's work tree.
-- Nothing stops two runs in one work tree. alr takes no lock, so one run's commit action can commit the other's changes.
+- Nothing stops two runs in one work tree. milhouse takes no lock, so one run's commit action can commit the other's changes.
 - A commit action takes whatever is in the work tree; keeping `tasks.yaml` and the logs out of it is the action's job.
-  The template and the bundled skill use `git add -A -- :/` followed by `git reset` of `ALR_TASK_FILE` and `ALR_LOG_DIR`.
+  The template and the bundled skill use `git add -A -- :/` followed by `git reset` of `MILHOUSE_TASK_FILE` and `MILHOUSE_LOG_DIR`.
 - An earlier action's effects stay when a later one fails.
 
 **Key Characteristics:**
 
-| Characteristic | Value                                             |
-| -------------- | ------------------------------------------------- |
-| Runtime        | `asyncio`; one task at a time                     |
-| Output         | None. The engine never writes to stdout or stderr |
-| Mode knowledge | None. It calls the front end it was handed        |
-| Imports        | `alr.tasks`, `alr.errors`, the standard library   |
+| Characteristic | Value                                                     |
+| -------------- | --------------------------------------------------------- |
+| Runtime        | `asyncio`; one task at a time                             |
+| Output         | None. The engine never writes to stdout or stderr         |
+| Mode knowledge | None. It calls the front end it was handed                |
+| Imports        | `milhouse.tasks`, `milhouse.errors`, the standard library |
 
-### Plain Front End (alr.plain)
+### Plain Front End (milhouse.plain)
 
 **Responsibilities:**
 
@@ -328,7 +328,7 @@ How gralph's packages map onto this:
   everything is printed, instead of `<file> is valid`; a real run runs no rule
 - Validate (ADR-036): `--validate` runs the dry run above and, when it is clean (no refusal and no warning, with or
   without `--strict`), `review.py` starts a fresh `claude --print` session held to reading tools. The prompt names the
-  `alr-task-review` skill, the task file, and the sandbox settings file. The log header shows `none` when there is no sandbox file. alr prints
+  `milhouse-task-review` skill, the task file, and the sandbox settings file. The log header shows `none` when there is no sandbox file. milhouse prints
   `review: asking Claude to read <file> (this uses tokens)`, the reply as it came, and `review log: <path>` (when warnings stop it, `review skipped: the dry run found problems; fix them and run again`), and writes
   the reply to `<run folder>/logs/review-<timestamp>.log` (mode 600, `logs/` mode 700 when it is created). The time limit is
   10 minutes, or `--action-timeout`; the session runs on `engine/proc.py` in the dry run's async path (own process group, stopped whole on a stop or a time out, reads cut off after exit), with MCP tools denied; SIGINT, SIGTERM, and SIGHUP stop it. A skill that is not in place after the sync fails the review before it starts. Findings never change the exit code; a review that cannot finish raises
@@ -336,13 +336,13 @@ How gralph's packages map onto this:
 
 **Key Characteristics:**
 
-| Characteristic | Value                                                            |
-| -------------- | ---------------------------------------------------------------- |
-| Used when      | A run is not full-screen: no terminal, `--plain`, or `--dry-run` |
-| Output         | Plain text on stdout and stderr                                  |
-| Imports        | `alr.engine`, `alr.record`, `alr.tasks`; never `alr.stream`      |
+| Characteristic | Value                                                                           |
+| -------------- | ------------------------------------------------------------------------------- |
+| Used when      | A run is not full-screen: no terminal, `--plain`, or `--dry-run`                |
+| Output         | Plain text on stdout and stderr                                                 |
+| Imports        | `milhouse.engine`, `milhouse.record`, `milhouse.tasks`; never `milhouse.stream` |
 
-### Stream Front End (alr.stream)
+### Stream Front End (milhouse.stream)
 
 **Responsibilities:**
 
@@ -356,7 +356,7 @@ How gralph's packages map onto this:
   `ActionFinished`, `TaskFinished`, `RunDone`; `ActionStarted` follows the `→ action` marker (ADR-020); a cancelled session or action
   emits none of the finished kinds. Output from `after_run` actions is reported under a stand-in task with id 0 and the
   name "after the run"; no real task has id 0
-- Record the run through `alr.record` when the Logging setting is on: the writer creates the run folder (`0700`, files
+- Record the run through `milhouse.record` when the Logging setting is on: the writer creates the run folder (`0700`, files
   `0600`; when two runs start in the same second the later one gets a `-1` suffix, then `-2`, and so on, and the
   caller is not told the final folder name, a known limit), writes `run_started`, appends one ledger line per event to `run.jsonl` with gralph's key order (`ActionStarted` adds
   nothing), and appends
@@ -364,13 +364,13 @@ How gralph's packages map onto this:
 
 **Key Characteristics:**
 
-| Characteristic | Value                                                      |
-| -------------- | ---------------------------------------------------------- |
-| Used when      | The full-screen view, through `alr.tui`                    |
-| Output         | Events and log files; nothing on stdout or stderr          |
-| Imports        | `alr.engine`, `alr.record`, `alr.tasks`; never `alr.plain` |
+| Characteristic | Value                                                                          |
+| -------------- | ------------------------------------------------------------------------------ |
+| Used when      | The full-screen view, through `milhouse.tui`                                   |
+| Output         | Events and log files; nothing on stdout or stderr                              |
+| Imports        | `milhouse.engine`, `milhouse.record`, `milhouse.tasks`; never `milhouse.plain` |
 
-### TUI (alr.tui)
+### TUI (milhouse.tui)
 
 **Responsibilities:**
 
@@ -384,7 +384,7 @@ How gralph's packages map onto this:
   at start, ADR-029), the step's time, and `run <time>`. When the line is wider than the widget, the step text is cut
   with a trailing `…` so the timers always show. Between tasks the line is only `task n of N · run <time>`. An
   `after_run` step reads `after the run: <first line of the action>`, and on a rerun where every task was already
-  completed the line is that step, its time, and `run <time>`, with no task part. `alr.tui.progress` builds the text
+  completed the line is that step, its time, and `run <time>`, with no task part. `milhouse.tui.progress` builds the text
   from the run events; the line is empty before the first task starts (or the first `after_run` action) and after the
   run ends
 - Give the Tasks pane a `Time` column: the running task's time counts up every second, a finished task keeps the time
@@ -397,7 +397,7 @@ How gralph's packages map onto this:
   Permissions, Reset, and Quit; at the end disable Start again and re-enable Quit (Folder, Permissions, and Reset stay off). The Actions button is not greyed out but does nothing
   while a run is going; the Tasks and Sandbox viewers open any time
 - Keep the four states and what each allows: Setup (Start disabled, the reason shown), Ready, Running (settings locked,
-  dialogs read-only), and Finished (a summary pop-up with the outcome and time, then, after a failed run, or one stopped with Stop or Ctrl-C, the app stays open until quit, and a run stopped by SIGTERM or SIGHUP quits it, since nobody is at the keyboard; after a clean run its focused Exit button ends alr)
+  dialogs read-only), and Finished (a summary pop-up with the outcome and time, then, after a failed run, or one stopped with Stop or Ctrl-C, the app stays open until quit, and a run stopped by SIGTERM or SIGHUP quits it, since nobody is at the keyboard; after a clean run its focused Exit button ends milhouse)
 - At launch open the folder, permissions, and actions dialogs in that order, each only when the flags and the task file
   leave it open; until Start, reopen any dialog from the menu
 - Validate each answer with the functions a run uses, and keep the error in the dialog: `tasks.yaml` loads, the settings
@@ -425,26 +425,26 @@ How gralph's packages map onto this:
 | Runtime        | The app's own `asyncio` loop; the engine is one worker in it                                          |
 | State          | The run settings, the app state, and the events seen so far                                           |
 | Controls       | Keys only, no mouse, no footer, no command palette; Start becomes Stop (^c); no pause, skip, or retry |
-| Imports        | `alr.stream`, `alr.record`, `alr.engine`, `alr.tasks`; never `alr.plain`                              |
+| Imports        | `milhouse.stream`, `milhouse.record`, `milhouse.engine`, `milhouse.tasks`; never `milhouse.plain`     |
 
 ## The Front End Interface
 
-`alr.engine.frontend` defines the one interface both front ends implement. The engine owns when each call happens and
+`milhouse.engine.frontend` defines the one interface both front ends implement. The engine owns when each call happens and
 what the result means; the engine, not the front end, applies each action's time limit. The front end owns how output is handled.
 
-| Call                | Engine asks the front end to                                                | Plain                                                                        | Stream                                                    |
-| ------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------- |
-| extra session flags | Give the Claude flags that follow `--print`                                 | None                                                                         | `--output-format stream-json --verbose`                   |
-| run session         | Run Claude with this argv and stdin; return the result text and the exit    | Echo, tee stdout and stderr, emit `Activity`                                 | Capture, parse, emit `Activity`                           |
-| run action          | Run this action command with these `ALR_*` variables added; return the exit | Print `action: <action>`, tee output as `Activity`, and emit `ActionStarted` | Emit marker and output as `Activity`, and `ActionStarted` |
-| task started        | Note that a task is starting                                                | Nothing                                                                      | Emit `TaskStarted`                                        |
-| session finished    | Note the session outcome and duration                                       | Nothing                                                                      | Emit `SessionFinished`                                    |
-| result retried      | Note that a session dropped its result line and was asked once for it       | Emit `ResultRetried` to the run log                                          | Emit `ResultRetried`                                      |
-| action finished     | Note an action's result, limit, and duration                                | Emit `ActionFinished` to the run log                                         | Emit `ActionFinished`                                     |
-| task finished       | Note the final state and duration                                           | Nothing                                                                      | Emit `TaskFinished`                                       |
-| run done            | Note the end of the run, with its error, `result`, and `exit_code`          | Emit `RunDone` to the run log                                                | Emit `RunDone`                                            |
+| Call                | Engine asks the front end to                                                     | Plain                                                                        | Stream                                                    |
+| ------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------- |
+| extra session flags | Give the Claude flags that follow `--print`                                      | None                                                                         | `--output-format stream-json --verbose`                   |
+| run session         | Run Claude with this argv and stdin; return the result text and the exit         | Echo, tee stdout and stderr, emit `Activity`                                 | Capture, parse, emit `Activity`                           |
+| run action          | Run this action command with these `MILHOUSE_*` variables added; return the exit | Print `action: <action>`, tee output as `Activity`, and emit `ActionStarted` | Emit marker and output as `Activity`, and `ActionStarted` |
+| task started        | Note that a task is starting                                                     | Nothing                                                                      | Emit `TaskStarted`                                        |
+| session finished    | Note the session outcome and duration                                            | Nothing                                                                      | Emit `SessionFinished`                                    |
+| result retried      | Note that a session dropped its result line and was asked once for it            | Emit `ResultRetried` to the run log                                          | Emit `ResultRetried`                                      |
+| action finished     | Note an action's result, limit, and duration                                     | Emit `ActionFinished` to the run log                                         | Emit `ActionFinished`                                     |
+| task finished       | Note the final state and duration                                                | Nothing                                                                      | Emit `TaskFinished`                                       |
+| run done            | Note the end of the run, with its error, `result`, and `exit_code`               | Emit `RunDone` to the run log                                                | Emit `RunDone`                                            |
 
-Both front ends start processes through `alr.engine.proc`, so process groups and the kill-on-cancel rule are the same
+Both front ends start processes through `milhouse.engine.proc`, so process groups and the kill-on-cancel rule are the same
 for both.
 
 ## Data Flow
@@ -455,13 +455,13 @@ for both.
 %%{init: {"themeVariables": {"actorTextColor": "#000000"}}}%%
 sequenceDiagram
     participant User
-    participant CLI as alr.cli
-    participant Engine as alr.engine
-    participant Plain as alr.plain
-    participant Tasks as alr.tasks
+    participant CLI as milhouse.cli
+    participant Engine as milhouse.engine
+    participant Plain as milhouse.plain
+    participant Tasks as milhouse.tasks
     participant Claude as claude
     participant FS as Filesystem
-    User ->> CLI: alr -d feat --sandbox-settings sandbox.json
+    User ->> CLI: milhouse -d feat --sandbox-settings sandbox.json
     CLI ->> Engine: build session flags
     CLI ->> Engine: run(tasks path, options, plain front end)
     Engine ->> FS: read tasks.yaml
@@ -473,7 +473,7 @@ sequenceDiagram
         Plain -->> Engine: result text, exit
         Engine ->> Engine: outcome rule
         opt session completed and the task has own or after_task actions
-            Engine ->> Plain: run each action, one at a time, with the ALR_* variables
+            Engine ->> Plain: run each action, one at a time, with the MILHOUSE_* variables
             Plain -->> Engine: exit
         end
         Engine ->> Tasks: save
@@ -493,13 +493,13 @@ sequenceDiagram
 %%{init: {"themeVariables": {"actorTextColor": "#000000"}}}%%
 sequenceDiagram
     participant User
-    participant CLI as alr.cli
-    participant App as alr.tui app
+    participant CLI as milhouse.cli
+    participant App as milhouse.tui app
     participant Adapter as adapter
-    participant Engine as alr.engine
-    participant Stream as alr.stream
+    participant Engine as milhouse.engine
+    participant Stream as milhouse.stream
     participant Panes as panes
-    User ->> CLI: alr -d .local/feat
+    User ->> CLI: milhouse -d .local/feat
     CLI ->> App: start with the flag values
     App ->> User: dialogs for any open step
     User ->> App: answers, then Start
@@ -525,23 +525,23 @@ sequenceDiagram
 Before step 1, argparse checks the command line. A flag it does not know is rejected there and exits 2. `--commit` and
 `--gate-timeout` are known only to be refused: the first step after parsing prints `error: --commit: removed; a commit is
 an action now: put it in shared.after_task, see the README (Migrating from commit modes and gates)` or
-`error: --gate-timeout: renamed to --action-timeout` and exits 2, ahead of every other check (ADR-026). The steps below raise `AlrError`s, each of which exits with its own code
+`error: --gate-timeout: renamed to --action-timeout` and exits 2, ahead of every other check (ADR-026). The steps below raise `MilhouseError`s, each of which exits with its own code
 (ADR-025): a `UsageError` exits 2 and a `RefusedError` exits 3.
 
 1. Check the config folder (ADR-031), before anything else a real run does, so no later refusal hides the question.
-   When `~/.local/alr` exists, go on. When it is missing and this is a real run at a terminal (stdin and stdout are
+   When `~/.local/milhouse` exists, go on. When it is missing and this is a real run at a terminal (stdin and stdout are
    both terminals), print what would be created and ask `Create them? [y/N]` on stdout; only `y` or `yes` creates the
    folder (all at once: built in a staging folder and renamed into place, so it never exists without its
-   `config.yaml`), after which alr says where it is and **exits 0 without starting the run**. Any other answer, or the
+   `config.yaml`), after which milhouse says where it is and **exits 0 without starting the run**. Any other answer, or the
    end of input, prints `Nothing was created.` and is refused as `config-setup-missing`. With no terminal, and on a
    `--dry-run`, which never writes, it is refused as `config-setup-missing` at once and nothing is asked. A path that
-   is a file or a symlink is refused as `invalid-config`, and a home alr cannot find or write to as `config-unwritable`.
-   On a real run that goes on, alr then creates `sandboxes/` when it is missing and copies in each shipped sandbox file
+   is a file or a symlink is refused as `invalid-config`, and a home milhouse cannot find or write to as `config-unwritable`.
+   On a real run that goes on, milhouse then creates `sandboxes/` when it is missing and copies in each shipped sandbox file
    that is not there (a temporary file, then a link that cannot replace one; losing a race is not an error), and prints
    `Added <path>` for each. A shipped file that differs from its copy is written beside it and renamed over it, with
    `Updated <path>` and no backup; a file under any other name is never touched (ADR-037). A `sandboxes` path that is not a folder is refused as
-   `invalid-config`, and a file alr cannot write as `config-unwritable`. A `--dry-run` writes nothing (ADR-032)
-   Then alr syncs the bundled skills (ADR-035) in the skills folder, which is `$CLAUDE_CONFIG_DIR/skills` when that
+   `invalid-config`, and a file milhouse cannot write as `config-unwritable`. A `--dry-run` writes nothing (ADR-032)
+   Then milhouse syncs the bundled skills (ADR-035) in the skills folder, which is `$CLAUDE_CONFIG_DIR/skills` when that
    variable is set and not empty and `~/.claude/skills` otherwise: for each one, in sorted name order, an identical
    folder `<name>/` (files, folders, and symlinks alike) prints nothing; a missing one is copied in beside the target and renamed into place
    and prints `Added <path>`; a different one (an extra entry counts) is replaced by renaming the old folder aside, renaming the
@@ -552,7 +552,7 @@ an action now: put it in shared.after_task, see the README (Migrating from commi
    `skill: <path> (added on a real run)`, `(updated on a real run)`, or `(replaces a symlink on a real run)` for each
    skill it would change; `--validate` syncs like a real run (ADR-036)
 2. Resolve `--dir`: the task file is `<folder>/tasks.yaml`. A folder with no `tasks.yaml` is a usage error and exits 2.
-   A `<folder>/sandbox.json` is not read; when `--dir` names a folder that holds one, alr prints
+   A `<folder>/sandbox.json` is not read; when `--dir` names a folder that holds one, milhouse prints
    `<folder>/sandbox.json is no longer read; pick a sandbox with --sandbox <name>` on stdout (ADR-032)
 3. Read `config.yaml`, which never writes: a missing file, bad YAML, an unknown key, a bad value, or a prompt
    file that cannot be opened is refused as `invalid-config`. A `custom` default or a `sandbox_file` key is
@@ -575,14 +575,14 @@ an action now: put it in shared.after_task, see the README (Migrating from commi
    `refused: invalid-sandbox-settings: --sandbox <name>: <path>: <problem>`, or
    `refused: invalid-sandbox-settings: --sandbox-settings <path>: <problem>` for a settings file
 8. Dry run, plain real run, or the full-screen view. A task file that cannot be read or parsed is refused first, as
-   `invalid-task-file`. alr does not look at git at any step. Every refusal prints
+   `invalid-task-file`. milhouse does not look at git at any step. Every refusal prints
    `error: refused: <reason>: <message>` as its first stderr line and leaves nothing changed in the run folder: no run log, and the task
-   file as it was (a real run may already have added missing shipped sandbox files to `~/.local/alr/sandboxes/`, step 1). With `--reset-failed`, a real run sets failed tasks back to pending silently, in memory first (the view
+   file as it was (a real run may already have added missing shipped sandbox files to `~/.local/milhouse/sandboxes/`, step 1). With `--reset-failed`, a real run sets failed tasks back to pending silently, in memory first (the view
    does that when it first reads the file, so Start is enabled), and saves the file only after every other check and the
    run log have passed; if that save fails (or, in the view, the save of edited actions does) the run is
    refused as `task-file-unwritable` and the run folder it made is removed, with
    the `logs/` folder too when the run created it and it is empty.
-   alr writes nothing for permissions: the sandbox file is read where it is, so no restore is needed after a refused save (ADR-032).
+   milhouse writes nothing for permissions: the sandbox file is read where it is, so no restore is needed after a refused save (ADR-032).
    The dry run refuses like a real run (exit 3, including `failed-tasks` and `log-unwritable`), prints its
    warnings after the action limits, and with `--strict` refuses on a warning as `task-file-warnings` (ADR-034);
    `--reset-failed` with `--dry-run` is a usage error (exit 2, ADR-018). The view repeats steps 2 and 4 to 6 on Start with the dialogs' values; steps 1 and 3 run once, before the view opens
@@ -594,7 +594,7 @@ and the run ends with a `RunDone` error that the app shows as stopped, since it 
 whatever is running is killed. The interrupted task is not marked failed and the file is not written, so the task is
 still `pending` on the next run, even when the stop came during one of its `after_task` actions. A stop during an
 `after_run` action leaves the tasks `completed`, since they were saved before it started. The run log's `run_finished`
-has the result `stopped`. `alr` exits 130 after SIGINT, 143 after SIGTERM, and 129 after SIGHUP; the first signal
+has the result `stopped`. `milhouse` exits 130 after SIGINT, 143 after SIGTERM, and 129 after SIGHUP; the first signal
 decides, and a later one changes nothing (ADR-025). The full-screen view exits with the same codes from the same table.
 The app owns one `Stop`: its SIGTERM and SIGHUP handlers set the signal before it stops the run, the worker passes the
 same object to the engine, and the exit code is read from it, so SIGTERM exits 143 and SIGHUP 129 whether a run is going or has
@@ -617,7 +617,7 @@ started, so there is no run log.
 | 130  | Stopped by SIGINT            | `stopped`        | None                                                                                                                 |
 | 143  | Stopped by SIGTERM           | `stopped`        | None                                                                                                                 |
 
-Each `AlrError` class carries its `exit_code`, and `alr.cli` maps it, so there is no scattered `return 1`. The engine
+Each `MilhouseError` class carries its `exit_code`, and `milhouse.cli` maps it, so there is no scattered `return 1`. The engine
 reports the same `result` and code through `run_done`, and the run log writes them as `run_finished.result` and
 `run_finished.exit`. Every action writes an `action_finished` line with its result and the limit it ran under;
 `run_started` records `action_timeout` when `--action-timeout` was passed. Exit 4 used to mean a failed commit (ADR-025,
@@ -631,16 +631,16 @@ Two kinds of failure are kept apart.
 failed or timed-out `after_task` action makes the task `failed`, with the reason in its `error` field. A session that
 exits 0 without a result line is first resumed once and asked for only that line (ADR-039); the task fails only when
 that follow-up fails too, with `session exited 0 but wrote no result line, even after one follow-up`. The file is
-saved, the run stops, and `alr` exits 1. Error text keeps gralph's shape (for example
+saved, the run stops, and `milhouse` exits 1. Error text keeps gralph's shape (for example
 `action "<action>" failed: exit status 1` and `action "<action>" timed out after <timeout>`) without having to match it
 word for word (ADR-007).
 
-**A problem with the run itself is an exception** under `AlrError` in `alr.errors`:
+**A problem with the run itself is an exception** under `MilhouseError` in `milhouse.errors`:
 
 | Error                 | Exit             | Raised when                                                                                                                                                                                                                                                                                                                      |
 | --------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UsageError`          | 2                | A flag is missing, conflicts with another, or has a bad value (argparse's own rejections exit 2)                                                                                                                                                                                                                                 |
-| `RefusedError`        | 3                | alr declines to start; carries a reason word (`failed-tasks`, `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `invalid-config`, `config-unwritable`, `config-setup-missing`)                                                                                                          |
+| `RefusedError`        | 3                | milhouse declines to start; carries a reason word (`failed-tasks`, `invalid-task-file`, `invalid-sandbox-settings`, `log-unwritable`, `task-file-unwritable`, `invalid-config`, `config-unwritable`, `config-setup-missing`)                                                                                                     |
 | `FailedTasksError`    | 3                | The task file already holds a failed task; a kind of `RefusedError`                                                                                                                                                                                                                                                              |
 | `TaskFileError`       | 1                | The task file cannot be read, parsed, validated (including `shared.prompt` and task names without line breaks or other control characters), or saved; at startup it is refused as `invalid-task-file`, or as `task-file-unwritable` when a save at startup fails (the `--reset-failed` reset, or the edited actions in the view) |
 | `RunLogError`         | 1                | The run log cannot be written mid-run; when it cannot be opened at startup it is refused as `log-unwritable`                                                                                                                                                                                                                     |
@@ -658,8 +658,8 @@ found on Start (a task file that cannot be read, a log folder that cannot be wri
 pop-up and the app stays Ready. A failed or stopped run arrives as `RunDone` and shows in the Finished summary with the
 engine's error text. An unexpected exception in the worker shows as a failed run, and Textual restores the terminal.
 
-`alr.cli` catches `AlrError` once, prints `error: <message>`, and exits with the error's `exit_code` (see
-[Exit Codes](#exit-codes)). A flag argparse rejects at parse time (an unknown flag, say) is not an `AlrError`: argparse
+`milhouse.cli` catches `MilhouseError` once, prints `error: <message>`, and exits with the error's `exit_code` (see
+[Exit Codes](#exit-codes)). A flag argparse rejects at parse time (an unknown flag, say) is not an `MilhouseError`: argparse
 prints its own usage error and exits 2, before any startup step. Any other exception is a bug and is left to
 show its traceback. Lower-level errors are wrapped with `raise ... from ...` so the cause is kept.
 
@@ -667,38 +667,38 @@ show its traceback. Lower-level errors are wrapped with `raise ... from ...` so 
 
 Tests are ported from gralph before the code they cover is written. There are two suites that share nothing (ADR-010).
 
-| Layer           | Covers                                                                                                                                                                                                                     | Ported from                                                      |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Unit            | Task validation tables, the result rule, stream-json parsing, the sandbox merge, action limits and variables, run log output                                                                                               | `task_test.go`, `internal/looper/*_test.go`, `runlog_test.go`    |
-| Fake `claude`   | A Python script placed first on `PATH`, driven by the same `FAKECLAUDE_*` variables: records argv and stdin, sets output and exit code, can block; one copy per suite                                                      | `testdata/fakeclaude/main.go`                                    |
-| End to end      | Runs the installed `alr` command as a subprocess, in a container: the loop, results, actions (with real `git commit` actions), `--dir`, dry-run, `--plain`, the run log, sandbox, SIGINT, SIGTERM, SIGHUP (ignored or not) | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check |
-| Golden          | The exact stdin text sent to Claude                                                                                                                                                                                        | gralph's golden assertions                                       |
-| TUI unit        | Each pane and dialog under Textual's headless `run_test` and `Pilot`, fed by a fake event stream, one case per branch (ADR-011); the state rules, Start and Stop, and the dialogs' checks                                  | New                                                              |
-| TUI end to end  | Four pseudo-terminal runs in the container: a happy-path run, a Stop, a SIGHUP stop, and a closed terminal with SIGHUP ignored                                                                                             | gralph's `wizard_pty` and `wizard_signal` tests                  |
-| Import boundary | `engine` imports neither front end; `plain`, `stream`, and `tui` do not import `plain`                                                                                                                                     | New                                                              |
+| Layer           | Covers                                                                                                                                                                                                                          | Ported from                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Unit            | Task validation tables, the result rule, stream-json parsing, the sandbox merge, action limits and variables, run log output                                                                                                    | `task_test.go`, `internal/looper/*_test.go`, `runlog_test.go`    |
+| Fake `claude`   | A Python script placed first on `PATH`, driven by the same `FAKECLAUDE_*` variables: records argv and stdin, sets output and exit code, can block; one copy per suite                                                           | `testdata/fakeclaude/main.go`                                    |
+| End to end      | Runs the installed `milhouse` command as a subprocess, in a container: the loop, results, actions (with real `git commit` actions), `--dir`, dry-run, `--plain`, the run log, sandbox, SIGINT, SIGTERM, SIGHUP (ignored or not) | `tests/e2e/*_test.go`, except wizard, install-skill, skill-check |
+| Golden          | The exact stdin text sent to Claude                                                                                                                                                                                             | gralph's golden assertions                                       |
+| TUI unit        | Each pane and dialog under Textual's headless `run_test` and `Pilot`, fed by a fake event stream, one case per branch (ADR-011); the state rules, Start and Stop, and the dialogs' checks                                       | New                                                              |
+| TUI end to end  | Four pseudo-terminal runs in the container: a happy-path run, a Stop, a SIGHUP stop, and a closed terminal with SIGHUP ignored                                                                                                  | gralph's `wizard_pty` and `wizard_signal` tests                  |
+| Import boundary | `engine` imports neither front end; `plain`, `stream`, and `tui` do not import `plain`                                                                                                                                          | New                                                              |
 
 `make test` runs ruff format and lint and mypy over `src/`, then the unit tests in parallel with `pytest-xdist` (`-n auto`). The Docker build
 runs ruff, mypy, and the unit tests the same way, and nothing else. To run them one at a time, which is the way to use a debugger, use
 `uv run pytest -n 0 tests/unit` (or one test file or `-k`). A `tasks.yaml` action may use `uv run pytest -n auto tests/unit`. The e2e suite runs in a container against the wheel in `dist/`: `make e2e` runs it against the wheel already
-built, and `make build` builds the wheel first. The e2e suite finds `alr` on `PATH` and never imports from `src/`. No
+built, and `make build` builds the wheel first. The e2e suite finds `milhouse` on `PATH` and never imports from `src/`. No
 real Claude and no network are needed.
 
 ## Component Interactions
 
-| From            | To            | Protocol                           | Purpose                                  | Data Format                           |
-| --------------- | ------------- | ---------------------------------- | ---------------------------------------- | ------------------------------------- |
-| `cli`           | `engine`      | Function call (awaited)            | Session flags, the run                   | Python values                         |
-| `cli`           | `plain`       | Function call                      | Build the plain front end; the dry run   | Python values                         |
-| `engine`        | front end     | The `FrontEnd` interface (awaited) | Run subprocesses, report progress        | Python values                         |
-| `engine`        | `tasks`       | Function call                      | Parse and save the task file             | YAML text, dataclasses                |
-| front end       | `engine.proc` | Function call (awaited)            | Start a process group, kill it on cancel | argv, Unix signals                    |
-| front end       | `claude`      | Subprocess, stdin, stdout, stderr  | Run a session                            | Text; stream-json on the stream path  |
-| front end       | action        | Subprocess (`sh -c`), exit code    | Check, commit, or finish a run           | Shell command text, `ALR_*` variables |
-| `stream`        | `report`      | Callback                           | Hand each event to a listener            | `alr.record.events` values            |
-| `cli`           | `tui`         | Function call                      | Open the full-screen view with the flags | Python values                         |
-| `tui` adapter   | panes         | Textual messages                   | Update the panes from run events         | One message type per event            |
-| `tui` app       | `engine`      | Worker (awaited), cancel           | Start a run, stop it                     | Run options, the stream front end     |
-| `record.runlog` | Filesystem    | File appends                       | Write the ledger and detail files        | JSON lines; text                      |
+| From            | To            | Protocol                           | Purpose                                  | Data Format                                |
+| --------------- | ------------- | ---------------------------------- | ---------------------------------------- | ------------------------------------------ |
+| `cli`           | `engine`      | Function call (awaited)            | Session flags, the run                   | Python values                              |
+| `cli`           | `plain`       | Function call                      | Build the plain front end; the dry run   | Python values                              |
+| `engine`        | front end     | The `FrontEnd` interface (awaited) | Run subprocesses, report progress        | Python values                              |
+| `engine`        | `tasks`       | Function call                      | Parse and save the task file             | YAML text, dataclasses                     |
+| front end       | `engine.proc` | Function call (awaited)            | Start a process group, kill it on cancel | argv, Unix signals                         |
+| front end       | `claude`      | Subprocess, stdin, stdout, stderr  | Run a session                            | Text; stream-json on the stream path       |
+| front end       | action        | Subprocess (`sh -c`), exit code    | Check, commit, or finish a run           | Shell command text, `MILHOUSE_*` variables |
+| `stream`        | `report`      | Callback                           | Hand each event to a listener            | `milhouse.record.events` values            |
+| `cli`           | `tui`         | Function call                      | Open the full-screen view with the flags | Python values                              |
+| `tui` adapter   | panes         | Textual messages                   | Update the panes from run events         | One message type per event                 |
+| `tui` app       | `engine`      | Worker (awaited), cancel           | Start a run, stop it                     | Run options, the stream front end          |
+| `record.runlog` | Filesystem    | File appends                       | Write the ledger and detail files        | JSON lines; text                           |
 
 ## Boundary Definitions
 
@@ -706,8 +706,8 @@ The trust and process boundaries are gralph's, unchanged.
 
 ```mermaid
 graph LR
-    subgraph TrustZone["Trust Zone: the alr user"]
-        ALR["alr process"]
+    subgraph TrustZone["Trust Zone: the milhouse user"]
+        MILHOUSE["milhouse process"]
         TaskFile["tasks.yaml"]
         SettingsFile["sandbox settings file"]
         Actions["action commands (sh -c)"]
@@ -715,26 +715,26 @@ graph LR
     subgraph External["Untrusted External"]
         Claude["claude --print"]
     end
-    ALR -->|reads and writes| TaskFile
-    ALR -->|reads once| SettingsFile
-    ALR -->|runs| Claude
-    Claude -->|result| ALR
-    ALR -->|sh -c, unsandboxed, ALR_* variables| Actions
+    MILHOUSE -->|reads and writes| TaskFile
+    MILHOUSE -->|reads once| SettingsFile
+    MILHOUSE -->|runs| Claude
+    Claude -->|result| MILHOUSE
+    MILHOUSE -->|sh -c, unsandboxed, MILHOUSE_* variables| Actions
 ```
 
 **Boundary Rules:**
 
-| Boundary                    | What Crosses                     | Rules                                                                                                                                                                                                                                                                                                                                     |
-| --------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| alr reads the filesystem    | Task file                        | Treated as code the user chose to run (its prompts go to Claude, its `shared.after_task` and `shared.after_run` actions to `sh -c`); not sanitized                                                                                                                                                                                        |
-| alr reads the filesystem    | Sandbox settings file            | Read once; only the two shipped files are written (ADR-037); a JSON object; four sandbox keys forced, the rest passed through. Comes from `~/.local/alr/sandboxes/` or `--sandbox-settings`, both chosen by the user; a run folder's `sandbox.json` is never read                                                                         |
-| alr reads the filesystem    | Config folder                    | `~/.local/alr/config.yaml` and the prompt files it names, read at every start except `--version`; a key alr does not know is refused; never written by a read                                                                                                                                                                             |
-| alr writes the filesystem   | Config folder                    | Only after a typed yes at a terminal: `~/.local/alr` and `~/.local` are created, the folder all at once, and an existing file is never overwritten, a file or symlink in its place never removed                                                                                                                                          |
-| alr writes the filesystem   | Task state                       | Atomic: temp file, then rename                                                                                                                                                                                                                                                                                                            |
-| alr writes the filesystem   | Run log                          | Both modes write `<dir>/logs/<timestamp>/`, a new folder per run: plain mode always, the TUI through its Logging setting; never on a dry run.                                                                                                                                                                                             |
-| alr writes the filesystem   | Action edits from the TUI        | Only on Start, after the startup checks pass; saved atomically with the task file                                                                                                                                                                                                                                                         |
-| alr writes the filesystem   | Installed skills                 | At every start but `--version`: each bundled skill folder is added or replaced in `$CLAUDE_CONFIG_DIR/skills` (else `~/.claude/skills`), a symlink or file there replaced with a warning, nothing else touched (ADR-035)                                                                                                                  |
-| alr starts Claude           | Combined prompt on stdin         | Fixed argv: `--print`, the front end's flags, the session flags, `--session-id <uuid4>` (`--resume <id>` for the one follow-up)                                                                                                                                                                                                           |
-| alr starts an action        | `action` text from the task file | `sh -c <action>` in alr's working directory, unsandboxed, no stdin, with `ALR_TASK_FILE` and `ALR_LOG_DIR` (and, for a task's own and `after_task` actions, `ALR_TASK_ID` and `ALR_TASK_NAME`) set; only the exit code is used. What it does, git included, is the action's own business; alr never pushes, resets, or stashes on its own |
-| Claude returns to alr       | Stdout, stderr, exit code        | Only the last result line and the exit code decide the outcome; a zero exit with no result line is resumed once and asked for it, and `wrote no result line` is the error if that fails too (ADR-039)                                                                                                                                     |
-| alr and its child processes | Signals                          | Each child runs in its own process group; on cancel the group is killed                                                                                                                                                                                                                                                                   |
+| Boundary                         | What Crosses                     | Rules                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| milhouse reads the filesystem    | Task file                        | Treated as code the user chose to run (its prompts go to Claude, its `shared.after_task` and `shared.after_run` actions to `sh -c`); not sanitized                                                                                                                                                                                                                      |
+| milhouse reads the filesystem    | Sandbox settings file            | Read once; only the two shipped files are written (ADR-037); a JSON object; four sandbox keys forced, the rest passed through. Comes from `~/.local/milhouse/sandboxes/` or `--sandbox-settings`, both chosen by the user; a run folder's `sandbox.json` is never read                                                                                                  |
+| milhouse reads the filesystem    | Config folder                    | `~/.local/milhouse/config.yaml` and the prompt files it names, read at every start except `--version`; a key milhouse does not know is refused; never written by a read                                                                                                                                                                                                 |
+| milhouse writes the filesystem   | Config folder                    | Only after a typed yes at a terminal: `~/.local/milhouse` and `~/.local` are created, the folder all at once, and an existing file is never overwritten, a file or symlink in its place never removed                                                                                                                                                                   |
+| milhouse writes the filesystem   | Task state                       | Atomic: temp file, then rename                                                                                                                                                                                                                                                                                                                                          |
+| milhouse writes the filesystem   | Run log                          | Both modes write `<dir>/logs/<timestamp>/`, a new folder per run: plain mode always, the TUI through its Logging setting; never on a dry run.                                                                                                                                                                                                                           |
+| milhouse writes the filesystem   | Action edits from the TUI        | Only on Start, after the startup checks pass; saved atomically with the task file                                                                                                                                                                                                                                                                                       |
+| milhouse writes the filesystem   | Installed skills                 | At every start but `--version`: each bundled skill folder is added or replaced in `$CLAUDE_CONFIG_DIR/skills` (else `~/.claude/skills`), a symlink or file there replaced with a warning, nothing else touched (ADR-035)                                                                                                                                                |
+| milhouse starts Claude           | Combined prompt on stdin         | Fixed argv: `--print`, the front end's flags, the session flags, `--session-id <uuid4>` (`--resume <id>` for the one follow-up)                                                                                                                                                                                                                                         |
+| milhouse starts an action        | `action` text from the task file | `sh -c <action>` in milhouse's working directory, unsandboxed, no stdin, with `MILHOUSE_TASK_FILE` and `MILHOUSE_LOG_DIR` (and, for a task's own and `after_task` actions, `MILHOUSE_TASK_ID` and `MILHOUSE_TASK_NAME`) set; only the exit code is used. What it does, git included, is the action's own business; milhouse never pushes, resets, or stashes on its own |
+| Claude returns to milhouse       | Stdout, stderr, exit code        | Only the last result line and the exit code decide the outcome; a zero exit with no result line is resumed once and asked for it, and `wrote no result line` is the error if that fails too (ADR-039)                                                                                                                                                                   |
+| milhouse and its child processes | Signals                          | Each child runs in its own process group; on cancel the group is killed                                                                                                                                                                                                                                                                                                 |

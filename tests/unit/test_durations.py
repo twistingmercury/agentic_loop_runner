@@ -1,6 +1,6 @@
 import pytest
 
-from alr.durations import format_duration, format_elapsed, parse_duration
+from milhouse.durations import format_duration, format_elapsed, parse_duration
 
 
 @pytest.mark.parametrize(

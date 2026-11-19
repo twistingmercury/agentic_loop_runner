@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from alr.plain.terminal import _VanishingTerminal, outliving_its_terminal
+from milhouse.plain.terminal import _VanishingTerminal, outliving_its_terminal
 
 
 @contextmanager

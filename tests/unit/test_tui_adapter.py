@@ -2,9 +2,9 @@
 
 import pytest
 
-from alr.record.events import Activity, RunDone
-from alr.tasks import Task
-from alr.tui.adapter import RunEvent, make_report
+from milhouse.record.events import Activity, RunDone
+from milhouse.tasks import Task
+from milhouse.tui.adapter import RunEvent, make_report
 
 TASK = Task(id=1, name="First", prompt="p")
 

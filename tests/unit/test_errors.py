@@ -1,6 +1,6 @@
 import pytest
 
-from alr.errors import (
+from milhouse.errors import (
     FAILED_TASKS,
     AfterRunFailedError,
     FailedTasksError,
@@ -10,7 +10,7 @@ from alr.errors import (
     UsageError,
     quote,
 )
-from alr.tasks import Shared, TaskList
+from milhouse.tasks import Shared, TaskList
 
 
 @pytest.mark.parametrize(

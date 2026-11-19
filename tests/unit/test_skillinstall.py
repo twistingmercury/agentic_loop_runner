@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from alr import skillinstall
-from alr.skillinstall import (
+from milhouse import skillinstall
+from milhouse.skillinstall import (
     SkillChange,
     SyncReport,
     pending,
@@ -19,7 +19,7 @@ from alr.skillinstall import (
 )
 
 
-SKILLS = ("alr-task-file", "alr-task-review")
+SKILLS = ("milhouse-task-file", "milhouse-task-review")
 
 
 def _skill(home: Path, name: str) -> Path:
@@ -49,7 +49,9 @@ def test_an_error_without_a_strerror_never_says_none(
 
 
 def _bundled_text(name: str) -> str:
-    return (files("alr") / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+    return (files("milhouse") / "skills" / name / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _snapshot(root: Path) -> dict[str, str]:
@@ -108,7 +110,7 @@ def test_sync_changes_nothing_when_identical(tmp_path: Path) -> None:
 def test_sync_updates_a_differing_skill_and_removes_an_extra_file(
     tmp_path: Path,
 ) -> None:
-    path = _skill(tmp_path, "alr-task-file")
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     (path / "SKILL.md").write_text("edited", encoding="utf-8")
     (path / "stale.txt").write_text("old", encoding="utf-8")
@@ -118,7 +120,7 @@ def test_sync_updates_a_differing_skill_and_removes_an_extra_file(
     assert report.changes == [SkillChange(path, "Updated", "")]
     assert report.warnings == []
     assert (path / "SKILL.md").read_text(encoding="utf-8") == _bundled_text(
-        "alr-task-file"
+        "milhouse-task-file"
     )
     assert not (path / "stale.txt").exists()
 
@@ -140,7 +142,7 @@ def test_sync_replaces_a_symlink_without_touching_its_target(tmp_path: Path) -> 
     real = tmp_path / "real"
     real.mkdir()
     (real / "keep.txt").write_text("kept", encoding="utf-8")
-    link = _skill(tmp_path, "alr-task-file")
+    link = _skill(tmp_path, "milhouse-task-file")
     link.parent.mkdir(parents=True)
     link.symlink_to(real)
 
@@ -148,7 +150,7 @@ def test_sync_replaces_a_symlink_without_touching_its_target(tmp_path: Path) -> 
 
     assert report.changes == [
         SkillChange(link, "Updated", "symlink"),
-        SkillChange(_skill(tmp_path, "alr-task-review"), "Added", ""),
+        SkillChange(_skill(tmp_path, "milhouse-task-review"), "Added", ""),
     ]
     assert report.warnings == [
         f"{link} was a symlink; replaced it with the bundled skill"
@@ -160,7 +162,7 @@ def test_sync_replaces_a_symlink_without_touching_its_target(tmp_path: Path) -> 
 
 
 def test_sync_replaces_a_dangling_symlink(tmp_path: Path) -> None:
-    link = _skill(tmp_path, "alr-task-file")
+    link = _skill(tmp_path, "milhouse-task-file")
     link.parent.mkdir(parents=True)
     link.symlink_to(tmp_path / "gone")
 
@@ -175,7 +177,7 @@ def test_sync_replaces_a_dangling_symlink(tmp_path: Path) -> None:
 
 
 def test_sync_replaces_a_plain_file(tmp_path: Path) -> None:
-    target = _skill(tmp_path, "alr-task-file")
+    target = _skill(tmp_path, "milhouse-task-file")
     target.parent.mkdir(parents=True)
     target.write_text("mine", encoding="utf-8")
 
@@ -204,7 +206,7 @@ def test_sync_warns_and_goes_on_when_the_folder_cannot_be_written(
 def test_a_failed_copy_leaves_the_old_skill_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = _skill(tmp_path, "alr-task-file")
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     (path / "SKILL.md").write_text("mine", encoding="utf-8")
     monkeypatch.setattr(skillinstall.shutil, "copytree", _failing_copy("part.txt"))
@@ -212,7 +214,7 @@ def test_a_failed_copy_leaves_the_old_skill_in_place(
     report = sync(tmp_path)
 
     assert report.changes == []
-    assert report.warnings == [f"skill alr-task-file: {path}: no space left"]
+    assert report.warnings == [f"skill milhouse-task-file: {path}: no space left"]
     assert (path / "SKILL.md").read_text(encoding="utf-8") == "mine"
     assert not (path / "part.txt").exists()
     assert sorted(entry.name for entry in path.parent.iterdir()) == list(SKILLS)
@@ -236,7 +238,7 @@ def test_an_unreadable_installed_file_warns_in_sync_and_is_skipped_by_pending(
     tmp_path: Path, locked_folder: None
 ) -> None:
     sync(tmp_path)
-    locked = _skill(tmp_path, "alr-task-file") / "SKILL.md"
+    locked = _skill(tmp_path, "milhouse-task-file") / "SKILL.md"
     locked.chmod(0o000)
 
     try:
@@ -247,13 +249,13 @@ def test_an_unreadable_installed_file_warns_in_sync_and_is_skipped_by_pending(
 
     assert report.changes == []
     assert len(report.warnings) == 1
-    assert report.warnings[0].startswith("skill alr-task-file: ")
+    assert report.warnings[0].startswith("skill milhouse-task-file: ")
     assert waiting == []
 
 
 def _arrange(tmp_path: Path, scenario: str) -> None:
-    """Sync both skills, then put alr-task-file into the named state."""
-    path = _skill(tmp_path, "alr-task-file")
+    """Sync both skills, then put milhouse-task-file into the named state."""
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     if scenario == "missing":
         shutil.rmtree(path)
@@ -293,7 +295,7 @@ def test_pending_reports_without_writing(
 
     expected = []
     if verb is not None and replaced is not None:
-        expected = [SkillChange(_skill(tmp_path, "alr-task-file"), verb, replaced)]
+        expected = [SkillChange(_skill(tmp_path, "milhouse-task-file"), verb, replaced)]
 
     assert changes == expected
     assert _snapshot(tmp_path) == before
@@ -302,7 +304,7 @@ def test_pending_reports_without_writing(
 def test_a_dangling_symlink_inside_an_installed_skill_makes_it_different(
     tmp_path: Path,
 ) -> None:
-    path = _skill(tmp_path, "alr-task-file")
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     (path / "dangling").symlink_to(tmp_path / "gone")
 
@@ -316,7 +318,7 @@ def test_a_dangling_symlink_inside_an_installed_skill_makes_it_different(
 def test_an_empty_folder_inside_an_installed_skill_makes_it_different(
     tmp_path: Path,
 ) -> None:
-    path = _skill(tmp_path, "alr-task-file")
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     (path / "empty").mkdir()
 
@@ -331,7 +333,7 @@ def test_an_unreadable_folder_inside_an_installed_skill_warns_in_sync_and_is_ski
     tmp_path: Path, locked_folder: None
 ) -> None:
     sync(tmp_path)
-    locked = _skill(tmp_path, "alr-task-file") / "locked"
+    locked = _skill(tmp_path, "milhouse-task-file") / "locked"
     locked.mkdir()
     locked.chmod(0o000)
 
@@ -343,14 +345,14 @@ def test_an_unreadable_folder_inside_an_installed_skill_warns_in_sync_and_is_ski
 
     assert report.changes == []
     assert len(report.warnings) == 1
-    assert report.warnings[0].startswith("skill alr-task-file: ")
+    assert report.warnings[0].startswith("skill milhouse-task-file: ")
     assert waiting == []
 
 
 def test_a_failed_rename_puts_the_old_skill_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = _skill(tmp_path, "alr-task-file")
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     (path / "SKILL.md").write_text("mine", encoding="utf-8")
     (path / "stale.txt").write_text("old", encoding="utf-8")
@@ -369,7 +371,7 @@ def test_a_failed_rename_puts_the_old_skill_back(
     report = sync(tmp_path)
 
     assert report.changes == []
-    assert report.warnings == [f"skill alr-task-file: {path}: rename blocked"]
+    assert report.warnings == [f"skill milhouse-task-file: {path}: rename blocked"]
     assert (path / "SKILL.md").read_text(encoding="utf-8") == "mine"
     assert (path / "stale.txt").read_text(encoding="utf-8") == "old"
     assert sorted(entry.name for entry in path.parent.iterdir()) == list(SKILLS)
@@ -378,7 +380,7 @@ def test_a_failed_rename_puts_the_old_skill_back(
 def test_a_removal_failure_after_the_swap_still_reports_updated(
     tmp_path: Path, locked_folder: None
 ) -> None:
-    path = _skill(tmp_path, "alr-task-file")
+    path = _skill(tmp_path, "milhouse-task-file")
     sync(tmp_path)
     stuck = path / "stuck"
     stuck.mkdir()
@@ -393,7 +395,7 @@ def test_a_removal_failure_after_the_swap_still_reports_updated(
     assert report.changes == [SkillChange(path, "Updated", "")]
     assert report.warnings == []
     assert (path / "SKILL.md").read_text(encoding="utf-8") == _bundled_text(
-        "alr-task-file"
+        "milhouse-task-file"
     )
     assert not (path / "stuck").exists()
 
@@ -408,7 +410,7 @@ def test_a_read_only_bundled_source_still_syncs_and_the_copy_is_writable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "package"
-    shutil.copytree(files("alr") / "skills", package / "skills")
+    shutil.copytree(files("milhouse") / "skills", package / "skills")
     monkeypatch.setattr(skillinstall, "files", lambda _: package)
     _set_modes(package / "skills", folder_mode=0o555, file_mode=0o444)
     home = tmp_path / "home"
@@ -420,7 +422,7 @@ def test_a_read_only_bundled_source_still_syncs_and_the_copy_is_writable(
 
     assert report.warnings == []
     assert len(report.changes) == len(SKILLS)
-    mode = (_skill(home, "alr-task-file") / "SKILL.md").stat().st_mode
+    mode = (_skill(home, "milhouse-task-file") / "SKILL.md").stat().st_mode
     assert mode & stat.S_IWUSR
 
 

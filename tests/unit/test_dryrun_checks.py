@@ -1,6 +1,6 @@
 """The dry-run checks: findings, headings, code spans, and the rules that read the text."""
 
-from alr.plain.dryrun_checks import (
+from milhouse.plain.dryrun_checks import (
     COMPLETION_CRITERIA,
     EXCLUDED_COMMAND_WRAPPED,
     FINISH_BLOCK,
@@ -12,7 +12,7 @@ from alr.plain.dryrun_checks import (
     code_spans,
     headings,
 )
-from alr.tasks import COMPLETED, PENDING, Action, Shared, Task, TaskList
+from milhouse.tasks import COMPLETED, PENDING, Action, Shared, Task, TaskList
 
 EXCLUDED = ["docker *", "./build/build.sh", "./build/build.sh *"]
 

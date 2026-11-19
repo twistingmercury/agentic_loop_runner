@@ -5,14 +5,20 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).parents[2] / "src" / "alr"
+SRC = Path(__file__).parents[2] / "src" / "milhouse"
 
 FORBIDDEN = {
-    "engine": ("alr.plain", "alr.stream", "alr.tui", "alr.record"),
-    "plain": ("alr.stream", "alr.tui"),
-    "record": ("alr.engine", "alr.plain", "alr.stream", "alr.tui", "alr.cli"),
-    "stream": ("alr.plain", "alr.tui"),
-    "tui": ("alr.plain", "alr.cli"),
+    "engine": ("milhouse.plain", "milhouse.stream", "milhouse.tui", "milhouse.record"),
+    "plain": ("milhouse.stream", "milhouse.tui"),
+    "record": (
+        "milhouse.engine",
+        "milhouse.plain",
+        "milhouse.stream",
+        "milhouse.tui",
+        "milhouse.cli",
+    ),
+    "stream": ("milhouse.plain", "milhouse.tui"),
+    "tui": ("milhouse.plain", "milhouse.cli"),
 }
 
 
@@ -48,7 +54,7 @@ def test_engine_never_prints() -> None:
 
 
 def test_no_module_runs_git() -> None:
-    # alr is git-blind: a commit is an action the user writes, never alr's own call.
+    # milhouse is git-blind: a commit is an action the user writes, never milhouse's own call.
     for path in sorted(SRC.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
         assert '"git"' not in source, f"{path} names git as an executable"

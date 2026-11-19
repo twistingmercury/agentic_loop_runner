@@ -1,4 +1,4 @@
-"""Every exit code alr can return, with the result its run log records.
+"""Every exit code milhouse can return, with the result its run log records.
 
 0 completed, 1 failed, 2 usage, 3 refused, 4 after_run failed, 129, 130 and 143 stopped.
 """
@@ -11,11 +11,11 @@ from e2e_helpers import (
     ONE_TASK,
     assert_no_tmp_file,
     read_tasks_yaml,
-    run_alr,
+    run_milhouse,
     run_log,
     run_args,
     shared_block,
-    start_alr,
+    start_milhouse,
     task_states,
     wait_for_file,
     write_tasks_yaml,
@@ -49,7 +49,7 @@ def assert_run_finished(folder: Path, result: str, exit_code: int) -> None:
 def test_completed_exits_0(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, ONE_TASK_YAML)
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 0, res
     assert_run_finished(tmp_path, "completed", 0)
@@ -58,7 +58,7 @@ def test_completed_exits_0(tmp_path: Path, fake_claude: Path) -> None:
 def test_failed_task_exits_1(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, ONE_TASK_YAML)
 
-    res = run_alr(
+    res = run_milhouse(
         *run_args(tasks_path),
         env={"FAKECLAUDE_OUTPUT": '{"state":"failed","error":"boom"}\n'},
     )
@@ -70,7 +70,7 @@ def test_failed_task_exits_1(tmp_path: Path, fake_claude: Path) -> None:
 def test_bad_flag_exits_2(tmp_path: Path, fake_claude: Path) -> None:
     tasks_path = write_tasks_yaml(tmp_path, ONE_TASK_YAML)
 
-    res = run_alr(*run_args(tasks_path), "--action-timeout", "soon")
+    res = run_milhouse(*run_args(tasks_path), "--action-timeout", "soon")
 
     assert res.code == 2, res
     assert not (tmp_path / "logs").exists()
@@ -83,7 +83,7 @@ def test_refusal_exits_3_and_writes_no_log(tmp_path: Path, fake_claude: Path) ->
     )
     tasks_path = write_tasks_yaml(tmp_path, failed_yaml)
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 3, res
     assert res.err.splitlines()[0].startswith("error: refused: failed-tasks: ")
@@ -101,7 +101,7 @@ def test_reset_failed_with_an_unwritable_log_folder_leaves_the_file_alone(
     # A file where the log folder belongs fails for every user, root included.
     (tmp_path / "logs").write_text("a file, not a folder", encoding="utf-8")
 
-    res = run_alr(*run_args(tasks_path), "--reset-failed")
+    res = run_milhouse(*run_args(tasks_path), "--reset-failed")
 
     assert res.code == 3, res
     assert res.err.splitlines()[0].startswith("error: refused: log-unwritable: ")
@@ -119,7 +119,7 @@ def test_reset_failed_keeps_a_users_own_tmp_file(
     users = tmp_path / "tasks.yaml.tmp"
     users.write_text("precious", encoding="utf-8")
 
-    res = run_alr(*run_args(tasks_path), "--reset-failed")
+    res = run_milhouse(*run_args(tasks_path), "--reset-failed")
 
     assert res.code == 0, res
     assert task_states(read_tasks_yaml(tasks_path)) == {1: "completed"}
@@ -132,7 +132,7 @@ def test_after_run_failure_exits_4_and_leaves_the_tasks_completed(
 ) -> None:
     tasks_path = write_tasks_yaml(tmp_path, AFTER_RUN_FAILS_YAML)
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 4, res
     assert AFTER_RUN_FAILURE in res.err
@@ -154,7 +154,7 @@ def test_a_signal_exits_128_plus_its_number(
     env = {"FAKECLAUDE_BLOCK": "1", "FAKECLAUDE_READY_FILE": str(ready_file)}
 
     with stopped_at_exit(
-        start_alr(*run_args(tasks_path), env=env), ready_file
+        start_milhouse(*run_args(tasks_path), env=env), ready_file
     ) as process:
         # The fake is blocking inside the session once this exists.
         wait_for_file(ready_file, 10)
@@ -171,7 +171,7 @@ def test_after_run_failure_has_no_task_in_the_run_finished_error(
 ) -> None:
     tasks_path = write_tasks_yaml(tmp_path, AFTER_RUN_FAILS_YAML)
 
-    run_alr(*run_args(tasks_path))
+    run_milhouse(*run_args(tasks_path))
 
     assert run_log(tmp_path)[-1]["error"] == AFTER_RUN_FAILURE
 
@@ -183,7 +183,7 @@ def test_an_after_task_failure_names_the_task_in_the_run_finished_error(
         tmp_path, shared_block("Body.", [{"action": "exit 7"}]) + ONE_TASK
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 1, res
     assert (
@@ -200,7 +200,7 @@ def test_the_ledger_says_completed_once_the_actions_passed(
         tmp_path, shared_block("Body.", [{"action": "true"}]) + ONE_TASK
     )
 
-    res = run_alr(*run_args(tasks_path))
+    res = run_milhouse(*run_args(tasks_path))
 
     assert res.code == 0, res
     finished = [e for e in run_log(tmp_path) if e["event"] == "task_finished"]
@@ -215,7 +215,7 @@ def test_a_signal_during_an_after_task_action_exits_143(
     tasks_yaml = shared_block("Body.", [action]) + ONE_TASK
     tasks_path = write_tasks_yaml(tmp_path, tasks_yaml)
 
-    with stopped_at_exit(start_alr(*run_args(tasks_path)), ready_file) as process:
+    with stopped_at_exit(start_milhouse(*run_args(tasks_path)), ready_file) as process:
         wait_for_file(ready_file, 10)
 
         process.send_signal(signal.SIGTERM)

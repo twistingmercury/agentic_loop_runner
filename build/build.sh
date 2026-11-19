@@ -26,20 +26,20 @@ COMPOSE_FILE_PATH="${PROJ_ROOT}/tests/docker-compose.yaml"
 # sit beside the new one and could be mistaken for it.
 clean_output() {
     mkdir -p "${OUTPUT_DIR}"
-    find "${OUTPUT_DIR}" -maxdepth 1 -type f \( -name 'alr-*.whl' -o -name 'alr-*.tar.gz' \) -delete
+    find "${OUTPUT_DIR}" -maxdepth 1 -type f \( -name 'milhouse-*.whl' -o -name 'milhouse-*.tar.gz' \) -delete
     return 0
 }
 
 build() {
     clean_output
 
-    printf "building alr..."
+    printf "building milhouse..."
     docker build --rm --no-cache --pull --progress=plain \
         --file "${SCRIPT_DIR}/Dockerfile" \
         --build-arg BUILD_VER="${BUILD_VER}" \
         --target export \
         --output "type=local,dest=${OUTPUT_DIR}" \
-        --tag "alr:${BUILD_VER}" \
+        --tag "milhouse:${BUILD_VER}" \
         "${PROJ_ROOT}"
 
     printf "\nBinaries exported to: %s\n" "${OUTPUT_DIR}"
@@ -50,7 +50,7 @@ newest_wheel() {
     local candidate
     local newest=""
 
-    for candidate in "${OUTPUT_DIR}"/alr-*.whl; do
+    for candidate in "${OUTPUT_DIR}"/milhouse-*.whl; do
         if [ ! -f "${candidate}" ]; then
             continue
         fi
@@ -70,12 +70,12 @@ e2e_tests() {
 
     wheel="$(newest_wheel)"
     if [ -z "${wheel}" ]; then
-        printf "ERROR: no alr wheel in %s; run make build first\n" "${OUTPUT_DIR}" >&2
+        printf "ERROR: no milhouse wheel in %s; run make build first\n" "${OUTPUT_DIR}" >&2
         return 1
     fi
 
     # The Dockerfile copies only this file, so no other wheel can be installed.
-    export ALR_WHEEL="${wheel}"
+    export MILHOUSE_WHEEL="${wheel}"
 
     printf "starting end-to-end tests with %s..." "${wheel}"
     docker compose --progress=plain -f "${COMPOSE_FILE_PATH}" build --progress=plain

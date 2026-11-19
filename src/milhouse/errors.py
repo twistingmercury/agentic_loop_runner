@@ -1,0 +1,91 @@
+"""Errors that end a run before or outside a task's own outcome."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from milhouse.tasks import TaskList
+
+FAILED_TASKS_MESSAGE = (
+    "fix the failed tasks and set their state to pending before running"
+)
+
+FAILED_TASKS = "failed-tasks"
+CONFIG_SETUP_MISSING = "config-setup-missing"
+CONFIG_UNWRITABLE = "config-unwritable"
+INVALID_CONFIG = "invalid-config"
+INVALID_TASK_FILE = "invalid-task-file"
+INVALID_SANDBOX_SETTINGS = "invalid-sandbox-settings"
+LOG_UNWRITABLE = "log-unwritable"
+TASK_FILE_UNWRITABLE = "task-file-unwritable"
+TASK_FILE_WARNINGS = "task-file-warnings"
+
+
+def quote(text: str) -> str:
+    """Wrap text in double quotes, escaping what needs it, for names in error messages."""
+    return json.dumps(text, ensure_ascii=False)
+
+
+class MilhouseError(Exception):
+    """Base for every error milhouse reports as `error: <message>`; exit_code is the code it exits with."""
+
+    exit_code = 1
+
+
+class UsageError(MilhouseError):
+    """A flag is missing, conflicts with another, or has a bad value."""
+
+    exit_code = 2
+
+
+class RefusedError(MilhouseError):
+    """milhouse declined to start; nothing ran and nothing was written."""
+
+    exit_code = 3
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(f"refused: {reason}: {message}")
+        self.reason = reason
+        self.message = message
+
+
+class TaskFileError(MilhouseError):
+    """The task file cannot be read, parsed, validated, or saved."""
+
+
+class FailedTasksError(RefusedError):
+    """The task file already holds a failed task."""
+
+    def __init__(self, task_list: TaskList) -> None:
+        super().__init__(FAILED_TASKS, FAILED_TASKS_MESSAGE)
+        self.task_list = task_list
+
+
+class RunLogError(MilhouseError):
+    """The run log cannot be opened or written."""
+
+
+class ReviewError(MilhouseError):
+    """The review could not run or did not finish; what it finds never raises this."""
+
+    exit_code = 1
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"review: {reason}")
+        self.reason = reason
+
+
+class RunError(MilhouseError):
+    """A task failed, or its state could not be saved."""
+
+
+class AfterRunFailedError(RunError):
+    """An after_run action failed; every task is still completed."""
+
+    exit_code = 4
+
+
+class RunCancelledError(RunError):
+    """The run was stopped before a task finished."""

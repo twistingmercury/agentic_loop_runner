@@ -6,10 +6,10 @@ import pytest
 from helpers import until, write_file
 from textual.widgets import Button, Footer, Select, Static
 
-from alr.tui.app import AlrApp
-from alr.tui.dialogs import SummaryDialog
-from alr.tui.panes import TasksPane
-from alr.tui.settings import Permissions, RunSettings
+from milhouse.tui.app import MilhouseApp
+from milhouse.tui.dialogs import SummaryDialog
+from milhouse.tui.panes import TasksPane
+from milhouse.tui.settings import Permissions, RunSettings
 
 SIZES = [(80, 24), (110, 32)]
 SIZE_IDS = ["80x24", "110x32"]
@@ -34,19 +34,19 @@ def _tasks(*names: str) -> str:
     return f"shared:\n  prompt: p\n  after_task: []\ntasks:\n{rows}"
 
 
-def _app(folder: Path, *names: str) -> AlrApp:
+def _app(folder: Path, *names: str) -> MilhouseApp:
     tasks_file = write_file(folder / "run" / "tasks.yaml", _tasks(*(names or ("A",))))
-    return AlrApp(
+    return MilhouseApp(
         RunSettings(tasks_file=tasks_file, permissions=Permissions.SKIP, logging=False)
     )
 
 
-async def _loaded(app: AlrApp) -> None:
+async def _loaded(app: MilhouseApp) -> None:
     await until(lambda: app.query_one(TasksPane).row_count > 0)
     await until(lambda: app.query_one(TasksPane).size.width > 0)
 
 
-def _name_cell(app: AlrApp, row: int = 0) -> str:
+def _name_cell(app: MilhouseApp, row: int = 0) -> str:
     return str(app.query_one(TasksPane).get_cell_at((row, 2)))
 
 

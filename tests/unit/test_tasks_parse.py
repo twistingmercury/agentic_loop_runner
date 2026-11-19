@@ -3,9 +3,9 @@ import re
 
 import pytest
 
-from alr import tasks
-from alr.errors import TaskFileError
-from alr.tasks import (
+from milhouse import tasks
+from milhouse.errors import TaskFileError
+from milhouse.tasks import (
     COMPLETED,
     PENDING,
     RUN_SCOPE,
@@ -101,7 +101,7 @@ def test_parse_tasks_preserves_file_order() -> None:
 
 
 def test_parse_tasks_refuses_unknown_fields() -> None:
-    # A key alr does not know used to be dropped on save; with per-task actions
+    # A key milhouse does not know used to be dropped on save; with per-task actions
     # a misspelled key would run the task without its checks and erase the evidence.
     text = """shared:\n  prompt: shared\ntasks:
   - id: 1
