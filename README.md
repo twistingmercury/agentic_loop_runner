@@ -1,4 +1,4 @@
-# Agentic Loop Runner (alr)
+# Agentic Loop Runner (milhouse)
 
 ![Maturity](https://img.shields.io/badge/maturity-emerging-orange)
 ![Version](https://img.shields.io/github/v/tag/twistingmercury/agentic_loop_runner?sort=semver)
@@ -22,24 +22,24 @@
 
 ## Usage
 
-`alr` runs ["ralph loops"](https://ghuntley.com/loop/) with Claude Code: it works through
+`milhouse` runs ["ralph loops"](https://ghuntley.com/loop/) with Claude Code: it works through
 a `tasks.yaml` list, one fresh Claude session per task. It began as the Python port of
 [gralph](https://github.com/twistingmercury/gralph) and has since evolved beyond it
 ([ADR-022](docs/design/02_architectural_decisions.md#adr-022-alr-has-evolved-beyond-gralph)).
 
 Everything a user needs lives in the [wiki](https://github.com/twistingmercury/agentic_loop_runner/wiki):
 
-| To do this                                   | Read                                                                                                                   |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Install alr                                  | [Install](https://github.com/twistingmercury/agentic_loop_runner/wiki/Install)                                         |
-| Make a first run                             | [Your first run](https://github.com/twistingmercury/agentic_loop_runner/wiki/Your-first-run)                           |
-| Write a task file                            | [Write a task file](https://github.com/twistingmercury/agentic_loop_runner/wiki/Write-a-task-file)                     |
-| Run commands around tasks (tests, commits)   | [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions)                                         |
-| Choose what sessions may touch               | [Permissions and the sandbox](https://github.com/twistingmercury/agentic_loop_runner/wiki/Permissions-and-the-sandbox) |
-| Use the full-screen view                     | [Reading the screen](https://github.com/twistingmercury/agentic_loop_runner/wiki/Reading-the-screen)                   |
-| Script it, read the logs and exit codes      | [Plain mode and the run log](https://github.com/twistingmercury/agentic_loop_runner/wiki/Plain-mode-and-the-run-log)   |
-| Look up a flag, an exit code, a refusal      | [Command-line reference](https://github.com/twistingmercury/agentic_loop_runner/wiki/Command-line-reference)           |
-| Recover from a failed task                   | [When a task fails](https://github.com/twistingmercury/agentic_loop_runner/wiki/When-a-task-fails)                     |
+| To do this                                 | Read                                                                                                                   |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Install milhouse                           | [Install](https://github.com/twistingmercury/agentic_loop_runner/wiki/Install)                                         |
+| Make a first run                           | [Your first run](https://github.com/twistingmercury/agentic_loop_runner/wiki/Your-first-run)                           |
+| Write a task file                          | [Write a task file](https://github.com/twistingmercury/agentic_loop_runner/wiki/Write-a-task-file)                     |
+| Run commands around tasks (tests, commits) | [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions)                                         |
+| Choose what sessions may touch             | [Permissions and the sandbox](https://github.com/twistingmercury/agentic_loop_runner/wiki/Permissions-and-the-sandbox) |
+| Use the full-screen view                   | [Reading the screen](https://github.com/twistingmercury/agentic_loop_runner/wiki/Reading-the-screen)                   |
+| Script it, read the logs and exit codes    | [Plain mode and the run log](https://github.com/twistingmercury/agentic_loop_runner/wiki/Plain-mode-and-the-run-log)   |
+| Look up a flag, an exit code, a refusal    | [Command-line reference](https://github.com/twistingmercury/agentic_loop_runner/wiki/Command-line-reference)           |
+| Recover from a failed task                 | [When a task fails](https://github.com/twistingmercury/agentic_loop_runner/wiki/When-a-task-fails)                     |
 
 [CHANGELOG.md](CHANGELOG.md) records every release and every break.
 
@@ -60,17 +60,17 @@ and each build plan is in [docs/plans/](docs/plans/).
 
 - Supported platforms are Linux and macOS only.
 - No automatic retries: at most one attempt per task per run. The one exception
-  is a session that exits 0 without a result line: alr resumes it once and asks
+  is a session that exits 0 without a result line: milhouse resumes it once and asks
   for only that line.
-- The first run on a machine needs a one-time setup: `alr` asks before creating
-  `~/.local/alr` (its `config.yaml` and prompt files) and then stops. Without a
+- The first run on a machine needs a one-time setup: `milhouse` asks before creating
+  `~/.local/milhouse` (its `config.yaml` and prompt files) and then stops. Without a
   terminal, or with `--dry-run`, it refuses with `config-setup-missing` and creates
-  nothing, so run `alr` once in a terminal on any machine or CI image before scripting it.
+  nothing, so run `milhouse` once in a terminal on any machine or CI image before scripting it.
 - Claude Code is the only supported agent. It uses your installed CLI's own model and
-  authentication settings; `alr` adds no model-selection flags.
+  authentication settings; `milhouse` adds no model-selection flags.
 - The task file is code: its prompts go to Claude and its actions run through `sh -c`.
-  Do not run `alr` on a task file you do not trust.
-- `alr` ends only what it started, takes no lock, and promises no commit per task. The
+  Do not run `milhouse` on a task file you do not trust.
+- `milhouse` ends only what it started, takes no lock, and promises no commit per task. The
   [Actions](https://github.com/twistingmercury/agentic_loop_runner/wiki/Actions) page
   lists these limits.
 
@@ -85,7 +85,7 @@ wiki page.
 
 ```sh
 uv sync
-uv run alr -d path/to/run-folder --dry-run
+uv run milhouse -d path/to/run-folder --dry-run
 ```
 
 ### Testing
